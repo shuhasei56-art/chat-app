@@ -33,6 +33,8 @@ import {
   writeBatch,
   getDocs,
   deleteField,
+  increment,
+  runTransaction,
 } from "firebase/firestore";
 import {
   Search,
@@ -79,30 +81,39 @@ import {
   FileText,
   Paperclip,
   Download,
+  UserMinus,
+  AtSign,
+  Store,
+  PenTool,
+  Eraser,
+  Type,
+  CheckCircle,
+  XCircle,
+  Lock,
+  ShoppingBag,
+  Coins,
+  Scissors,
+  Star,
+  Disc,
+  ShieldAlert,
+  Music,
+  Volume2,
+  ShoppingCart,
 } from "lucide-react";
-const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
-// --- Firebase Configuration ---
-const firebaseConfig = {
-  apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
-  authDomain: "chat-app-c17bf.firebaseapp.com",
-  projectId: "chat-app-c17bf",
-  storageBucket: "chat-app-c17bf.firebasestorage.app",
-  messagingSenderId: "1063497801308",
-  appId: "1:1063497801308:web:8040959804832a690a1099",
-};
-// --- ここに下の1行を追加します ---
-const appId = firebaseConfig.appId;
-// Firebaseの初期化
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app); // ← これが「auth」の正体です！
-const db = getFirestore(app);
-// Initialize Firebase
-// Firestoreの1MB制限を回避しつつ、Base64の境界(3byte)に合わせるため3の倍数に設定
-// 700KBに近い3の倍数: 716799 bytes
-const CHUNK_SIZE = 716799;
 
+// --- Firebase Configuration ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== "undefined" ? __app_id : "messenger-app-v9";
+
+const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
+
+const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 
+// --- Utility Functions ---
 const formatTime = (timestamp) => {
   if (!timestamp) return "";
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -134,14 +145,12 @@ const isTodayBirthday = (birthdayString) => {
   return today.getMonth() + 1 === m && today.getDate() === d;
 };
 
-// 画像の送信前圧縮処理
 const processFileBeforeUpload = (file) => {
   return new Promise((resolve) => {
     if (!file || !file.type.startsWith("image") || file.type === "image/gif") {
       resolve(file);
       return;
     }
-
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
@@ -151,7 +160,6 @@ const processFileBeforeUpload = (file) => {
         const MAX_HEIGHT = 1600;
         let width = img.width;
         let height = img.height;
-
         if (width > height) {
           if (width > MAX_WIDTH) {
             height *= MAX_WIDTH / width;
@@ -163,24 +171,21 @@ const processFileBeforeUpload = (file) => {
             height = MAX_HEIGHT;
           }
         }
-
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, width, height);
-
         canvas.toBlob(
           (blob) => {
             if (blob) {
-              if (blob.size > file.size) {
-                resolve(file);
-              } else {
-                const newFile = new File([blob], file.name, {
-                  type: "image/jpeg",
-                  lastModified: Date.now(),
-                });
-                resolve(newFile);
-              }
+              resolve(
+                blob.size > file.size
+                  ? file
+                  : new File([blob], file.name, {
+                      type: "image/jpeg",
+                      lastModified: Date.now(),
+                    })
+              );
             } else {
               resolve(file);
             }
@@ -200,43 +205,32 @@ const processFileBeforeUpload = (file) => {
 const handleFileUpload = async (e, callback) => {
   const originalFile = e.target.files[0];
   if (!originalFile) return;
-
-  // ファイル選択後にinputの値をクリアして、選択状態（マーク）をリセットする
   e.target.value = "";
-
   let file = originalFile;
-  // 画像の場合のみ圧縮を試みる
   if (
     originalFile.type.startsWith("image") &&
     originalFile.type !== "image/gif"
   ) {
     file = await processFileBeforeUpload(originalFile);
   }
-
-  // タイプ判定を拡張
   let type = "file";
   if (file.type.startsWith("image")) type = "image";
   else if (file.type.startsWith("video")) type = "video";
   else if (file.type.startsWith("audio")) type = "audio";
 
-  // ファイルサイズが大きい、または特定のタイプはBlob URLを使用
   if (file.size > 1024 * 1024 || type === "video" || type === "file") {
     const objectUrl = URL.createObjectURL(file);
     callback(objectUrl, type, file);
   } else {
     const reader = new FileReader();
-    reader.onload = (event) => {
-      callback(event.target.result, type, file);
-    };
+    reader.onload = (event) => callback(event.target.result, type, file);
     reader.readAsDataURL(file);
   }
 };
 
 const handleCompressedUpload = (e, callback) => {
   const file = e.target.files[0];
-  if (!file) return;
-  if (!file.type.startsWith("image")) return;
-
+  if (!file || !file.type.startsWith("image")) return;
   const reader = new FileReader();
   reader.onload = (event) => {
     const img = new Image();
@@ -246,7 +240,6 @@ const handleCompressedUpload = (e, callback) => {
       const MAX_HEIGHT = 800;
       let width = img.width;
       let height = img.height;
-
       if (width > height) {
         if (width > MAX_WIDTH) {
           height *= MAX_WIDTH / width;
@@ -258,7 +251,6 @@ const handleCompressedUpload = (e, callback) => {
           height = MAX_HEIGHT;
         }
       }
-
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext("2d");
@@ -277,7 +269,6 @@ const generateThumbnail = (file) => {
       return;
     }
     const MAX_SIZE = 320;
-
     if (file.type.startsWith("image")) {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -314,7 +305,6 @@ const generateThumbnail = (file) => {
       video.playsInline = true;
       video.crossOrigin = "anonymous";
       video.preload = "metadata";
-
       const capture = () => {
         try {
           const canvas = document.createElement("canvas");
@@ -365,6 +355,8 @@ const generateThumbnail = (file) => {
     }
   });
 };
+
+// --- Modals & Sub-components ---
 
 const ContactSelectModal = ({ onClose, onSend, friends }) => (
   <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
@@ -455,6 +447,39 @@ const BirthdayCardModal = ({ onClose, onSend, toName }) => {
   );
 };
 
+const StickerBuyModal = ({ onClose, onGoToStore, packId }) => {
+  return (
+    <div className="fixed inset-0 z-[400] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center">
+        <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <ShoppingCart className="w-8 h-8 text-blue-600" />
+        </div>
+        <h3 className="font-bold text-lg mb-2">このスタンプを購入しますか？</h3>
+        <p className="text-gray-500 text-sm mb-6">
+          ショップで詳細を確認できます。
+        </p>
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 font-bold rounded-2xl text-gray-600 transition-colors"
+          >
+            キャンセル
+          </button>
+          <button
+            onClick={() => {
+              onGoToStore(packId);
+              onClose();
+            }}
+            className="flex-1 py-3 bg-blue-500 hover:bg-blue-600 font-bold rounded-2xl text-white transition-colors shadow-lg shadow-blue-200"
+          >
+            ショップへ
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const GroupAddMemberModal = ({
   onClose,
   currentMembers,
@@ -470,22 +495,17 @@ const GroupAddMemberModal = ({
       (profile?.friends || []).includes(u.uid) &&
       !currentMembers.includes(u.uid)
   );
-
-  const toggle = (uid) => {
+  const toggle = (uid) =>
     setSelected((prev) =>
       prev.includes(uid) ? prev.filter((i) => i !== uid) : [...prev, uid]
     );
-  };
-
   const handleInvite = async () => {
     if (selected.length === 0) return;
     try {
       const addedNames = [];
       await updateDoc(
         doc(db, "artifacts", appId, "public", "data", "chats", chatId),
-        {
-          participants: arrayUnion(...selected),
-        }
+        { participants: arrayUnion(...selected) }
       );
       selected.forEach((uid) => {
         const u = allUsers.find((user) => user.uid === uid);
@@ -516,7 +536,6 @@ const GroupAddMemberModal = ({
       showNotification("エラーが発生しました");
     }
   };
-
   return (
     <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
       <div className="bg-white w-full max-w-sm rounded-3xl flex flex-col max-h-[70vh]">
@@ -579,25 +598,23 @@ const GroupEditModal = ({
   chatId,
   currentName,
   currentIcon,
+  currentMembers,
+  allUsers,
   showNotification,
   user,
   profile,
 }) => {
   const [name, setName] = useState(currentName);
   const [icon, setIcon] = useState(currentIcon);
+  const [kickTarget, setKickTarget] = useState(null);
 
   const handleUpdate = async () => {
     if (!name.trim()) return showNotification("グループ名を入力してください");
     try {
       await updateDoc(
         doc(db, "artifacts", appId, "public", "data", "chats", chatId),
-        {
-          name: name,
-          icon: icon,
-          updatedAt: serverTimestamp(),
-        }
+        { name, icon, updatedAt: serverTimestamp() }
       );
-      // 変更があればシステムメッセージを送信
       if (name !== currentName || icon !== currentIcon) {
         await addDoc(
           collection(
@@ -622,96 +639,202 @@ const GroupEditModal = ({
       showNotification("グループ情報を更新しました");
       onClose();
     } catch (e) {
-      console.error(e);
       showNotification("更新に失敗しました");
     }
   };
-
+  const executeKick = async () => {
+    if (!kickTarget) return;
+    const { uid, name: memberName } = kickTarget;
+    try {
+      await updateDoc(
+        doc(db, "artifacts", appId, "public", "data", "chats", chatId),
+        { participants: arrayRemove(uid) }
+      );
+      await addDoc(
+        collection(
+          db,
+          "artifacts",
+          appId,
+          "public",
+          "data",
+          "chats",
+          chatId,
+          "messages"
+        ),
+        {
+          senderId: user.uid,
+          content: `${profile.name}が${memberName}を退会させました。`,
+          type: "text",
+          createdAt: serverTimestamp(),
+          readBy: [user.uid],
+        }
+      );
+      showNotification(`${memberName}を削除しました`);
+    } catch (e) {
+      showNotification("削除に失敗しました");
+    } finally {
+      setKickTarget(null);
+    }
+  };
   return (
     <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
-      <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl flex flex-col">
-        <div className="flex justify-between items-center mb-6 border-b pb-4">
+      <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl flex flex-col max-h-[85vh]">
+        <div className="flex justify-between items-center mb-6 border-b pb-4 shrink-0">
           <h3 className="font-bold text-lg">グループ設定</h3>
           <button onClick={onClose}>
             <X className="w-6 h-6 text-gray-500" />
           </button>
         </div>
-
-        <div className="flex flex-col items-center gap-6 mb-6">
-          <div className="relative group">
-            <img
-              src={icon}
-              className="w-24 h-24 rounded-3xl object-cover bg-gray-100 border shadow-sm"
-            />
-            <label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer shadow-lg border-2 border-white hover:bg-green-600 transition-colors">
-              <CameraIcon className="w-4 h-4" />
-              <input
-                type="file"
-                className="hidden"
-                accept="image/*"
-                onChange={(e) => handleCompressedUpload(e, (d) => setIcon(d))}
+        <div className="flex-1 overflow-y-auto scrollbar-hide">
+          <div className="flex flex-col items-center gap-6 mb-8">
+            <div className="relative group">
+              <img
+                src={icon}
+                className="w-24 h-24 rounded-3xl object-cover bg-gray-100 border shadow-sm"
               />
-            </label>
+              <label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer shadow-lg border-2 border-white hover:bg-green-600 transition-colors">
+                <CameraIcon className="w-4 h-4" />
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={(e) => handleCompressedUpload(e, (d) => setIcon(d))}
+                />
+              </label>
+            </div>
+            <div className="w-full">
+              <label className="text-xs font-bold text-gray-400 mb-1 block">
+                グループ名
+              </label>
+              <input
+                className="w-full text-center text-lg font-bold border-b py-2 focus:outline-none focus:border-green-500 bg-transparent"
+                placeholder="グループ名を入力"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
           </div>
-          <div className="w-full">
-            <label className="text-xs font-bold text-gray-400 mb-1 block">
-              グループ名
-            </label>
-            <input
-              className="w-full text-center text-lg font-bold border-b py-2 focus:outline-none focus:border-green-500 bg-transparent"
-              placeholder="グループ名を入力"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
+          <div className="mb-6">
+            <h4 className="text-xs font-bold text-gray-400 mb-2 uppercase flex justify-between">
+              <span>メンバー ({currentMembers.length})</span>
+              <span className="text-[10px] text-gray-400 font-normal">
+                管理者権限: 削除可能
+              </span>
+            </h4>
+            <div className="space-y-2">
+              {currentMembers.map((uid) => {
+                const m = allUsers.find((u) => u.uid === uid);
+                if (!m) return null;
+                const isMe = uid === user.uid;
+                return (
+                  <div
+                    key={uid}
+                    className="flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 border border-transparent hover:border-gray-100"
+                  >
+                    <img
+                      src={m.avatar}
+                      className="w-10 h-10 rounded-full object-cover border"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-sm truncate">
+                        {m.name}{" "}
+                        {isMe && (
+                          <span className="text-gray-400 text-xs">(自分)</span>
+                        )}
+                      </div>
+                    </div>
+                    {!isMe && (
+                      <button
+                        onClick={() => setKickTarget({ uid, name: m.name })}
+                        className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors flex items-center gap-1 group"
+                        title="強制退会"
+                      >
+                        <span className="text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                          強制退会
+                        </span>
+                        <UserMinus className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
-
         <button
           onClick={handleUpdate}
-          className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-2xl shadow-lg transition-all"
+          className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-2xl shadow-lg transition-all shrink-0 mt-4"
         >
           保存する
         </button>
       </div>
+      {kickTarget && (
+        <div className="fixed inset-0 z-[400] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl">
+            <h3 className="font-bold text-lg mb-2 text-center text-gray-800">
+              強制退会の確認
+            </h3>
+            <p className="text-center text-gray-600 mb-6 text-sm">
+              {kickTarget.name} をグループから退会させますか？
+              <br />
+              <span className="text-xs text-red-500">
+                この操作は元に戻せません。
+              </span>
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setKickTarget(null)}
+                className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 font-bold rounded-2xl text-gray-600 transition-colors"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={executeKick}
+                className="flex-1 py-3 bg-red-500 hover:bg-red-600 font-bold rounded-2xl text-white transition-colors shadow-lg shadow-red-200"
+              >
+                退会させる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-const LeaveGroupConfirmModal = ({ onClose, onLeave }) => {
-  return (
-    <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
-      <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl">
-        <div className="text-center mb-6">
-          <div className="mx-auto w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-3">
-            <LogOut className="w-6 h-6 text-red-500" />
-          </div>
-          <h3 className="font-bold text-lg text-gray-800">
-            グループを退会しますか？
-          </h3>
-          <p className="text-sm text-gray-500 mt-2">
-            この操作は取り消せません。
-            <br />
-            本当に退会してもよろしいですか？
-          </p>
+const LeaveGroupConfirmModal = ({ onClose, onLeave }) => (
+  <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
+    <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl">
+      <div className="text-center mb-6">
+        <div className="mx-auto w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-3">
+          <LogOut className="w-6 h-6 text-red-500" />
         </div>
-        <div className="flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-2xl transition-colors"
-          >
-            キャンセル
-          </button>
-          <button
-            onClick={onLeave}
-            className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl transition-colors shadow-lg shadow-red-200"
-          >
-            退会する
-          </button>
-        </div>
+        <h3 className="font-bold text-lg text-gray-800">
+          グループを退会しますか？
+        </h3>
+        <p className="text-sm text-gray-500 mt-2">
+          この操作は取り消せません。
+          <br />
+          本当に退会してもよろしいですか？
+        </p>
+      </div>
+      <div className="flex gap-3">
+        <button
+          onClick={onClose}
+          className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-2xl transition-colors"
+        >
+          キャンセル
+        </button>
+        <button
+          onClick={onLeave}
+          className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl transition-colors shadow-lg shadow-red-200"
+        >
+          退会する
+        </button>
       </div>
     </div>
-  );
-};
+  </div>
+);
 
 const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }) => {
   const caller = allUsers.find((u) => u.uid === callData.callerId);
@@ -781,61 +904,56 @@ const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }) => {
   );
 };
 
-const OutgoingCallOverlay = ({ callData, onCancel, allUsers }) => {
-  return (
-    <div className="fixed inset-0 z-[500] bg-gray-900 flex flex-col items-center justify-between py-24 px-6 animate-in fade-in duration-300">
-      <div className="flex flex-col items-center gap-6 mt-10">
-        <div className="relative">
-          <div className="absolute inset-0 rounded-full bg-white/10 animate-pulse"></div>
-          <div className="w-32 h-32 rounded-full bg-gray-700 flex items-center justify-center border-4 border-white/50 shadow-2xl relative z-10">
-            <Video className="w-14 h-14 text-white opacity-80" />
-          </div>
-        </div>
-        <div className="text-center text-white">
-          <h2 className="text-2xl font-bold mb-2">発信中...</h2>
-          <p className="text-sm opacity-60">相手の応答を待っています</p>
+const OutgoingCallOverlay = ({ callData, onCancel, allUsers }) => (
+  <div className="fixed inset-0 z-[500] bg-gray-900 flex flex-col items-center justify-between py-24 px-6 animate-in fade-in duration-300">
+    <div className="flex flex-col items-center gap-6 mt-10">
+      <div className="relative">
+        <div className="absolute inset-0 rounded-full bg-white/10 animate-pulse"></div>
+        <div className="w-32 h-32 rounded-full bg-gray-700 flex items-center justify-center border-4 border-white/50 shadow-2xl relative z-10">
+          <Video className="w-14 h-14 text-white opacity-80" />
         </div>
       </div>
-      <div className="w-full flex justify-center items-center mb-10">
-        <button
-          onClick={onCancel}
-          className="flex flex-col items-center gap-3 group"
-        >
-          <div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center shadow-lg group-active:scale-95 transition-all hover:bg-red-600">
-            <X className="w-10 h-10 text-white" />
-          </div>
-          <span className="text-white text-xs font-bold">キャンセル</span>
-        </button>
+      <div className="text-center text-white">
+        <h2 className="text-2xl font-bold mb-2">発信中...</h2>
+        <p className="text-sm opacity-60">相手の応答を待っています</p>
       </div>
     </div>
-  );
-};
+    <div className="w-full flex justify-center items-center mb-10">
+      <button
+        onClick={onCancel}
+        className="flex flex-col items-center gap-3 group"
+      >
+        <div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center shadow-lg group-active:scale-95 transition-all hover:bg-red-600">
+          <X className="w-10 h-10 text-white" />
+        </div>
+        <span className="text-white text-xs font-bold">キャンセル</span>
+      </button>
+    </div>
+  </div>
+);
 
-// 相手が応答したときに表示するオーバーレイ（ポップアップブロック回避のため）
-const CallAcceptedOverlay = ({ callData, onJoin }) => {
-  return (
-    <div className="fixed inset-0 z-[500] bg-gray-900/90 flex flex-col items-center justify-center px-6 animate-in fade-in duration-300 backdrop-blur-sm">
-      <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border border-white/20">
-        <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
-          <Video className="w-10 h-10 text-green-600" />
-        </div>
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">
-          相手が応答しました
-        </h2>
-        <p className="text-gray-500 mb-8 text-sm">
-          下のボタンを押して通話を開始してください
-        </p>
-        <button
-          onClick={onJoin}
-          className="w-full py-4 bg-green-500 hover:bg-green-600 text-white font-bold rounded-2xl transition-all shadow-lg shadow-green-200 transform hover:scale-[1.02] flex items-center justify-center gap-2"
-        >
-          <Video className="w-5 h-5" />
-          通話に参加する
-        </button>
+const CallAcceptedOverlay = ({ callData, onJoin }) => (
+  <div className="fixed inset-0 z-[500] bg-gray-900/90 flex flex-col items-center justify-center px-6 animate-in fade-in duration-300 backdrop-blur-sm">
+    <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border border-white/20">
+      <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
+        <Video className="w-10 h-10 text-green-600" />
       </div>
+      <h2 className="text-2xl font-bold text-gray-800 mb-2">
+        相手が応答しました
+      </h2>
+      <p className="text-gray-500 mb-8 text-sm">
+        下のボタンを押して通話を開始してください
+      </p>
+      <button
+        onClick={onJoin}
+        className="w-full py-4 bg-green-500 hover:bg-green-600 text-white font-bold rounded-2xl transition-all shadow-lg shadow-green-200 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+      >
+        <Video className="w-5 h-5" />
+        通話に参加する
+      </button>
     </div>
-  );
-};
+  </div>
+);
 
 const MessageItem = React.memo(
   ({
@@ -853,49 +971,42 @@ const MessageItem = React.memo(
     onReply,
     onReaction,
     allUsers,
+    onShowProfile,
+    onStickerClick,
   }) => {
     const isMe = m.senderId === user.uid;
     const [mediaSrc, setMediaSrc] = useState(null);
     const [loading, setLoading] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
-
     const isInvalidBlob = !isMe && m.content?.startsWith("blob:");
 
-    // Blob URLを生成してセットする処理
     const setBlobSrcFromBase64 = (base64Data, mimeType) => {
       try {
         const byteCharacters = atob(base64Data);
         const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
+        for (let i = 0; i < byteCharacters.length; i++)
           byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
         const byteArray = new Uint8Array(byteNumbers);
         const blob = new Blob([byteArray], { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        setMediaSrc(url);
+        setMediaSrc(URL.createObjectURL(blob));
       } catch (e) {
         console.error("Blob creation failed", e);
       }
     };
 
     useEffect(() => {
-      // 自分が送信した直後のblobURLはそのまま使う
       if (isMe && m.content?.startsWith("blob:")) {
         setMediaSrc(m.content);
         return;
       }
-
-      // クリーンアップ関数
       return () => {
-        if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe) {
+        if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe)
           URL.revokeObjectURL(mediaSrc);
-        }
       };
     }, [isMe, m.content]);
 
     useEffect(() => {
       if (isMe && m.content?.startsWith("blob:")) return;
-
       if (m.hasChunks) {
         if (mediaSrc && !mediaSrc.startsWith("blob:") && mediaSrc !== m.preview)
           return;
@@ -903,10 +1014,9 @@ const MessageItem = React.memo(
         (async () => {
           try {
             let base64Data = "";
-            // 高速化: chunkCountがある場合は並列ダウンロードを行う
             if (m.chunkCount) {
               const chunkPromises = [];
-              for (let i = 0; i < m.chunkCount; i++) {
+              for (let i = 0; i < m.chunkCount; i++)
                 chunkPromises.push(
                   getDoc(
                     doc(
@@ -924,13 +1034,11 @@ const MessageItem = React.memo(
                     )
                   )
                 );
-              }
               const chunkDocs = await Promise.all(chunkPromises);
               chunkDocs.forEach((d) => {
                 if (d.exists()) base64Data += d.data().data;
               });
             } else {
-              // 旧データ互換
               const snap = await getDocs(
                 query(
                   collection(
@@ -950,9 +1058,7 @@ const MessageItem = React.memo(
               );
               snap.forEach((d) => (base64Data += d.data().data));
             }
-
             if (base64Data) {
-              // MIMEタイプの決定
               let mimeType = m.mimeType;
               if (!mimeType) {
                 if (m.type === "video") mimeType = "video/mp4";
@@ -960,12 +1066,8 @@ const MessageItem = React.memo(
                 else if (m.type === "audio") mimeType = "audio/webm";
                 else mimeType = "application/octet-stream";
               }
-
-              if (m.type === "text" || m.type === "contact") {
-                // テキスト系は何もしない
-              } else {
+              if (m.type !== "text" && m.type !== "contact")
                 setBlobSrcFromBase64(base64Data, mimeType);
-              }
             } else if (m.preview) {
               setMediaSrc(m.preview);
             }
@@ -977,9 +1079,6 @@ const MessageItem = React.memo(
           }
         })();
       } else {
-        // チャンクがない場合（小さいファイルなど）
-        // m.contentがData URLならそのまま、そうでないなら（古いデータ等）対応が必要だが
-        // 基本的にData URLかBlob URLが入っている想定
         if (isInvalidBlob) {
           setMediaSrc(m.preview);
         } else {
@@ -1007,17 +1106,14 @@ const MessageItem = React.memo(
         a.click();
         return;
       }
-
       setLoading(true);
       try {
-        let dataUrl = mediaSrc; // すでに生成済みのBlob URLがあればそれを使う
-
+        let dataUrl = mediaSrc;
         if (!dataUrl && m.hasChunks) {
-          // まだロードされていない場合はロードしてBlobを作る
           let base64Data = "";
           if (m.chunkCount) {
             const chunkPromises = [];
-            for (let i = 0; i < m.chunkCount; i++) {
+            for (let i = 0; i < m.chunkCount; i++)
               chunkPromises.push(
                 getDoc(
                   doc(
@@ -1035,7 +1131,6 @@ const MessageItem = React.memo(
                   )
                 )
               );
-            }
             const chunkDocs = await Promise.all(chunkPromises);
             chunkDocs.forEach((d) => {
               if (d.exists()) base64Data += d.data().data;
@@ -1060,28 +1155,25 @@ const MessageItem = React.memo(
             );
             snap.forEach((d) => (base64Data += d.data().data));
           }
-
           if (base64Data) {
             const mimeType = m.mimeType || "application/octet-stream";
             const byteCharacters = atob(base64Data);
             const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
+            for (let i = 0; i < byteCharacters.length; i++)
               byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: mimeType });
+            const blob = new Blob([new Uint8Array(byteNumbers)], {
+              type: mimeType,
+            });
             dataUrl = URL.createObjectURL(blob);
           }
         } else if (!dataUrl) {
           dataUrl = m.content;
         }
-
         if (dataUrl) {
           const a = document.createElement("a");
           a.href = dataUrl;
           a.download = m.fileName || "download_file";
           a.click();
-          // 一時的に生成したURLならrevokeが必要だが、複雑になるためここではブラウザのGCに任せるか、mediaSrcを使う
         }
       } catch (e) {
         console.error("Download failed", e);
@@ -1090,27 +1182,32 @@ const MessageItem = React.memo(
       }
     };
 
+    const handleStickerClick = (e) => {
+      e.stopPropagation();
+      if (m.audio) {
+        new Audio(m.audio)
+          .play()
+          .catch((e) => console.error("Audio playback error:", e));
+      }
+      if (onStickerClick && m.packId) {
+        onStickerClick(m.packId);
+      }
+    };
+
     const readCount = (m.readBy?.length || 1) - 1;
     const finalSrc = mediaSrc || m.preview;
     const isShowingPreview = loading || isInvalidBlob || finalSrc === m.preview;
-    const shouldRenderAsVideo =
-      m.type === "video" &&
-      !isShowingPreview &&
-      finalSrc &&
-      !finalSrc.startsWith("blob:") &&
-      !m.content?.startsWith("blob:"); // blob:の場合は即座に表示
-
     const handleBubbleClick = (e) => {
       e.stopPropagation();
       setShowMenu(!showMenu);
     };
-
-    const renderWithLinks = (text) => {
+    const renderContent = (text) => {
       if (!text) return "";
-      const urlRegex = /(https?:\/\/[^\s]+)/g;
-      const parts = text.split(urlRegex);
+      const regex = /(https?:\/\/[^\s]+)|(@[^\s]+)/g;
+      const parts = text.split(regex);
       return parts.map((part, i) => {
-        if (part.match(urlRegex)) {
+        if (!part) return null;
+        if (part.match(/^https?:\/\//))
           return (
             <a
               key={i}
@@ -1123,11 +1220,26 @@ const MessageItem = React.memo(
               {part}
             </a>
           );
+        if (part.startsWith("@")) {
+          const name = part.substring(1);
+          const mentionedUser = allUsers.find((u) => u.name === name);
+          if (mentionedUser)
+            return (
+              <span
+                key={i}
+                className="text-blue-500 font-bold cursor-pointer hover:underline"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onShowProfile && onShowProfile(mentionedUser);
+                }}
+              >
+                {part}
+              </span>
+            );
         }
         return part;
       });
     };
-
     const getUserNames = (uids) => {
       if (!uids || !allUsers) return "";
       return uids
@@ -1145,7 +1257,13 @@ const MessageItem = React.memo(
         } gap-2 relative group mb-4`}
       >
         {!isMe && (
-          <div className="relative mt-1">
+          <div
+            className="relative mt-1 cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              onShowProfile && onShowProfile(sender);
+            }}
+          >
             <img
               key={sender?.avatar}
               src={sender?.avatar}
@@ -1167,12 +1285,13 @@ const MessageItem = React.memo(
               {sender?.name}
             </div>
           )}
-
           <div className="relative">
             <div
               onClick={handleBubbleClick}
               className={`p-2 px-3 rounded-2xl text-[13px] shadow-sm relative cursor-pointer ${
-                isMe
+                m.type === "sticker"
+                  ? "bg-transparent shadow-none p-0"
+                  : isMe
                   ? "bg-[#7cfc00] rounded-tr-none"
                   : "bg-white rounded-tl-none"
               } ${
@@ -1181,7 +1300,7 @@ const MessageItem = React.memo(
                   : ""
               }`}
             >
-              {m.replyTo && (
+              {m.replyTo && m.type !== "sticker" && (
                 <div
                   className={`mb-2 p-2 rounded-lg border-l-4 text-xs opacity-70 ${
                     isMe
@@ -1207,10 +1326,9 @@ const MessageItem = React.memo(
                   </div>
                 </div>
               )}
-
               {m.type === "text" && (
                 <div className="whitespace-pre-wrap">
-                  {renderWithLinks(m.content)}
+                  {renderContent(m.content)}
                   {m.isEdited && (
                     <div className="text-[9px] text-black/40 text-right mt-1 font-bold">
                       (編集済)
@@ -1218,7 +1336,22 @@ const MessageItem = React.memo(
                   )}
                 </div>
               )}
-
+              {m.type === "sticker" && (
+                <div
+                  className="relative group/sticker"
+                  onClick={handleStickerClick}
+                >
+                  <img
+                    src={m.content || ""}
+                    className="w-32 h-32 object-contain drop-shadow-sm hover:scale-105 transition-transform"
+                  />
+                  {m.audio && (
+                    <div className="absolute bottom-0 right-0 bg-black/20 text-white rounded-full p-1">
+                      <Volume2 className="w-3 h-3" />
+                    </div>
+                  )}
+                </div>
+              )}
               {(m.type === "image" || m.type === "video") && (
                 <div className="relative">
                   {isShowingPreview && !finalSrc ? (
@@ -1232,7 +1365,6 @@ const MessageItem = React.memo(
                     </div>
                   ) : (
                     <div className="relative">
-                      {/* videoタグで再生するためには、finalSrcが有効なBlob URLである必要がある */}
                       {m.type === "video" ? (
                         <video
                           src={finalSrc}
@@ -1274,7 +1406,6 @@ const MessageItem = React.memo(
                   )}
                 </div>
               )}
-
               {m.type === "audio" && (
                 <div className="flex items-center gap-2 py-1 px-1">
                   {loading ? (
@@ -1288,7 +1419,6 @@ const MessageItem = React.memo(
                   )}
                 </div>
               )}
-
               {m.type === "file" && (
                 <div className="flex items-center gap-3 p-2 min-w-[200px]">
                   <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center shrink-0 border">
@@ -1320,7 +1450,6 @@ const MessageItem = React.memo(
                   </button>
                 </div>
               )}
-
               {m.type === "contact" && (
                 <div className="flex flex-col gap-2 min-w-[150px] p-1">
                   <div className="text-[10px] font-bold text-gray-400 mb-1 border-b border-gray-100 pb-1">
@@ -1349,11 +1478,15 @@ const MessageItem = React.memo(
                   )}
                 </div>
               )}
-
-              <div className="text-[8px] opacity-50 mt-1 text-right">
+              <div
+                className={`text-[8px] opacity-50 mt-1 text-right ${
+                  m.type === "sticker"
+                    ? "text-gray-500 font-bold bg-white/50 px-1 rounded"
+                    : ""
+                }`}
+              >
                 {formatDateTime(m.createdAt)}
               </div>
-
               {showMenu && (
                 <div
                   className={`absolute top-full ${
@@ -1386,7 +1519,6 @@ const MessageItem = React.memo(
                     <Reply className="w-4 h-4" />
                     リプライ
                   </button>
-
                   {(m.type === "image" || m.type === "video") && (
                     <button
                       onClick={(e) => {
@@ -1413,7 +1545,6 @@ const MessageItem = React.memo(
                       保存
                     </button>
                   )}
-
                   {m.type === "text" && isMe && (
                     <button
                       onClick={(e) => {
@@ -1444,7 +1575,6 @@ const MessageItem = React.memo(
               )}
             </div>
           </div>
-
           {m.reactions &&
             Object.keys(m.reactions).some(
               (k) => m.reactions[k]?.length > 0
@@ -1476,7 +1606,6 @@ const MessageItem = React.memo(
                 )}
               </div>
             )}
-
           {isMe && readCount > 0 && (
             <div className="text-[10px] font-bold text-green-600 mt-0.5">
               既読 {isGroup ? readCount : ""}
@@ -1494,7 +1623,6 @@ const PostItem = ({ post, user, allUsers, db, appId, profile }) => {
     [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const u = allUsers.find((x) => x.uid === post.userId),
     isLiked = post.likes?.includes(user?.uid);
-
   useEffect(() => {
     if (post.hasChunks && !mediaSrc) {
       setIsLoadingMedia(true);
@@ -1502,7 +1630,7 @@ const PostItem = ({ post, user, allUsers, db, appId, profile }) => {
         let base64Data = "";
         if (post.chunkCount) {
           const chunkPromises = [];
-          for (let i = 0; i < post.chunkCount; i++) {
+          for (let i = 0; i < post.chunkCount; i++)
             chunkPromises.push(
               getDoc(
                 doc(
@@ -1518,7 +1646,6 @@ const PostItem = ({ post, user, allUsers, db, appId, profile }) => {
                 )
               )
             );
-          }
           const chunkDocs = await Promise.all(chunkPromises);
           chunkDocs.forEach((d) => {
             if (d.exists()) base64Data += d.data().data;
@@ -1541,7 +1668,6 @@ const PostItem = ({ post, user, allUsers, db, appId, profile }) => {
           );
           snap.forEach((d) => (base64Data += d.data().data));
         }
-
         if (base64Data) {
           try {
             const mimeType =
@@ -1549,13 +1675,12 @@ const PostItem = ({ post, user, allUsers, db, appId, profile }) => {
               (post.mediaType === "video" ? "video/mp4" : "image/jpeg");
             const byteCharacters = atob(base64Data);
             const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
+            for (let i = 0; i < byteCharacters.length; i++)
               byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: mimeType });
-            const url = URL.createObjectURL(blob);
-            setMediaSrc(url);
+            const blob = new Blob([new Uint8Array(byteNumbers)], {
+              type: mimeType,
+            });
+            setMediaSrc(URL.createObjectURL(blob));
           } catch (e) {
             console.error("Post media load error", e);
           }
@@ -1564,16 +1689,12 @@ const PostItem = ({ post, user, allUsers, db, appId, profile }) => {
       })();
     }
   }, [post.id, post.chunkCount]);
-
-  // クリーンアップ
   useEffect(() => {
     return () => {
-      if (mediaSrc && mediaSrc.startsWith("blob:")) {
+      if (mediaSrc && mediaSrc.startsWith("blob:"))
         URL.revokeObjectURL(mediaSrc);
-      }
     };
   }, [mediaSrc]);
-
   const toggleLike = async () =>
     await updateDoc(
       doc(db, "artifacts", appId, "public", "data", "posts", post.id),
@@ -1690,6 +1811,8 @@ const GroupCreateView = ({
     );
   };
   const handleCreate = async () => {
+    if (profile?.isBanned)
+      return showNotification("アカウントが利用停止されています 🚫");
     if (!groupName.trim())
       return showNotification("グループ名を入力してください");
     if (selectedMembers.length === 0)
@@ -1814,7 +1937,6 @@ const GroupCreateView = ({
 };
 
 const BirthdayCardBox = ({ user, setView }) => {
-  /* ... existing code ... */
   const [myCards, setMyCards] = useState([]);
   useEffect(() => {
     if (!user) return;
@@ -1894,6 +2016,1101 @@ const BirthdayCardBox = ({ user, setView }) => {
   );
 };
 
+const StickerEditor = ({ user, profile, onClose, showNotification }) => {
+  const canvasRef = useRef(null);
+  const containerRef = useRef(null);
+  const cuttingSnapshotRef = useRef(null);
+  const [color, setColor] = useState("#000000");
+  const [lineWidth, setLineWidth] = useState(5);
+  const [fontSize, setFontSize] = useState(24);
+  const [createdStickers, setCreatedStickers] = useState([]);
+  const [packName, setPackName] = useState("");
+  const [packDescription, setPackDescription] = useState("");
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [mode, setMode] = useState("pen");
+  const [textInput, setTextInput] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [cutPoints, setCutPoints] = useState([]);
+  const [audioData, setAudioData] = useState(null);
+  const [isRecordingSticker, setIsRecordingSticker] = useState(false);
+  const stickerMediaRecorderRef = useRef(null);
+  const [textObjects, setTextObjects] = useState([]);
+  const [draggingTextId, setDraggingTextId] = useState(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.width = 250;
+      canvas.height = 250;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, 250, 250);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+    }
+  }, []);
+
+  const startDraw = (e) => {
+    if (draggingTextId) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX || e.touches[0].clientX) - rect.left;
+    const y = (e.clientY || e.touches[0].clientY) - rect.top;
+    if (mode === "scissors") {
+      setIsDrawing(true);
+      setCutPoints([{ x, y }]);
+      cuttingSnapshotRef.current = ctx.getImageData(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      return;
+    }
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    setIsDrawing(true);
+  };
+
+  const draw = (e) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX || e.touches[0].clientX) - rect.left;
+    const y = (e.clientY || e.touches[0].clientY) - rect.top;
+    if (mode === "scissors") {
+      setCutPoints((prev) => [...prev, { x, y }]);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#ff0000";
+      ctx.setLineDash([5, 5]);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      return;
+    }
+    ctx.strokeStyle = mode === "eraser" ? "#ffffff" : color;
+    ctx.lineWidth = mode === "eraser" ? 20 : lineWidth;
+    ctx.setLineDash([]);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+
+  const endDraw = () => {
+    if (mode === "scissors" && isDrawing) {
+      setIsDrawing(false);
+      applyFreehandCut();
+      setCutPoints([]);
+      cuttingSnapshotRef.current = null;
+      return;
+    }
+    setIsDrawing(false);
+  };
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    setTextObjects([]);
+    setAudioData(null);
+  };
+
+  const addText = () => {
+    if (!textInput) return;
+    const newText = {
+      id: Date.now(),
+      text: textInput,
+      x: 125,
+      y: 125,
+      color: color,
+      fontSize: fontSize,
+    };
+    setTextObjects([...textObjects, newText]);
+    setTextInput("");
+    showNotification("テキストを追加しました。ドラッグして移動できます");
+  };
+
+  const handleTextMouseDown = (e, id) => {
+    e.stopPropagation();
+    setDraggingTextId(id);
+  };
+
+  const handleContainerMouseMove = (e) => {
+    if (draggingTextId) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = (e.clientX || e.touches[0].clientX) - rect.left;
+      const y = (e.clientY || e.touches[0].clientY) - rect.top;
+      setTextObjects((prev) =>
+        prev.map((t) => (t.id === draggingTextId ? { ...t, x, y } : t))
+      );
+    }
+  };
+
+  const handleContainerMouseUp = () => {
+    setDraggingTextId(null);
+  };
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    handleCompressedUpload(e, (dataUrl) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext("2d");
+        let width = img.width;
+        let height = img.height;
+        const maxSize = 250;
+        if (width > height) {
+          if (width > maxSize) {
+            height *= maxSize / width;
+            width = maxSize;
+          }
+        } else {
+          if (height > maxSize) {
+            width *= maxSize / height;
+            height = maxSize;
+          }
+        }
+        const x = (maxSize - width) / 2;
+        const y = (maxSize - height) / 2;
+        ctx.drawImage(img, x, y, width, height);
+      };
+      img.src = dataUrl;
+    });
+    e.target.value = "";
+  };
+
+  const handleAudioUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setAudioData(ev.target.result);
+      showNotification("音声を追加しました 🎵");
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const startStickerRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      stickerMediaRecorderRef.current = mediaRecorder;
+      const chunks = [];
+      mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunks, { type: "audio/webm" });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setAudioData(reader.result);
+          showNotification("録音しました 🎤");
+        };
+        reader.readAsDataURL(blob);
+        stream.getTracks().forEach((t) => t.stop());
+      };
+      mediaRecorder.start();
+      setIsRecordingSticker(true);
+    } catch (e) {
+      showNotification("マイクを使用できません");
+    }
+  };
+
+  const stopStickerRecording = () => {
+    if (stickerMediaRecorderRef.current && isRecordingSticker) {
+      stickerMediaRecorderRef.current.stop();
+      setIsRecordingSticker(false);
+    }
+  };
+
+  const cutShape = (shape) => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    const width = canvas.width;
+    const height = canvas.height;
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = width;
+    tempCanvas.height = height;
+    const tempCtx = tempCanvas.getContext("2d");
+    tempCtx.drawImage(canvas, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.save();
+    ctx.beginPath();
+    if (shape === "circle") {
+      ctx.arc(width / 2, height / 2, width / 2, 0, Math.PI * 2);
+    } else if (shape === "heart") {
+      const topCurveHeight = height * 0.3;
+      ctx.moveTo(width / 2, height * 0.2);
+      ctx.bezierCurveTo(width / 2, 0, 0, 0, 0, topCurveHeight);
+      ctx.bezierCurveTo(
+        0,
+        (height + topCurveHeight) / 2,
+        width / 2,
+        height * 0.9,
+        width / 2,
+        height
+      );
+      ctx.bezierCurveTo(
+        width / 2,
+        height * 0.9,
+        width,
+        (height + topCurveHeight) / 2,
+        width,
+        topCurveHeight
+      );
+      ctx.bezierCurveTo(width, 0, width / 2, 0, width / 2, height * 0.2);
+    } else if (shape === "star") {
+      const cx = width / 2;
+      const cy = height / 2;
+      const outerRadius = width / 2;
+      const innerRadius = width / 4;
+      const spikes = 5;
+      let rot = (Math.PI / 2) * 3;
+      let x = cx;
+      let y = cy;
+      const step = Math.PI / spikes;
+      ctx.moveTo(cx, cy - outerRadius);
+      for (let i = 0; i < spikes; i++) {
+        x = cx + Math.cos(rot) * outerRadius;
+        y = cy + Math.sin(rot) * outerRadius;
+        ctx.lineTo(x, y);
+        rot += step;
+        x = cx + Math.cos(rot) * innerRadius;
+        y = cy + Math.sin(rot) * innerRadius;
+        ctx.lineTo(x, y);
+        rot += step;
+      }
+      ctx.lineTo(cx, cy - outerRadius);
+      ctx.closePath();
+    }
+    ctx.clip();
+    ctx.drawImage(tempCanvas, 0, 0);
+    ctx.restore();
+    showNotification(
+      `${
+        shape === "circle" ? "丸" : shape === "heart" ? "ハート" : "星"
+      }型に切り抜きました`
+    );
+  };
+
+  const applyFreehandCut = () => {
+    if (cutPoints.length < 3 || !cuttingSnapshotRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    const width = canvas.width;
+    const height = canvas.height;
+    ctx.clearRect(0, 0, width, height);
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(cutPoints[0].x, cutPoints[0].y);
+    for (let i = 1; i < cutPoints.length; i++)
+      ctx.lineTo(cutPoints[i].x, cutPoints[i].y);
+    ctx.closePath();
+    ctx.clip();
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = width;
+    tempCanvas.height = height;
+    const tempCtx = tempCanvas.getContext("2d");
+    tempCtx.putImageData(cuttingSnapshotRef.current, 0, 0);
+    ctx.drawImage(tempCanvas, 0, 0);
+    ctx.restore();
+    showNotification("自由に切り抜きました");
+  };
+
+  const saveStickerToPack = () => {
+    if (createdStickers.length >= 8) {
+      showNotification("1パック最大8個までです");
+      return;
+    }
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    textObjects.forEach((t) => {
+      ctx.font = `bold ${t.fontSize}px sans-serif`;
+      ctx.fillStyle = t.color;
+      ctx.fillText(t.text, t.x, t.y);
+    });
+    ctx.restore();
+
+    const dataUrl = canvas.toDataURL("image/png", 0.8);
+    setCreatedStickers([
+      ...createdStickers,
+      { image: dataUrl, audio: audioData },
+    ]);
+    clearCanvas();
+    showNotification("パックに追加しました");
+  };
+
+  const submitPack = async () => {
+    if (profile?.isBanned)
+      return showNotification("アカウントが利用停止されています 🚫");
+    if (!packName.trim()) return showNotification("パック名を入力してください");
+    if (createdStickers.length === 0)
+      return showNotification("スタンプがありません");
+    setIsSubmitting(true);
+    try {
+      await addDoc(
+        collection(db, "artifacts", appId, "public", "data", "sticker_packs"),
+        {
+          authorId: user.uid,
+          authorName: profile?.name || user.displayName || "Creator",
+          name: packName,
+          description: packDescription,
+          stickers: createdStickers,
+          price: 100,
+          status: "pending",
+          purchasedBy: [],
+          createdAt: serverTimestamp(),
+        }
+      );
+      showNotification("申請しました！承認されると報酬がもらえます");
+      onClose();
+    } catch (e) {
+      console.error(e);
+      showNotification("エラーが発生しました");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-white">
+      <div className="p-4 border-b flex items-center justify-between">
+        <button onClick={onClose}>
+          <ChevronLeft className="w-6 h-6" />
+        </button>
+        <h2 className="font-bold">スタンプ作成スタジオ</h2>
+        <div className="w-6"></div>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col items-center gap-4">
+        <div className="w-full max-w-xs space-y-2">
+          <div>
+            <label className="text-xs font-bold text-gray-500 mb-1">
+              パック名
+            </label>
+            <input
+              className="w-full border p-2 rounded-xl"
+              placeholder="例: 面白うさぎセット"
+              value={packName}
+              onChange={(e) => setPackName(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-bold text-gray-500 mb-1">
+              説明文
+            </label>
+            <input
+              className="w-full border p-2 rounded-xl"
+              placeholder="どんなスタンプですか？"
+              value={packDescription}
+              onChange={(e) => setPackDescription(e.target.value)}
+            />
+          </div>
+        </div>
+        <div
+          ref={containerRef}
+          className="relative"
+          style={{ width: "250px", height: "250px" }}
+          onMouseMove={handleContainerMouseMove}
+          onMouseUp={handleContainerMouseUp}
+          onTouchMove={handleContainerMouseMove}
+          onTouchEnd={handleContainerMouseUp}
+        >
+          <canvas
+            ref={canvasRef}
+            className={`border-2 border-dashed ${
+              mode === "scissors"
+                ? "border-red-400 bg-red-50"
+                : "border-gray-300 bg-white"
+            } rounded-xl shadow-inner touch-none`}
+            onMouseDown={startDraw}
+            onMouseMove={draw}
+            onMouseUp={endDraw}
+            onMouseLeave={endDraw}
+            onTouchStart={startDraw}
+            onTouchMove={draw}
+            onTouchEnd={endDraw}
+            style={{ width: "100%", height: "100%" }}
+          />
+          {textObjects.map((t) => (
+            <div
+              key={t.id}
+              style={{
+                position: "absolute",
+                left: t.x,
+                top: t.y,
+                transform: "translate(-50%, -50%)",
+                color: t.color,
+                fontSize: `${t.fontSize}px`,
+                fontWeight: "bold",
+                cursor: "move",
+                userSelect: "none",
+                pointerEvents: "auto",
+              }}
+              onMouseDown={(e) => handleTextMouseDown(e, t.id)}
+              onTouchStart={(e) => handleTextMouseDown(e, t.id)}
+            >
+              {t.text}
+            </div>
+          ))}
+          <label
+            className="absolute top-2 right-2 bg-gray-100 p-2 rounded-full cursor-pointer hover:bg-gray-200"
+            title="画像を読み込む"
+          >
+            <Upload className="w-4 h-4 text-gray-600" />
+            <input
+              type="file"
+              className="hidden"
+              accept="image/*"
+              onChange={handleImageUpload}
+            />
+          </label>
+          {mode === "scissors" && (
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-red-500 font-bold opacity-30 pointer-events-none text-xl">
+              切り抜きモード
+            </div>
+          )}
+          {audioData && (
+            <div className="absolute bottom-2 left-2 bg-green-100 text-green-600 p-1 rounded-full">
+              <Music className="w-4 h-4" />
+            </div>
+          )}
+        </div>
+        <div className="flex gap-2 items-center w-full max-w-xs justify-center flex-wrap">
+          <button
+            onClick={() => setMode("pen")}
+            className={`p-3 rounded-full ${
+              mode === "pen" ? "bg-black text-white" : "bg-gray-100"
+            }`}
+          >
+            <PenTool className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => setMode("eraser")}
+            className={`p-3 rounded-full ${
+              mode === "eraser" ? "bg-black text-white" : "bg-gray-100"
+            }`}
+          >
+            <Eraser className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => setMode("scissors")}
+            className={`p-3 rounded-full ${
+              mode === "scissors"
+                ? "bg-red-500 text-white animate-pulse"
+                : "bg-gray-100"
+            }`}
+            title="フリーハンド切り抜き"
+          >
+            <Scissors className="w-5 h-5" />
+          </button>
+          <div className="w-px h-8 bg-gray-300 mx-2"></div>
+          <button
+            onClick={() => cutShape("circle")}
+            className="p-3 rounded-full bg-blue-100 text-blue-600"
+            title="丸く切り抜く"
+          >
+            <Disc className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => cutShape("heart")}
+            className="p-3 rounded-full bg-pink-100 text-pink-600"
+            title="ハート型に切り抜く"
+          >
+            <Heart className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => cutShape("star")}
+            className="p-3 rounded-full bg-yellow-100 text-yellow-600"
+            title="星型に切り抜く"
+          >
+            <Star className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="flex flex-col gap-2 w-full max-w-xs">
+          <div className="flex gap-4 items-center justify-center">
+            <div className="flex flex-col items-center">
+              <span className="text-[10px] text-gray-400">太さ</span>
+              <input
+                type="range"
+                min="1"
+                max="20"
+                value={lineWidth}
+                onChange={(e) => setLineWidth(e.target.value)}
+                className="w-20"
+              />
+            </div>
+            <input
+              type="color"
+              value={color}
+              onChange={(e) => setColor(e.target.value)}
+              className="w-10 h-10 rounded-full overflow-hidden border-2"
+            />
+            <div className="flex flex-col items-center">
+              <span className="text-[10px] text-gray-400">文字サイズ</span>
+              <input
+                type="range"
+                min="12"
+                max="60"
+                value={fontSize}
+                onChange={(e) => setFontSize(e.target.value)}
+                className="w-20"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2 items-center justify-center bg-gray-50 p-2 rounded-xl">
+            <label className="p-2 bg-white rounded-lg shadow-sm cursor-pointer flex items-center gap-1 text-xs font-bold">
+              <Upload className="w-3 h-3" /> 音声読込
+              <input
+                type="file"
+                className="hidden"
+                accept="audio/*"
+                onChange={handleAudioUpload}
+              />
+            </label>
+            {!isRecordingSticker ? (
+              <button
+                onClick={startStickerRecording}
+                className="p-2 bg-red-100 text-red-500 rounded-lg shadow-sm flex items-center gap-1 text-xs font-bold"
+              >
+                <Mic className="w-3 h-3" /> 録音
+              </button>
+            ) : (
+              <button
+                onClick={stopStickerRecording}
+                className="p-2 bg-red-500 text-white rounded-lg shadow-sm flex items-center gap-1 text-xs font-bold animate-pulse"
+              >
+                <StopCircle className="w-3 h-3" /> 停止
+              </button>
+            )}
+            {audioData && (
+              <button
+                onClick={() => setAudioData(null)}
+                className="p-2 bg-gray-200 rounded-lg text-xs font-bold"
+              >
+                音声削除
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-2 w-full max-w-xs">
+          <input
+            className="flex-1 border p-2 rounded-lg text-sm"
+            placeholder="文字入れ..."
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+          />
+          <button
+            onClick={addText}
+            className="bg-gray-200 p-2 rounded-lg text-xs font-bold"
+          >
+            追加
+          </button>
+          <button
+            onClick={clearCanvas}
+            className="bg-red-100 text-red-500 p-2 rounded-lg text-xs font-bold"
+          >
+            全クリア
+          </button>
+        </div>
+        <button
+          onClick={saveStickerToPack}
+          className="w-full max-w-xs py-3 bg-blue-500 text-white font-bold rounded-2xl shadow-lg"
+        >
+          このスタンプをパックに追加 ({createdStickers.length}/8)
+        </button>
+        {createdStickers.length > 0 && (
+          <div className="w-full max-w-xs">
+            <div className="text-xs font-bold text-gray-400 mb-2">
+              作成済みリスト
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {createdStickers.map((s, i) => (
+                <div key={i} className="relative">
+                  <img
+                    src={typeof s === "string" ? s : s.image}
+                    className="w-16 h-16 border rounded bg-gray-50 object-contain"
+                  />
+                  {typeof s !== "string" && s.audio && (
+                    <div className="absolute bottom-0 right-0 bg-green-500 w-3 h-3 rounded-full border border-white"></div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="w-full h-10"></div>
+      </div>
+      <div className="p-4 border-t bg-white">
+        <button
+          onClick={submitPack}
+          disabled={createdStickers.length === 0 || isSubmitting}
+          className="w-full py-4 bg-green-500 text-white font-bold rounded-2xl shadow-xl disabled:bg-gray-300"
+        >
+          {isSubmitting ? (
+            <Loader2 className="w-6 h-6 animate-spin mx-auto" />
+          ) : (
+            "販売申請する (報酬は承認後)"
+          )}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const StickerStoreView = ({
+  user,
+  setView,
+  showNotification,
+  profile,
+  allUsers,
+}) => {
+  const [packs, setPacks] = useState([]);
+  const [activeTab, setActiveTab] = useState("shop");
+  const [adminSubTab, setAdminSubTab] = useState("stickers");
+  const [adminMode, setAdminMode] = useState(false);
+  const [adminPass, setAdminPass] = useState("");
+  const [purchasing, setPurchasing] = useState(null);
+  const [banTarget, setBanTarget] = useState(null);
+  const [grantAmount, setGrantAmount] = useState("");
+
+  useEffect(() => {
+    let q;
+    if (activeTab === "admin" && adminSubTab === "stickers")
+      q = query(
+        collection(db, "artifacts", appId, "public", "data", "sticker_packs"),
+        where("status", "==", "pending")
+      );
+    else if (activeTab === "shop")
+      q = query(
+        collection(db, "artifacts", appId, "public", "data", "sticker_packs"),
+        where("status", "==", "approved")
+      );
+    else return;
+    if (q) {
+      const unsub = onSnapshot(q, (snap) => {
+        const fetchedPacks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        fetchedPacks.sort((a, b) => {
+          const tA = a.createdAt?.toDate
+            ? a.createdAt.toDate().getTime()
+            : a.createdAt?.seconds * 1000 || 0;
+          const tB = b.createdAt?.toDate
+            ? b.createdAt.toDate().getTime()
+            : b.createdAt?.seconds * 1000 || 0;
+          return tB - tA;
+        });
+        setPacks(fetchedPacks);
+      });
+      return () => unsub();
+    }
+  }, [activeTab, adminSubTab]);
+
+  const handleBuy = async (pack) => {
+    if (profile?.isBanned)
+      return showNotification("アカウントが利用停止されています 🚫");
+    if ((profile.wallet || 0) < pack.price) {
+      showNotification("コインが足りません");
+      return;
+    }
+    if (pack.purchasedBy?.includes(user.uid) || pack.authorId === user.uid) {
+      showNotification("既に入手済みです");
+      return;
+    }
+    setPurchasing(pack.id);
+    try {
+      await updateDoc(
+        doc(db, "artifacts", appId, "public", "data", "users", user.uid),
+        { wallet: increment(-pack.price) }
+      );
+      await updateDoc(
+        doc(db, "artifacts", appId, "public", "data", "users", pack.authorId),
+        { wallet: increment(pack.price) }
+      );
+      await updateDoc(
+        doc(db, "artifacts", appId, "public", "data", "sticker_packs", pack.id),
+        { purchasedBy: arrayUnion(user.uid) }
+      );
+      showNotification("購入しました！");
+    } catch (e) {
+      console.error(e);
+      showNotification("購入に失敗しました");
+    } finally {
+      setPurchasing(null);
+    }
+  };
+  const handleApprove = async (packId, authorId, approve) => {
+    try {
+      await runTransaction(db, async (transaction) => {
+        const packRef = doc(
+          db,
+          "artifacts",
+          appId,
+          "public",
+          "data",
+          "sticker_packs",
+          packId
+        );
+        const packDoc = await transaction.get(packRef);
+        if (!packDoc.exists()) throw "Pack does not exist";
+        if (packDoc.data().status !== "pending") throw "Already processed";
+        transaction.update(packRef, {
+          status: approve ? "approved" : "rejected",
+        });
+        if (approve) {
+          const userRef = doc(
+            db,
+            "artifacts",
+            appId,
+            "public",
+            "data",
+            "users",
+            authorId
+          );
+          transaction.update(userRef, { wallet: increment(100) });
+        }
+      });
+      showNotification(approve ? "承認し、報酬を付与しました" : "却下しました");
+    } catch (e) {
+      console.error(e);
+      showNotification(
+        e === "Already processed"
+          ? "既に処理済みの申請です"
+          : "エラーが発生しました"
+      );
+    }
+  };
+  const executeBanToggle = async () => {
+    if (!banTarget) return;
+    try {
+      await updateDoc(
+        doc(db, "artifacts", appId, "public", "data", "users", banTarget.uid),
+        { isBanned: !banTarget.isBanned }
+      );
+      showNotification(
+        banTarget.isBanned
+          ? "制限を解除しました"
+          : "ユーザーを利用停止にしました"
+      );
+      setBanTarget(null);
+    } catch (e) {
+      showNotification("エラーが発生しました");
+    }
+  };
+  const handleGrantCoins = async () => {
+    if (!banTarget || !grantAmount) return;
+    const amount = parseInt(grantAmount, 10);
+    if (isNaN(amount) || amount === 0) {
+      showNotification("有効な金額を入力してください");
+      return;
+    }
+    try {
+      await updateDoc(
+        doc(db, "artifacts", appId, "public", "data", "users", banTarget.uid),
+        { wallet: increment(amount) }
+      );
+      showNotification(`${banTarget.name}に ${amount} コインを付与しました`);
+      setGrantAmount("");
+      setBanTarget(null);
+    } catch (e) {
+      console.error(e);
+      showNotification("エラーが発生しました");
+    }
+  };
+  const attemptAdminLogin = () => {
+    if (adminPass === "admin123") {
+      setAdminMode(true);
+      showNotification("管理者モード");
+    } else {
+      showNotification("パスワードが違います");
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-white">
+      <div className="p-4 border-b flex items-center justify-between sticky top-0 bg-white z-10">
+        <div className="flex items-center gap-2">
+          <ChevronLeft
+            className="w-6 h-6 cursor-pointer"
+            onClick={() => setView("home")}
+          />
+          <h1 className="font-bold text-lg">スタンプショップ</h1>
+        </div>
+        <div className="flex items-center gap-2 bg-yellow-100 px-3 py-1 rounded-full">
+          <Coins className="w-4 h-4 text-yellow-600" />
+          <span className="font-bold text-yellow-700">
+            {profile?.wallet || 0}
+          </span>
+        </div>
+      </div>
+      <div className="flex border-b">
+        <button
+          onClick={() => setActiveTab("shop")}
+          className={`flex-1 py-3 text-sm font-bold ${
+            activeTab === "shop" ? "border-b-2 border-black" : "text-gray-400"
+          }`}
+        >
+          ショップ
+        </button>
+        <button
+          onClick={() => setView("sticker-create")}
+          className="flex-1 py-3 text-sm font-bold text-blue-500 bg-blue-50"
+        >
+          つくる (+100)
+        </button>
+        <button
+          onClick={() => setActiveTab("admin")}
+          className={`flex-1 py-3 text-sm font-bold ${
+            activeTab === "admin" ? "border-b-2 border-black" : "text-gray-400"
+          }`}
+        >
+          管理者
+        </button>
+      </div>
+      {!adminMode && activeTab === "admin" && (
+        <div className="p-8 flex flex-col gap-4 items-center justify-center flex-1">
+          <ShieldAlert className="w-16 h-16 text-gray-300" />
+          <h3 className="font-bold text-center mb-2">管理者ログイン</h3>
+          <input
+            type="password"
+            value={adminPass}
+            onChange={(e) => setAdminPass(e.target.value)}
+            className="border p-3 rounded-xl w-full max-w-xs text-center"
+            placeholder="パスワードを入力"
+          />
+          <button
+            onClick={attemptAdminLogin}
+            className="bg-black text-white py-3 rounded-xl font-bold w-full max-w-xs shadow-lg"
+          >
+            ログイン
+          </button>
+        </div>
+      )}
+      {adminMode && activeTab === "admin" && (
+        <div className="flex bg-gray-50 p-2 gap-2">
+          <button
+            onClick={() => setAdminSubTab("stickers")}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold ${
+              adminSubTab === "stickers"
+                ? "bg-white shadow text-black"
+                : "text-gray-500"
+            }`}
+          >
+            スタンプ承認
+          </button>
+          <button
+            onClick={() => setAdminSubTab("users")}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold ${
+              adminSubTab === "users"
+                ? "bg-white shadow text-black"
+                : "text-gray-500"
+            }`}
+          >
+            ユーザー管理
+          </button>
+        </div>
+      )}
+      {(activeTab === "shop" ||
+        (adminMode && activeTab === "admin" && adminSubTab === "stickers")) && (
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {packs.length === 0 && (
+            <div className="text-center py-10 text-gray-400">
+              スタンプがありません
+            </div>
+          )}
+          {packs.map((pack) => {
+            const isOwned =
+              pack.purchasedBy?.includes(user.uid) ||
+              pack.authorId === user.uid;
+            return (
+              <div
+                key={pack.id}
+                className="border rounded-2xl p-4 shadow-sm bg-white"
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <div className="flex-1">
+                    <h3 className="font-bold text-lg">{pack.name}</h3>
+                    <p className="text-xs text-gray-500 font-bold mb-1">
+                      作: {pack.authorName || "不明"}
+                    </p>
+                    {pack.description && (
+                      <p className="text-xs text-gray-400 bg-gray-50 p-2 rounded-lg mb-2">
+                        {pack.description}
+                      </p>
+                    )}
+                  </div>
+                  {!isOwned && activeTab === "shop" && (
+                    <button
+                      onClick={() => handleBuy(pack)}
+                      disabled={purchasing === pack.id}
+                      className="bg-green-500 text-white px-4 py-2 rounded-full font-bold text-xs shadow-md hover:bg-green-600 disabled:bg-gray-300 shrink-0 ml-2"
+                    >
+                      {purchasing === pack.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        `¥${pack.price}`
+                      )}
+                    </button>
+                  )}
+                  {isOwned && activeTab === "shop" && (
+                    <span className="bg-gray-100 text-gray-500 px-3 py-1 rounded-full text-xs font-bold shrink-0 ml-2">
+                      入手済み
+                    </span>
+                  )}
+                </div>
+                <div
+                  className={`${
+                    activeTab === "admin"
+                      ? "grid grid-cols-4 gap-2 mt-2"
+                      : "flex gap-2 overflow-x-auto pb-2 scrollbar-hide"
+                  }`}
+                >
+                  {pack.stickers.map((s, i) => (
+                    <div key={i} className="relative flex-shrink-0">
+                      <img
+                        src={typeof s === "string" ? s : s.image}
+                        className={`${
+                          activeTab === "admin"
+                            ? "w-full aspect-square"
+                            : "w-20 h-20"
+                        } object-contain bg-gray-50 rounded-lg border`}
+                      />
+                      {typeof s !== "string" && s.audio && (
+                        <div className="absolute top-1 right-1 bg-green-500 w-2 h-2 rounded-full border border-white"></div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {activeTab === "admin" && (
+                  <div className="flex gap-2 mt-4 pt-2 border-t">
+                    <button
+                      onClick={() =>
+                        handleApprove(pack.id, pack.authorId, true)
+                      }
+                      className="flex-1 py-2 bg-blue-500 text-white rounded-lg font-bold text-xs"
+                    >
+                      承認 (+100コイン)
+                    </button>
+                    <button
+                      onClick={() =>
+                        handleApprove(pack.id, pack.authorId, false)
+                      }
+                      className="flex-1 py-2 bg-red-500 text-white rounded-lg font-bold text-xs"
+                    >
+                      拒否
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {adminMode && activeTab === "admin" && adminSubTab === "users" && (
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          {allUsers.map((u) => (
+            <div
+              key={u.uid}
+              className={`flex items-center gap-3 p-3 rounded-xl border ${
+                u.isBanned ? "bg-red-50 border-red-200" : "bg-white"
+              }`}
+            >
+              <img src={u.avatar} className="w-10 h-10 rounded-full border" />
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-sm truncate">{u.name}</div>
+                <div className="text-xs text-gray-400 font-mono">{u.id}</div>
+              </div>
+              <button
+                onClick={() => setBanTarget(u)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white ${
+                  u.isBanned ? "bg-gray-500" : "bg-red-500"
+                }`}
+              >
+                管理
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {banTarget && (
+        <div className="fixed inset-0 z-[600] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl overflow-y-auto max-h-[80vh]">
+            <h3 className="font-bold text-lg mb-1 text-center text-gray-900">
+              ユーザー管理: {banTarget.name}
+            </h3>
+            <p className="text-center text-gray-400 text-xs mb-6 font-mono">
+              {banTarget.id}
+            </p>
+            <div className="mb-6 pb-6 border-b">
+              <h4 className="font-bold text-sm text-gray-700 mb-2">利用制限</h4>
+              <p className="text-sm text-gray-600 mb-3">
+                {banTarget.isBanned
+                  ? "現在は停止中です。解除しますか？"
+                  : "現在利用可能です。停止しますか？"}
+              </p>
+              <button
+                onClick={executeBanToggle}
+                className={`w-full py-3 font-bold rounded-2xl text-white transition-colors ${
+                  banTarget.isBanned
+                    ? "bg-blue-500 hover:bg-blue-600"
+                    : "bg-red-500 hover:bg-red-600"
+                }`}
+              >
+                {banTarget.isBanned ? "制限を解除する" : "アカウントを停止する"}
+              </button>
+            </div>
+            <div className="mb-6">
+              <h4 className="font-bold text-sm text-gray-700 mb-2">
+                コイン操作
+              </h4>
+              <div className="flex items-center justify-between bg-yellow-50 p-3 rounded-xl mb-3">
+                <span className="text-xs font-bold text-yellow-800">
+                  現在の所持コイン
+                </span>
+                <span className="text-lg font-bold text-yellow-600">
+                  {banTarget.wallet || 0}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  placeholder="金額 (-で没収)"
+                  className="flex-1 border p-3 rounded-xl text-center font-bold outline-none focus:border-yellow-500"
+                  value={grantAmount}
+                  onChange={(e) => setGrantAmount(e.target.value)}
+                />
+                <button
+                  onClick={handleGrantCoins}
+                  className="bg-yellow-500 text-white font-bold px-6 rounded-xl hover:bg-yellow-600 shadow-md"
+                >
+                  付与
+                </button>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-2 text-center">
+                ※マイナスの値を入力すると減算されます
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setBanTarget(null);
+                setGrantAmount("");
+              }}
+              className="w-full py-3 bg-gray-100 hover:bg-gray-200 font-bold rounded-2xl text-gray-600 transition-colors"
+            >
+              閉じる
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ChatRoomView = ({
   user,
   profile,
@@ -1935,6 +3152,10 @@ const ChatRoomView = ({
   const [messageLimit, setMessageLimit] = useState(50);
   const lastMessageIdRef = useRef(null);
   const [backgroundSrc, setBackgroundSrc] = useState(null);
+  const [stickerMenuOpen, setStickerMenuOpen] = useState(false);
+  const [myStickerPacks, setMyStickerPacks] = useState([]);
+  const [selectedPackId, setSelectedPackId] = useState(null);
+  const [buyStickerModalPackId, setBuyStickerModalPackId] = useState(null);
 
   const chatData = chats.find((c) => c.id === activeChatId);
   if (!chatData)
@@ -1959,6 +3180,33 @@ const ChatRoomView = ({
       icon = partnerData.avatar;
     }
   }
+
+  useEffect(() => {
+    const q = query(
+      collection(db, "artifacts", appId, "public", "data", "sticker_packs"),
+      where("purchasedBy", "array-contains", user.uid)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const packs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      // Also fetch own packs
+      const q2 = query(
+        collection(db, "artifacts", appId, "public", "data", "sticker_packs"),
+        where("authorId", "==", user.uid)
+      );
+      getDocs(q2).then((snap2) => {
+        const ownPacks = snap2.docs.map((d) => ({ id: d.id, ...d.data() }));
+        // Merge and dedup
+        const all = [...packs, ...ownPacks];
+        const unique = Array.from(
+          new Map(all.map((item) => [item.id, item])).values()
+        );
+        setMyStickerPacks(unique);
+        if (unique.length > 0 && !selectedPackId)
+          setSelectedPackId(unique[0].id);
+      });
+    });
+    return () => unsub();
+  }, [user.uid]);
 
   useEffect(() => {
     isFirstLoad.current = true;
@@ -2148,14 +3396,14 @@ const ChatRoomView = ({
     additionalData = {},
     file = null
   ) => {
+    if (profile?.isBanned)
+      return showNotification("アカウントが利用停止されています 🚫");
     if ((!content && !file && type === "text") || isUploading) return;
     setIsUploading(true);
     setUploadProgress(0);
     const currentReply = replyTo;
     setReplyTo(null);
-
-    // 同時並列数1000に設定
-    const CONCURRENCY = 1000;
+    setStickerMenuOpen(false);
 
     try {
       const msgCol = collection(
@@ -2184,8 +3432,6 @@ const ChatRoomView = ({
             },
           }
         : {};
-
-      // ファイル情報
       const fileData = file
         ? { fileName: file.name, fileSize: file.size, mimeType: file.type }
         : {};
@@ -2196,8 +3442,6 @@ const ChatRoomView = ({
         if (["image", "video"].includes(type)) {
           previewData = await generateThumbnail(file);
         }
-
-        // blobURLで即時送信 (楽観的UI更新)
         await setDoc(newMsgRef, {
           senderId: user.uid,
           content: storedContent,
@@ -2235,8 +3479,9 @@ const ChatRoomView = ({
       if (file && file.size > CHUNK_SIZE) {
         hasChunks = true;
         chunkCount = Math.ceil(file.size / CHUNK_SIZE);
-        let completedChunks = 0;
+        const CONCURRENCY = 100; // Increased concurrency
         const executing = new Set();
+        let completed = 0;
 
         for (let i = 0; i < chunkCount; i++) {
           const start = i * CHUNK_SIZE;
@@ -2246,12 +3491,13 @@ const ChatRoomView = ({
             const reader = new FileReader();
             reader.onload = async (e) => {
               try {
-                // Base64のヘッダー除去 (data:video/mp4;base64,.... のカンマ以降を取得)
                 const base64Data = e.target.result.split(",")[1];
                 await setDoc(doc(msgCol, newMsgRef.id, "chunks", `${i}`), {
                   data: base64Data,
                   index: i,
                 });
+                completed++;
+                setUploadProgress(Math.round((completed / chunkCount) * 100));
                 resolve();
               } catch (err) {
                 reject(err);
@@ -2259,16 +3505,12 @@ const ChatRoomView = ({
             };
             reader.onerror = reject;
             reader.readAsDataURL(blobSlice);
-          }).then(() => {
-            completedChunks++;
-            setUploadProgress(Math.round((completedChunks / chunkCount) * 100));
           });
-
           const pWrapper = p.then(() => executing.delete(pWrapper));
           executing.add(pWrapper);
-
-          // 並列数制御
-          if (executing.size >= CONCURRENCY) await Promise.race(executing);
+          if (executing.size >= CONCURRENCY) {
+            await Promise.race(executing);
+          }
         }
         await Promise.all(executing);
         await updateDoc(newMsgRef, {
@@ -2290,18 +3532,41 @@ const ChatRoomView = ({
             };
           });
         } else {
-          await setDoc(newMsgRef, {
-            senderId: user.uid,
-            content: storedContent,
-            type,
-            ...additionalData,
-            ...replyData,
-            ...fileData,
-            hasChunks,
-            chunkCount,
-            createdAt: serverTimestamp(),
-            readBy: [user.uid],
-          });
+          if (
+            typeof content === "object" &&
+            content !== null &&
+            type === "sticker"
+          ) {
+            // Handle sticker object with audio
+            const stickerContent = content.image || content;
+            const stickerAudio = content.audio || null;
+            await setDoc(newMsgRef, {
+              senderId: user.uid,
+              content: stickerContent,
+              audio: stickerAudio,
+              type,
+              ...additionalData,
+              ...replyData,
+              ...fileData,
+              hasChunks,
+              chunkCount,
+              createdAt: serverTimestamp(),
+              readBy: [user.uid],
+            });
+          } else {
+            await setDoc(newMsgRef, {
+              senderId: user.uid,
+              content: storedContent,
+              type,
+              ...additionalData,
+              ...replyData,
+              ...fileData,
+              hasChunks,
+              chunkCount,
+              createdAt: serverTimestamp(),
+              readBy: [user.uid],
+            });
+          }
           await updateDoc(
             doc(
               db,
@@ -2433,7 +3698,7 @@ const ChatRoomView = ({
     }
   };
   const handleLeaveGroup = async () => {
-    /* ... existing ... */ if (!activeChatId) return;
+    if (!activeChatId) return;
     try {
       await addDoc(
         collection(
@@ -2583,7 +3848,6 @@ const ChatRoomView = ({
     }
   };
 
-  // --- Video Call Logic ---
   const handleVideoCall = async () => {
     try {
       const roomName = `ChatApp_V9_${appId}_${activeChatId}_${Date.now()}`;
@@ -2632,6 +3896,10 @@ const ChatRoomView = ({
       console.error(e);
       showNotification("送信に失敗しました");
     }
+  };
+
+  const onStickerClick = (packId) => {
+    setBuyStickerModalPackId(packId);
   };
 
   return (
@@ -2788,6 +4056,7 @@ const ChatRoomView = ({
               onReply={setReplyTo}
               onReaction={handleReaction}
               allUsers={allUsers}
+              onStickerClick={onStickerClick}
             />
           );
         })}
@@ -2862,6 +4131,8 @@ const ChatRoomView = ({
           chatId={activeChatId}
           currentName={chatData.name}
           currentIcon={chatData.icon}
+          currentMembers={chatData.participants}
+          allUsers={allUsers}
           showNotification={showNotification}
           user={user}
           profile={profile}
@@ -2895,6 +4166,17 @@ const ChatRoomView = ({
           )}
         />
       )}
+      {buyStickerModalPackId && (
+        <StickerBuyModal
+          onClose={() => setBuyStickerModalPackId(null)}
+          packId={buyStickerModalPackId}
+          onGoToStore={(id) => {
+            setView("sticker-store");
+            setBuyStickerModalPackId(null);
+          }}
+        />
+      )}
+
       {plusMenuOpen && (
         <div className="absolute bottom-16 left-4 right-4 bg-white rounded-3xl p-4 shadow-2xl grid grid-cols-4 gap-4 animate-in slide-in-from-bottom-4 z-20">
           <label className="flex flex-col items-center gap-2 cursor-pointer">
@@ -2958,7 +4240,58 @@ const ChatRoomView = ({
           </div>
         </div>
       )}
+
       <div className="p-3 bg-white border-t flex flex-col gap-2 relative z-10">
+        {stickerMenuOpen && myStickerPacks.length > 0 && (
+          <div className="absolute bottom-full left-0 right-0 bg-gray-50 border-t h-72 flex flex-col shadow-2xl rounded-t-3xl overflow-hidden animate-in slide-in-from-bottom-2 z-20">
+            <div className="flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-4 content-start">
+              {myStickerPacks
+                .find((p) => p.id === selectedPackId)
+                ?.stickers.map((s, i) => (
+                  <div
+                    key={i}
+                    className="relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm"
+                    onClick={() =>
+                      sendMessage(s, "sticker", { packId: selectedPackId })
+                    }
+                  >
+                    <img
+                      src={typeof s === "string" ? s : s.image}
+                      className="w-full aspect-square object-contain"
+                    />
+                    {typeof s !== "string" && s.audio && (
+                      <div className="absolute bottom-0 right-0 bg-black/20 text-white rounded-full p-1">
+                        <Volume2 className="w-3 h-3" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+            </div>
+            <div className="bg-white border-t flex overflow-x-auto p-2 gap-2 scrollbar-hide shrink-0">
+              {myStickerPacks.map((pack) => (
+                <div
+                  key={pack.id}
+                  onClick={() => setSelectedPackId(pack.id)}
+                  className={`flex-shrink-0 cursor-pointer p-2 rounded-xl transition-colors ${
+                    selectedPackId === pack.id
+                      ? "bg-gray-200"
+                      : "hover:bg-gray-100"
+                  }`}
+                >
+                  <img
+                    src={
+                      typeof pack.stickers[0] === "string"
+                        ? pack.stickers[0]
+                        : pack.stickers[0].image
+                    }
+                    className="w-8 h-8 object-contain"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {replyTo && (
           <div className="flex items-center justify-between bg-gray-100 p-2 rounded-xl text-xs mb-1 border-l-4 border-green-500">
             <div className="flex flex-col max-w-[90%]">
@@ -2996,13 +4329,25 @@ const ChatRoomView = ({
           </button>
           <div className="flex-1 flex gap-2 relative">
             {!isRecording ? (
-              <input
-                className="flex-1 bg-gray-100 rounded-2xl px-4 py-2 text-sm focus:outline-none"
-                placeholder="メッセージを入力"
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyPress={(e) => e.key === "Enter" && sendMessage(text)}
-              />
+              <div className="flex-1 flex gap-2">
+                <input
+                  className="flex-1 bg-gray-100 rounded-2xl px-4 py-2 text-sm focus:outline-none"
+                  placeholder="メッセージを入力"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyPress={(e) => e.key === "Enter" && sendMessage(text)}
+                />
+                <button
+                  onClick={() => setStickerMenuOpen(!stickerMenuOpen)}
+                  className={`p-2 rounded-full hover:bg-gray-100 ${
+                    stickerMenuOpen
+                      ? "text-green-500 bg-green-50"
+                      : "text-gray-400"
+                  }`}
+                >
+                  <Smile className="w-5 h-5" />
+                </button>
+              </div>
             ) : (
               <div className="flex-1 bg-red-50 rounded-2xl px-4 py-2 flex items-center justify-between animate-pulse">
                 <div className="flex items-center gap-2 text-red-500 font-bold text-xs">
@@ -3064,6 +4409,246 @@ const ChatRoomView = ({
               )}
             </button>
           )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ProfileEditView = ({
+  user,
+  profile,
+  setView,
+  showNotification,
+  copyToClipboard,
+}) => {
+  const [edit, setEdit] = useState(profile || {});
+  useEffect(() => {
+    if (profile)
+      setEdit((prev) =>
+        !prev || Object.keys(prev).length === 0
+          ? { ...profile }
+          : {
+              ...profile,
+              name: prev.name,
+              id: prev.id,
+              status: prev.status,
+              birthday: prev.birthday,
+              avatar: prev.avatar,
+              cover: prev.cover,
+            }
+      );
+  }, [profile]);
+  const handleSave = () => {
+    updateDoc(
+      doc(db, "artifacts", appId, "public", "data", "users", user.uid),
+      edit
+    );
+    showNotification("保存しました ✅");
+  };
+  return (
+    <div className="flex flex-col h-full bg-white">
+      <div className="p-4 border-b flex items-center gap-4 sticky top-0 bg-white shrink-0">
+        <ChevronLeft
+          className="w-6 h-6 cursor-pointer"
+          onClick={() => setView("home")}
+        />
+        <span className="font-bold">設定</span>
+      </div>
+      <div className="flex-1 overflow-y-auto pb-8">
+        <div className="w-full h-48 relative bg-gray-200">
+          <img src={edit.cover} className="w-full h-full object-cover" />
+          <label className="absolute inset-0 flex items-center justify-center bg-black/20 text-white font-bold cursor-pointer opacity-0 hover:opacity-100 transition-opacity">
+            背景変更
+            <input
+              type="file"
+              className="hidden"
+              accept="image/*"
+              onChange={(e) =>
+                handleCompressedUpload(e, (d) => setEdit({ ...edit, cover: d }))
+              }
+            />
+          </label>
+        </div>
+        <div className="px-8 -mt-12 flex flex-col items-center gap-6">
+          <div className="relative">
+            <img
+              src={edit.avatar}
+              className="w-24 h-24 rounded-3xl border-4 border-white object-cover"
+            />
+            <label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer">
+              <CameraIcon className="w-4 h-4" />
+              <input
+                type="file"
+                className="hidden"
+                accept="image/*"
+                onChange={(e) =>
+                  handleCompressedUpload(e, (d) =>
+                    setEdit({ ...edit, avatar: d })
+                  )
+                }
+              />
+            </label>
+          </div>
+          <div className="w-full space-y-4">
+            <div>
+              <label className="text-xs font-bold text-gray-400">名前</label>
+              <input
+                className="w-full border-b py-2 outline-none"
+                value={edit.name || ""}
+                onChange={(e) => setEdit({ ...edit, name: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-400">ID</label>
+              <div className="flex items-center gap-2 border-b py-2">
+                <span className="flex-1 font-mono text-gray-600">
+                  {edit.id}
+                </span>
+                <button
+                  onClick={() => copyToClipboard(edit.id)}
+                  className="p-1 hover:bg-gray-100 rounded-full"
+                >
+                  <Copy className="w-4 h-4 text-gray-500" />
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-400">誕生日</label>
+              <input
+                type="date"
+                className="w-full border-b py-2 outline-none bg-transparent"
+                value={edit.birthday || ""}
+                onChange={(e) => setEdit({ ...edit, birthday: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-400">
+                ひとこと
+              </label>
+              <input
+                className="w-full border-b py-2 outline-none"
+                value={edit.status || ""}
+                onChange={(e) => setEdit({ ...edit, status: e.target.value })}
+              />
+            </div>
+            <button
+              onClick={handleSave}
+              className="w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg"
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const QRScannerView = ({ user, setView, addFriendById }) => {
+  const videoRef = useRef(null),
+    canvasRef = useRef(null),
+    [scanning, setScanning] = useState(false),
+    [stream, setStream] = useState(null);
+  useEffect(() => () => stream?.getTracks().forEach((t) => t.stop()), [stream]);
+  const startScanner = async () => {
+    setScanning(true);
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+      });
+      setStream(s);
+      if (videoRef.current) {
+        videoRef.current.srcObject = s;
+        videoRef.current.play();
+        requestAnimationFrame(tick);
+      }
+    } catch (err) {
+      setScanning(false);
+    }
+  };
+  const tick = () => {
+    if (videoRef.current?.readyState === videoRef.current?.HAVE_ENOUGH_DATA) {
+      const c = canvasRef.current,
+        ctx = c.getContext("2d");
+      c.height = videoRef.current.videoHeight;
+      c.width = videoRef.current.videoWidth;
+      ctx.drawImage(videoRef.current, 0, 0, c.width, c.height);
+      const code = window.jsQR?.(
+        ctx.getImageData(0, 0, c.width, c.height).data,
+        c.width,
+        c.height
+      );
+      if (code) {
+        stream?.getTracks().forEach((t) => t.stop());
+        setScanning(false);
+        addFriendById(code.data);
+        return;
+      }
+    }
+    requestAnimationFrame(tick);
+  };
+  return (
+    <div className="flex flex-col h-full bg-white">
+      <div className="p-4 border-b flex items-center gap-4">
+        <ChevronLeft
+          className="w-6 h-6 cursor-pointer"
+          onClick={() => setView("home")}
+        />
+        <span className="font-bold">QR</span>
+      </div>
+      <div className="flex-1 flex flex-col items-center justify-center p-8 gap-8">
+        {scanning ? (
+          <div className="relative w-64 h-64 border-4 border-green-500 rounded-3xl overflow-hidden">
+            <video ref={videoRef} className="w-full h-full object-cover" />
+            <canvas ref={canvasRef} className="hidden" />
+          </div>
+        ) : (
+          <div className="bg-white p-6 rounded-[40px] shadow-xl border">
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user?.uid}`}
+              className="w-48 h-48"
+            />
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-4 w-full">
+          <button
+            onClick={startScanner}
+            className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border"
+          >
+            <Maximize className="w-6 h-6 text-green-500" />
+            <span>スキャン</span>
+          </button>
+          <label className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border cursor-pointer">
+            <Upload className="w-6 h-6 text-blue-500" />
+            <span>読込</span>
+            <input
+              type="file"
+              className="hidden"
+              accept="image/*"
+              onChange={(e) => {
+                const r = new FileReader();
+                r.onload = (ev) => {
+                  const img = new Image();
+                  img.onload = () => {
+                    const c = document.createElement("canvas"),
+                      ctx = c.getContext("2d");
+                    c.width = img.width;
+                    c.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                    const code = window.jsQR(
+                      ctx.getImageData(0, 0, c.width, c.height).data,
+                      c.width,
+                      c.height
+                    );
+                    if (code) addFriendById(code.data);
+                  };
+                  img.src = ev.target.result;
+                };
+                r.readAsDataURL(e.target.files[0]);
+              }}
+            />
+          </label>
         </div>
       </div>
     </div>
@@ -3140,6 +4725,10 @@ const HomeView = ({
       <div className="p-4 border-b flex justify-between items-center bg-white shrink-0">
         <h1 className="text-xl font-bold">ホーム</h1>
         <div className="flex gap-4 items-center">
+          <Store
+            className="w-6 h-6 cursor-pointer text-orange-500"
+            onClick={() => setView("sticker-store")}
+          />
           <Gift
             className="w-6 h-6 cursor-pointer text-pink-500"
             onClick={() => setView("birthday-cards")}
@@ -3305,12 +4894,13 @@ const VoomView = ({
   db,
   appId,
 }) => {
-  /* ... existing ... */
   const [content, setContent] = useState(""),
     [media, setMedia] = useState(null),
     [mediaType, setMediaType] = useState("image"),
     [isUploading, setIsUploading] = useState(false);
   const postMessage = async () => {
+    if (profile?.isBanned)
+      return showNotification("アカウントが利用停止されています 🚫");
     if ((!content && !media) || isUploading) return;
     setIsUploading(true);
     try {
@@ -3326,16 +4916,13 @@ const VoomView = ({
         collection(db, "artifacts", appId, "public", "data", "posts")
       );
 
-      // VOOMの並列アップロードロジック (1000並列)
-      const CONCURRENCY = 1000;
       if (hasChunks) {
+        const CONCURRENCY = 100;
         const executing = new Set();
         for (let i = 0; i < chunkCount; i++) {
-          // チャンク処理: 文字列として分割して保存
           const start = i * CHUNK_SIZE;
           const end = Math.min(start + CHUNK_SIZE, media.length);
           const chunkData = media.slice(start, end);
-
           const p = setDoc(
             doc(
               db,
@@ -3352,18 +4939,17 @@ const VoomView = ({
           );
           const pWrapper = p.then(() => executing.delete(pWrapper));
           executing.add(pWrapper);
-          if (executing.size >= CONCURRENCY) await Promise.race(executing);
+          if (executing.size >= CONCURRENCY) {
+            await Promise.race(executing);
+          }
         }
         await Promise.all(executing);
       }
-      // Data URLからMIMEタイプ抽出 (data:image/jpeg;base64,....)
+
       let mimeType = null;
       if (media && media.startsWith("data:")) {
         mimeType = media.split(";")[0].split(":")[1];
       }
-
-      // 保存時は hasChunks が true なら media フィールドは null にして容量節約
-      // ただし、小さいファイルの場合は media にそのままデータを入れる
       await setDoc(newPostRef, {
         userId: user.uid,
         content,
@@ -3383,21 +4969,16 @@ const VoomView = ({
       setIsUploading(false);
     }
   };
-
-  // VOOM投稿時のファイル選択も、メッセージ送信と同じようにDataURL化
   const handleVoomFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      // ここでは Data URL 全体をセットしておく (プレビュー用 & 小さいファイルならそのまま送信)
-      // チャンク分割時は、この文字列を分割する
       setMedia(ev.target.result);
       setMediaType(file.type.startsWith("video") ? "video" : "image");
     };
     reader.readAsDataURL(file);
   };
-
   return (
     <div className="flex flex-col h-full bg-gray-50">
       <div className="bg-white p-4 border-b shrink-0">
@@ -3469,247 +5050,6 @@ const VoomView = ({
   );
 };
 
-const ProfileEditView = ({
-  user,
-  profile,
-  setView,
-  showNotification,
-  copyToClipboard,
-}) => {
-  const [edit, setEdit] = useState(profile || {});
-  useEffect(() => {
-    if (profile)
-      setEdit((prev) =>
-        !prev || Object.keys(prev).length === 0
-          ? { ...profile }
-          : {
-              ...profile,
-              name: prev.name,
-              id: prev.id,
-              status: prev.status,
-              birthday: prev.birthday,
-              avatar: prev.avatar,
-              cover: prev.cover,
-            }
-      );
-  }, [profile]);
-  const handleSave = () => {
-    updateDoc(
-      doc(db, "artifacts", appId, "public", "data", "users", user.uid),
-      edit
-    );
-    showNotification("保存しました ✅");
-  };
-  return (
-    <div className="flex flex-col h-full bg-white">
-      <div className="p-4 border-b flex items-center gap-4 sticky top-0 bg-white shrink-0">
-        <ChevronLeft
-          className="w-6 h-6 cursor-pointer"
-          onClick={() => setView("home")}
-        />
-        <span className="font-bold">設定</span>
-      </div>
-      <div className="flex-1 overflow-y-auto pb-8">
-        <div className="w-full h-48 relative bg-gray-200">
-          <img src={edit.cover} className="w-full h-full object-cover" />
-          <label className="absolute inset-0 flex items-center justify-center bg-black/20 text-white font-bold cursor-pointer opacity-0 hover:opacity-100 transition-opacity">
-            背景変更
-            <input
-              type="file"
-              className="hidden"
-              accept="image/*"
-              onChange={(e) =>
-                handleCompressedUpload(e, (d) => setEdit({ ...edit, cover: d }))
-              }
-            />
-          </label>
-        </div>
-        <div className="px-8 -mt-12 flex flex-col items-center gap-6">
-          <div className="relative">
-            <img
-              src={edit.avatar}
-              className="w-24 h-24 rounded-3xl border-4 border-white object-cover"
-            />
-            <label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer">
-              <CameraIcon className="w-4 h-4" />
-              <input
-                type="file"
-                className="hidden"
-                accept="image/*"
-                onChange={(e) =>
-                  handleCompressedUpload(e, (d) =>
-                    setEdit({ ...edit, avatar: d })
-                  )
-                }
-              />
-            </label>
-          </div>
-          <div className="w-full space-y-4">
-            <div>
-              <label className="text-xs font-bold text-gray-400">名前</label>
-              <input
-                className="w-full border-b py-2 outline-none"
-                value={edit.name || ""}
-                onChange={(e) => setEdit({ ...edit, name: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-gray-400">ID</label>
-              <div className="flex items-center gap-2 border-b py-2">
-                <span className="flex-1 font-mono text-gray-600">
-                  {edit.id}
-                </span>
-                <button
-                  onClick={() => copyToClipboard(edit.id)}
-                  className="p-1 hover:bg-gray-100 rounded-full"
-                >
-                  <Copy className="w-4 h-4 text-gray-500" />
-                </button>
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-gray-400">誕生日</label>
-              <input
-                type="date"
-                className="w-full border-b py-2 outline-none bg-transparent"
-                value={edit.birthday || ""}
-                onChange={(e) => setEdit({ ...edit, birthday: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-gray-400">
-                ひとこと
-              </label>
-              <input
-                className="w-full border-b py-2 outline-none"
-                value={edit.status || ""}
-                onChange={(e) => setEdit({ ...edit, status: e.target.value })}
-              />
-            </div>
-            <button
-              onClick={handleSave}
-              className="w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg"
-            >
-              保存
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const QRScannerView = ({ user, setView, addFriendById }) => {
-  /* ... existing ... */
-  const videoRef = useRef(null),
-    canvasRef = useRef(null),
-    [scanning, setScanning] = useState(false),
-    [stream, setStream] = useState(null);
-  useEffect(() => () => stream?.getTracks().forEach((t) => t.stop()), [stream]);
-  const startScanner = async () => {
-    setScanning(true);
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-      });
-      setStream(s);
-      if (videoRef.current) {
-        videoRef.current.srcObject = s;
-        videoRef.current.play();
-        requestAnimationFrame(tick);
-      }
-    } catch (err) {
-      setScanning(false);
-    }
-  };
-  const tick = () => {
-    if (videoRef.current?.readyState === videoRef.current?.HAVE_ENOUGH_DATA) {
-      const c = canvasRef.current,
-        ctx = c.getContext("2d");
-      c.height = videoRef.current.videoHeight;
-      c.width = videoRef.current.videoWidth;
-      ctx.drawImage(videoRef.current, 0, 0, c.width, c.height);
-      const code = window.jsQR?.(
-        ctx.getImageData(0, 0, c.width, c.height).data,
-        c.width,
-        c.height
-      );
-      if (code) {
-        stream?.getTracks().forEach((t) => t.stop());
-        setScanning(false);
-        addFriendById(code.data);
-        return;
-      }
-    }
-    requestAnimationFrame(tick);
-  };
-  return (
-    <div className="flex flex-col h-full bg-white">
-      <div className="p-4 border-b flex items-center gap-4">
-        <ChevronLeft
-          className="w-6 h-6 cursor-pointer"
-          onClick={() => setView("home")}
-        />
-        <span className="font-bold">QR</span>
-      </div>
-      <div className="flex-1 flex flex-col items-center justify-center p-8 gap-8">
-        {scanning ? (
-          <div className="relative w-64 h-64 border-4 border-green-500 rounded-3xl overflow-hidden">
-            <video ref={videoRef} className="w-full h-full object-cover" />
-            <canvas ref={canvasRef} className="hidden" />
-          </div>
-        ) : (
-          <div className="bg-white p-6 rounded-[40px] shadow-xl border">
-            <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user?.uid}`}
-              className="w-48 h-48"
-            />
-          </div>
-        )}
-        <div className="grid grid-cols-2 gap-4 w-full">
-          <button
-            onClick={startScanner}
-            className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border"
-          >
-            <Maximize className="w-6 h-6 text-green-500" />
-            <span>スキャン</span>
-          </button>
-          <label className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border cursor-pointer">
-            <Upload className="w-6 h-6 text-blue-500" />
-            <span>読込</span>
-            <input
-              type="file"
-              className="hidden"
-              accept="image/*"
-              onChange={(e) => {
-                const r = new FileReader();
-                r.onload = (ev) => {
-                  const img = new Image();
-                  img.onload = () => {
-                    const c = document.createElement("canvas"),
-                      ctx = c.getContext("2d");
-                    c.width = img.width;
-                    c.height = img.height;
-                    ctx.drawImage(img, 0, 0);
-                    const code = window.jsQR(
-                      ctx.getImageData(0, 0, c.width, c.height).data,
-                      c.width,
-                      c.height
-                    );
-                    if (code) addFriendById(code.data);
-                  };
-                  img.src = ev.target.result;
-                };
-                r.readAsDataURL(e.target.files[0]);
-              }}
-            />
-          </label>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 export default function App() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -3728,9 +5068,9 @@ export default function App() {
   // Call State
   const [incomingCall, setIncomingCall] = useState(null);
   const [outgoingCall, setOutgoingCall] = useState(null);
-  const [callAcceptedData, setCallAcceptedData] = useState(null); // 応答受け入れ後のデータ（ポップアップブロック回避用）
+  const [callAcceptedData, setCallAcceptedData] = useState(null);
   const ringtoneRef = useRef(null);
-  const processedCallIdsRef = useRef(new Set()); // 追加: 重複処理防止用
+  const processedCallIdsRef = useRef(new Set());
 
   const toggleMuteChat = (chatId) => {
     setMutedChats((prev) => {
@@ -3801,6 +5141,8 @@ export default function App() {
           cover:
             "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
           friends: [],
+          wallet: 1000,
+          isBanned: false,
         };
         await setDoc(userDocRef, initialProfile);
         setProfile(initialProfile);
@@ -3855,7 +5197,6 @@ export default function App() {
   useEffect(() => {
     if (!user || chats.length === 0) return;
 
-    // Check for calls
     const incoming = chats.find(
       (c) =>
         c.callStatus?.status === "ringing" && c.callStatus.callerId !== user.uid
@@ -3865,7 +5206,6 @@ export default function App() {
         c.callStatus?.status === "ringing" && c.callStatus.callerId === user.uid
     );
 
-    // 自分の発信に対して相手が応答したかチェック (status === 'accepted')
     const accepted = chats.find(
       (c) =>
         c.callStatus?.status === "accepted" &&
@@ -3888,12 +5228,10 @@ export default function App() {
       setOutgoingCall(null);
     }
 
-    // 相手が応答した場合の処理 (発信者側)
-    // 自動でwindow.openするのではなく、ユーザーアクションを促すオーバーレイを表示してポップアップブロックを回避
     if (accepted && !processedCallIdsRef.current.has(accepted.id)) {
       processedCallIdsRef.current.add(accepted.id);
-      setCallAcceptedData(accepted); // 専用のオーバーレイを表示
-      setOutgoingCall(null); // 発信中画面は消す
+      setCallAcceptedData(accepted);
+      setOutgoingCall(null);
     }
   }, [chats, user, incomingCall]);
 
@@ -3903,36 +5241,28 @@ export default function App() {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       const audioCtx = new AudioContext();
 
-      // オシレーター1 (明るい高音)
       const osc = audioCtx.createOscillator();
-      osc.type = "triangle"; // サイン波より少しはっきりした音色
-      osc.frequency.setValueAtTime(880, audioCtx.currentTime); // 880Hz (A5)
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
 
-      // オシレーター2 (長三度上で明るい和音を作る)
       const osc2 = audioCtx.createOscillator();
       osc2.type = "triangle";
-      osc2.frequency.setValueAtTime(1108.73, audioCtx.currentTime); // 1108Hz (C#6)
+      osc2.frequency.setValueAtTime(1108.73, audioCtx.currentTime);
 
-      // 音量制御用ノード
       const gainNode = audioCtx.createGain();
 
-      // 軽快なリズム (ピポッ... ピポッ...)
-      const cycleDuration = 1.2; // 1.2秒周期
-      const ringDuration = 0.2; // 0.2秒だけ鳴る（短く軽快に）
+      const cycleDuration = 1.2;
+      const ringDuration = 0.2;
 
-      // 初期設定
       const now = audioCtx.currentTime;
       gainNode.gain.setValueAtTime(0, now);
 
-      // 初回鳴動
       gainNode.gain.setTargetAtTime(0.1, now, 0.01);
-      gainNode.gain.setTargetAtTime(0, now + ringDuration, 0.15); // 余韻を少し残す
+      gainNode.gain.setTargetAtTime(0, now + ringDuration, 0.15);
 
       const intervalId = setInterval(() => {
         const currentTime = audioCtx.currentTime;
-        // ON
         gainNode.gain.setTargetAtTime(0.1, currentTime, 0.01);
-        // OFF
         gainNode.gain.setTargetAtTime(0, currentTime + ringDuration, 0.15);
       }, cycleDuration * 1000);
 
@@ -3943,7 +5273,6 @@ export default function App() {
       osc.start();
       osc2.start();
 
-      // ブラウザの自動再生ポリシー対策として、resumeを試みる
       if (audioCtx.state === "suspended") {
         audioCtx.resume();
       }
@@ -3971,17 +5300,12 @@ export default function App() {
     }
   };
 
-  // 受信者が応答したときの処理
   const answerCall = async () => {
     if (!incomingCall) return;
     stopRingtone();
     const roomName = incomingCall.callStatus.roomName;
     const url = `https://meet.jit.si/${encodeURIComponent(roomName)}`;
-
-    // ポップアップブロックを避けるため、ユーザーアクション(クリック)の直後にウィンドウを開く
     window.open(url, "_blank");
-
-    // その後ステータスを更新して、発信者側に通知
     await updateDoc(
       doc(db, "artifacts", appId, "public", "data", "chats", incomingCall.id),
       {
@@ -3990,16 +5314,11 @@ export default function App() {
     );
   };
 
-  // 発信者が「通話に参加」ボタンを押したときの処理
   const joinAcceptedCall = async () => {
     if (!callAcceptedData) return;
     const roomName = callAcceptedData.callStatus.roomName;
     const url = `https://meet.jit.si/${encodeURIComponent(roomName)}`;
-
-    // ユーザーアクション(クリック)内なのでブロックされない
     window.open(url, "_blank");
-
-    // 通話に参加したのでステータスをクリア
     await updateDoc(
       doc(
         db,
@@ -4015,8 +5334,6 @@ export default function App() {
       }
     );
     setCallAcceptedData(null);
-
-    // 少し遅れてIDセットから削除（再レンダリング時の重複防止）
     setTimeout(() => {
       processedCallIdsRef.current.delete(callAcceptedData.id);
     }, 5000);
@@ -4228,6 +5545,23 @@ export default function App() {
         )}
         {view === "birthday-cards" && (
           <BirthdayCardBox user={user} setView={setView} />
+        )}
+        {view === "sticker-create" && (
+          <StickerEditor
+            user={user}
+            profile={profile}
+            onClose={() => setView("sticker-store")}
+            showNotification={showNotification}
+          />
+        )}
+        {view === "sticker-store" && (
+          <StickerStoreView
+            user={user}
+            setView={setView}
+            showNotification={showNotification}
+            profile={profile}
+            allUsers={allUsers}
+          />
         )}
       </div>
 
