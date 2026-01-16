@@ -102,7 +102,6 @@ import {
 } from "lucide-react";
 
 // --- Firebase Configuration ---
-// --- Firebase Configuration ---
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
   authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
@@ -113,11 +112,12 @@ const firebaseConfig = {
   appId: process.env.REACT_APP_FIREBASE_APP_ID
 };
 
-// 🌟 ここから下の3行を「必ず」追加してください 🌟
+// 🌟 ここから下の3行が「必ず」必要です
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+const appId = 'messenger-app-v9';
 const appId = 'messenger-app-v9';
 const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
 const CHUNK_SIZE = 716799;
