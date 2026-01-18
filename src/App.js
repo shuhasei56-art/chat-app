@@ -11,6 +11,11 @@ import {
   signInAnonymously,
   signInWithCustomToken,
   onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
 } from "firebase/auth";
 import {
   getFirestore,
@@ -99,27 +104,22 @@ import {
   Music,
   Volume2,
   ShoppingCart,
+  User,
+  KeyRound,
 } from "lucide-react";
 
 // --- Firebase Configuration ---
-const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  databaseURL: process.env.REACT_APP_FIREBASE_DATABASE_URL,
-  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.REACT_APP_FIREBASE_APP_ID
-};
-
-// 🌟 ここから下の3行が「必ず」必要です
+const firebaseConfig = JSON.parse(__firebase_config);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-const appId = 'messenger-app-v9';
-const appId = 'messenger-app-v9';
+// Firestoreのパーミッションエラーを回避するため、環境変数からappIdを取得するように修正します。
+const appId =
+  typeof __app_id !== "undefined" ? __app_id : "voom-app-persistent-v1";
+
 const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
+
 const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 
@@ -367,6 +367,211 @@ const generateThumbnail = (file) => {
 };
 
 // --- Modals & Sub-components ---
+
+const AuthView = ({ onLogin, showNotification }) => {
+  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [userId, setUserId] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!userId || !password)
+      return showNotification("IDとパスワードを入力してください");
+    if (!isLoginMode && !displayName)
+      return showNotification("表示名を入力してください");
+
+    // 英数字チェック
+    if (!/^[a-zA-Z0-9_]+$/.test(userId)) {
+      return showNotification("IDは半角英数字とアンダースコアのみ使用できます");
+    }
+
+    setLoading(true);
+    // Firebase AuthenticationにはEmailが必要なため、IDから擬似的なEmailを生成します
+    // これにより、ユーザーはIDだけでログインできます
+    const email = `${userId}@voom-persistent.app`;
+
+    try {
+      if (isLoginMode) {
+        await signInWithEmailAndPassword(auth, email, password);
+        showNotification("ログインしました");
+      } else {
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
+        const user = userCredential.user;
+        // プロフィール初期設定
+        await setDoc(
+          doc(db, "artifacts", appId, "public", "data", "users", user.uid),
+          {
+            uid: user.uid,
+            name: displayName,
+            id: userId,
+            status: "よろしくお願いします！",
+            birthday: "",
+            avatar:
+              "https://api.dicebear.com/7.x/avataaars/svg?seed=" + user.uid,
+            cover:
+              "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
+            friends: [],
+            wallet: 1000,
+            isBanned: false,
+          }
+        );
+        showNotification("アカウントを作成しました");
+      }
+    } catch (error) {
+      console.error(error);
+      if (error.code === "auth/email-already-in-use") {
+        showNotification("このIDは既に使用されています");
+      } else if (
+        error.code === "auth/invalid-credential" ||
+        error.code === "auth/user-not-found" ||
+        error.code === "auth/wrong-password"
+      ) {
+        showNotification("IDまたはパスワードが間違っています");
+      } else if (error.code === "auth/weak-password") {
+        showNotification("パスワードは6文字以上で設定してください");
+      } else {
+        showNotification("認証エラーが発生しました: " + error.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGuestLogin = async () => {
+    setLoading(true);
+    try {
+      await signInAnonymously(auth);
+      showNotification("ゲストとしてログインしました");
+    } catch (e) {
+      showNotification("ゲストログインに失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="w-full h-full overflow-y-auto bg-gradient-to-br from-indigo-50 to-purple-50">
+      <div className="min-h-full flex flex-col items-center justify-center p-6">
+        <div className="bg-white w-full max-w-sm rounded-[32px] shadow-2xl p-8 animate-in fade-in zoom-in duration-300">
+          <div className="text-center mb-8">
+            <div className="w-20 h-20 bg-indigo-500 rounded-3xl mx-auto flex items-center justify-center mb-4 shadow-lg shadow-indigo-200">
+              <MessageCircle className="w-10 h-10 text-white" />
+            </div>
+            <h1 className="text-2xl font-bold text-gray-800">チャットアプリ</h1>
+            <p className="text-sm text-gray-500 mt-2">
+              {isLoginMode
+                ? "データはIDに紐づいて保存されます"
+                : "アカウントを作成してデータを保存"}
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {!isLoginMode && (
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-gray-500 ml-2">
+                  ニックネーム (表示名)
+                </label>
+                <div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border border-transparent focus-within:border-indigo-500 focus-within:bg-white transition-all">
+                  <User className="w-5 h-5 text-gray-400" />
+                  <input
+                    type="text"
+                    className="bg-transparent w-full outline-none text-sm font-bold text-gray-700"
+                    placeholder="山田 太郎"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-gray-500 ml-2">
+                ユーザーID (半角英数)
+              </label>
+              <div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border border-transparent focus-within:border-indigo-500 focus-within:bg-white transition-all">
+                <AtSign className="w-5 h-5 text-gray-400" />
+                <input
+                  type="text"
+                  className="bg-transparent w-full outline-none text-sm font-bold text-gray-700"
+                  placeholder="user_id"
+                  value={userId}
+                  onChange={(e) => setUserId(e.target.value)}
+                  autoCapitalize="none"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-gray-500 ml-2">
+                パスワード
+              </label>
+              <div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border border-transparent focus-within:border-indigo-500 focus-within:bg-white transition-all">
+                <KeyRound className="w-5 h-5 text-gray-400" />
+                <input
+                  type="password"
+                  className="bg-transparent w-full outline-none text-sm font-bold text-gray-700"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl shadow-indigo-100 transition-all active:scale-95 disabled:bg-gray-300 disabled:shadow-none mt-6"
+            >
+              {loading ? (
+                <Loader2 className="w-6 h-6 animate-spin mx-auto" />
+              ) : isLoginMode ? (
+                "ログイン"
+              ) : (
+                "アカウントを作成"
+              )}
+            </button>
+          </form>
+
+          <div className="mt-6 text-center space-y-4">
+            <button
+              onClick={() => setIsLoginMode(!isLoginMode)}
+              className="text-sm font-bold text-gray-500 hover:text-indigo-600 transition-colors"
+            >
+              {isLoginMode
+                ? "アカウントをお持ちでない方はこちら"
+                : "すでにアカウントをお持ちの方はこちら"}
+            </button>
+
+            <div className="relative py-2">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-gray-200"></span>
+              </div>
+              <div className="relative flex justify-center text-xs">
+                <span className="bg-white px-2 text-gray-400">または</span>
+              </div>
+            </div>
+
+            <button
+              onClick={handleGuestLogin}
+              className="text-xs font-bold text-gray-400 hover:text-gray-600 underline"
+            >
+              お試しゲストログイン（データは一時的です）
+            </button>
+          </div>
+        </div>
+        <div className="mt-8 text-[10px] text-gray-400 font-mono text-center">
+          Persistent App ID: {appId}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const ContactSelectModal = ({ onClose, onSend, friends }) => (
   <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
@@ -981,7 +1186,6 @@ const MessageItem = React.memo(
     onReply,
     onReaction,
     allUsers,
-    onShowProfile,
     onStickerClick,
   }) => {
     const isMe = m.senderId === user.uid;
@@ -1240,7 +1444,6 @@ const MessageItem = React.memo(
                 className="text-blue-500 font-bold cursor-pointer hover:underline"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onShowProfile && onShowProfile(mentionedUser);
                 }}
               >
                 {part}
@@ -1271,7 +1474,6 @@ const MessageItem = React.memo(
             className="relative mt-1 cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
-              onShowProfile && onShowProfile(sender);
             }}
           >
             <img
@@ -4456,6 +4658,15 @@ const ProfileEditView = ({
     );
     showNotification("保存しました ✅");
   };
+
+  const handleLogout = async () => {
+    if (window.confirm("ログアウトしますか？")) {
+      await signOut(auth);
+      // ユーザー状態はAppコンポーネントのonAuthStateChangedで自動的に更新されるため
+      // ここで特別な遷移処理は不要だが、viewのリセットなどは必要かもしれない
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-white">
       <div className="p-4 border-b flex items-center gap-4 sticky top-0 bg-white shrink-0">
@@ -4547,6 +4758,12 @@ const ProfileEditView = ({
               className="w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg"
             >
               保存
+            </button>
+            <button
+              onClick={handleLogout}
+              className="w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4"
+            >
+              ログアウト
             </button>
           </div>
         </div>
@@ -5063,7 +5280,7 @@ const VoomView = ({
 export default function App() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [view, setView] = useState("home");
+  const [view, setView] = useState("auth");
   const [activeChatId, setActiveChatId] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
   const [chats, setChats] = useState([]);
@@ -5096,18 +5313,31 @@ export default function App() {
     const script = document.createElement("script");
     script.src = JSQR_URL;
     document.head.appendChild(script);
+
+    // 【重要】永続化設定
     const initAuth = async () => {
-      if (typeof __initial_auth_token !== "undefined" && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
+      try {
+        // ローカルストレージを使用したセッションの永続化を有効にします
+        await setPersistence(auth, browserLocalPersistence);
+      } catch (e) {
+        console.error("Auth init error", e);
       }
     };
     initAuth();
+
+    // 認証状態の監視
+    // リロード時に永続化されたユーザーがいれば自動的にログイン状態になります
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       if (u) {
         setUser(u);
         ensureUserProfile(u.uid);
+        setView("home");
+      } else {
+        setUser(null);
+        setProfile(null);
+        // ユーザーがいない場合、自動的に匿名ログインなどはせず、
+        // ログイン画面 (AuthView) を表示してユーザーの入力を待ちます。
+        setView("auth");
       }
     });
     return () => unsubscribe();
@@ -5430,12 +5660,131 @@ export default function App() {
   };
 
   return (
-    <div className="max-w-md mx-auto h-screen border-x bg-white flex flex-col relative overflow-hidden shadow-2xl">
+    <div className="max-w-md mx-auto h-[100dvh] border-x bg-white flex flex-col relative overflow-hidden shadow-2xl">
       {notification && (
         <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce">
           {notification}
         </div>
       )}
+
+      {/* Call Overlays */}
+      {incomingCall && (
+        <IncomingCallOverlay
+          callData={incomingCall.callStatus}
+          onAccept={answerCall}
+          onDecline={declineCall}
+          allUsers={allUsers}
+        />
+      )}
+      {outgoingCall && (
+        <OutgoingCallOverlay
+          callData={outgoingCall.callStatus}
+          onCancel={cancelCall}
+          allUsers={allUsers}
+        />
+      )}
+      {callAcceptedData && (
+        <CallAcceptedOverlay
+          callData={callAcceptedData}
+          onJoin={joinAcceptedCall}
+        />
+      )}
+
+      <div className="flex-1 overflow-hidden relative flex flex-col">
+        {!user ? (
+          <AuthView onLogin={setUser} showNotification={showNotification} />
+        ) : (
+          <>
+            {view === "home" && (
+              <HomeView
+                user={user}
+                profile={profile}
+                allUsers={allUsers}
+                chats={chats}
+                setView={setView}
+                setActiveChatId={setActiveChatId}
+                setSearchModalOpen={setSearchModalOpen}
+                startChatWithUser={startChatWithUser}
+              />
+            )}
+            {view === "voom" && (
+              <VoomView
+                user={user}
+                allUsers={allUsers}
+                profile={profile}
+                posts={posts}
+                showNotification={showNotification}
+                db={db}
+                appId={appId}
+              />
+            )}
+            {view === "chatroom" && (
+              <ChatRoomView
+                user={user}
+                profile={profile}
+                allUsers={allUsers}
+                chats={chats}
+                activeChatId={activeChatId}
+                setActiveChatId={setActiveChatId}
+                setView={setView}
+                db={db}
+                appId={appId}
+                mutedChats={mutedChats}
+                toggleMuteChat={toggleMuteChat}
+                showNotification={showNotification}
+                addFriendById={addFriendById}
+              />
+            )}
+            {view === "profile" && (
+              <ProfileEditView
+                user={user}
+                profile={profile}
+                setView={setView}
+                showNotification={showNotification}
+                copyToClipboard={copyToClipboard}
+              />
+            )}
+            {view === "qr" && (
+              <QRScannerView
+                user={user}
+                setView={setView}
+                addFriendById={addFriendById}
+              />
+            )}
+            {view === "group-create" && (
+              <GroupCreateView
+                user={user}
+                profile={profile}
+                allUsers={allUsers}
+                setView={setView}
+                showNotification={showNotification}
+              />
+            )}
+            {view === "birthday-cards" && (
+              <BirthdayCardBox user={user} setView={setView} />
+            )}
+            {view === "sticker-create" && (
+              <StickerEditor
+                user={user}
+                profile={profile}
+                onClose={() => setView("sticker-store")}
+                showNotification={showNotification}
+              />
+            )}
+            {view === "sticker-store" && (
+              <StickerStoreView
+                user={user}
+                setView={setView}
+                showNotification={showNotification}
+                profile={profile}
+                allUsers={allUsers}
+              />
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Global Modals */}
       {searchModalOpen && (
         <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/60">
           <div className="bg-white w-full max-w-sm rounded-[32px] p-8">
@@ -5464,118 +5813,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Call Overlays */}
-      {incomingCall && (
-        <IncomingCallOverlay
-          callData={incomingCall.callStatus}
-          onAccept={answerCall}
-          onDecline={declineCall}
-          allUsers={allUsers}
-        />
-      )}
-      {outgoingCall && (
-        <OutgoingCallOverlay
-          callData={outgoingCall.callStatus}
-          onCancel={cancelCall}
-          allUsers={allUsers}
-        />
-      )}
-      {callAcceptedData && (
-        <CallAcceptedOverlay
-          callData={callAcceptedData}
-          onJoin={joinAcceptedCall}
-        />
-      )}
-
-      <div className="flex-1 overflow-hidden relative">
-        {view === "home" && (
-          <HomeView
-            user={user}
-            profile={profile}
-            allUsers={allUsers}
-            chats={chats}
-            setView={setView}
-            setActiveChatId={setActiveChatId}
-            setSearchModalOpen={setSearchModalOpen}
-            startChatWithUser={startChatWithUser}
-          />
-        )}
-        {view === "voom" && (
-          <VoomView
-            user={user}
-            allUsers={allUsers}
-            profile={profile}
-            posts={posts}
-            showNotification={showNotification}
-            db={db}
-            appId={appId}
-          />
-        )}
-        {view === "chatroom" && (
-          <ChatRoomView
-            user={user}
-            profile={profile}
-            allUsers={allUsers}
-            chats={chats}
-            activeChatId={activeChatId}
-            setActiveChatId={setActiveChatId}
-            setView={setView}
-            db={db}
-            appId={appId}
-            mutedChats={mutedChats}
-            toggleMuteChat={toggleMuteChat}
-            showNotification={showNotification}
-            addFriendById={addFriendById}
-          />
-        )}
-        {view === "profile" && (
-          <ProfileEditView
-            user={user}
-            profile={profile}
-            setView={setView}
-            showNotification={showNotification}
-            copyToClipboard={copyToClipboard}
-          />
-        )}
-        {view === "qr" && (
-          <QRScannerView
-            user={user}
-            setView={setView}
-            addFriendById={addFriendById}
-          />
-        )}
-        {view === "group-create" && (
-          <GroupCreateView
-            user={user}
-            profile={profile}
-            allUsers={allUsers}
-            setView={setView}
-            showNotification={showNotification}
-          />
-        )}
-        {view === "birthday-cards" && (
-          <BirthdayCardBox user={user} setView={setView} />
-        )}
-        {view === "sticker-create" && (
-          <StickerEditor
-            user={user}
-            profile={profile}
-            onClose={() => setView("sticker-store")}
-            showNotification={showNotification}
-          />
-        )}
-        {view === "sticker-store" && (
-          <StickerStoreView
-            user={user}
-            setView={setView}
-            showNotification={showNotification}
-            profile={profile}
-            allUsers={allUsers}
-          />
-        )}
-      </div>
-
-      {["home", "voom"].includes(view) && (
+      {/* Navigation Bar (Only show when logged in and in main views) */}
+      {user && ["home", "voom"].includes(view) && (
         <div className="h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0">
           <div
             className={`flex flex-col items-center gap-1 cursor-pointer transition-all ${
