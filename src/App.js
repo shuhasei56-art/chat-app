@@ -124,9 +124,9 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-// Firestoreのパーミッションエラーを回避するため、環境変数からappIdを取得するように修正します。
-const appId =
-  typeof __app_id !== 'messenger-app-v9';
+
+// ⚠️重要: ここでエラーが起きていました。固定の文字列にします。
+const appId = "my-chat-app-v1";
 
 const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
 
