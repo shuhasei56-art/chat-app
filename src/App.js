@@ -110,7 +110,7 @@ import {
   KeyRound,
 } from "lucide-react";
 
-// --- Firebase Configuration ---
+// --- Firebase Configuration
 const firebaseConfig = {
   apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
   authDomain: "chat-app-c17bf.firebaseapp.com",
@@ -119,7 +119,7 @@ const firebaseConfig = {
   storageBucket: "chat-app-c17bf.firebasestorage.app",
   messagingSenderId: "1063497801308",
   appId: "1:1063497801308:web:8040959804832a690a1099"
-};
+}; // ← すべてをこの中に入れ、最後にセミコロンを置きます
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -416,7 +416,11 @@ const handleGoogleLogin = async () => {
 
     try {
       if (isLoginMode) {
-        await signInWithEmailAndPassword(auth, email, password);
+       const userCredential = await createUserWithEmailAndPassword(
+  auth,
+  email,
+  password
+); // ← カッコを最後に持ってくる
         showNotification("ログインしました");
       } else {
         const userCredential = await createUserWithEmailAndPassword(
