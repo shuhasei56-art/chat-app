@@ -110,7 +110,7 @@ import {
   KeyRound,
 } from "lucide-react";
 
-// --- Firebase Configuration ---
+// --- 1. Firebaseの設定 (ここを一つの { } にまとめます) ---
 const firebaseConfig = {
   apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
   authDomain: "chat-app-c17bf.firebaseapp.com",
@@ -120,15 +120,12 @@ const firebaseConfig = {
   messagingSenderId: "1063497801308",
   appId: "1:1063497801308:web:8040959804832a690a1099"
 };
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
 
-const appId = 'messenger-app-v9';
+// --- 2. アプリの定数 (ここがエラーの原因だった場所です) ---
+const appId = 'messenger-app-v9'; // 1回だけにします
 const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
 const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
-
 // --- Utility Functions ---
 const formatTime = (timestamp) => {
   if (!timestamp) return "";
