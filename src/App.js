@@ -397,19 +397,23 @@ const handleGoogleLogin = async () => {
     }
   };
   const handleSubmit = async (e) => {
-  e.preventDefault();
-  // 修正：バックティックを使用し、userId（アイ）に修正
-  const email = `${userId}@voom-persistent.app`; 
-  
-  try {
-    if (isLogin) {
-      // 修正：関数名のスペースを削除
-      await signInWithEmailAndPassword(auth, email, password);
-    } else {
-      // 修正：カッコを正しく閉じ、引数を中に含める
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      
-      // ユーザー情報をFirestoreに保存する処理へ続く...
+    e.preventDefault();
+    if (!userId || !password)
+      return showNotification("IDとパスワードを入力してください");
+    if (!isLoginMode && !displayName)
+      return showNotification("表示名を入力してください");
+
+    // 英数字チェック
+    if (!/^[a-zA-Z0-9_]+$/.test(userId)) {
+      return showNotification("IDは半角英数字とアンダースコアのみ使用できます");
+    }
+
+    setLoading(true);
+    const email = `${userId}@voom-persistent.app`;
+
+    try {
+      if (isLoginMode) {
+        await signInWithEmailAndPassword(auth, email, password);
         showNotification("ログインしました");
       } else {
         const userCredential = await createUserWithEmailAndPassword(
@@ -453,18 +457,6 @@ const handleGoogleLogin = async () => {
       } else {
         showNotification("認証エラーが発生しました: " + error.message);
       }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGuestLogin = async () => {
-    setLoading(true);
-    try {
-      await signInAnonymously(auth);
-      showNotification("ゲストとしてログインしました");
-    } catch (e) {
-      showNotification("ゲストログインに失敗しました");
     } finally {
       setLoading(false);
     }
