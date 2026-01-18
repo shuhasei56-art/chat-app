@@ -120,16 +120,12 @@ const firebaseConfig = {
   messagingSenderId: "1063497801308",
   appId: "1:1063497801308:web:8040959804832a690a1099"
 };
-
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// ⚠️重要: ここでエラーが起きていました。固定の文字列にします。
-const appId = "my-chat-app-v1";
-
+const appId = 'messenger-app-v9';
 const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
-
 const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 
@@ -398,29 +394,19 @@ const handleGoogleLogin = async () => {
     }
   };
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!userId || !password)
-      return showNotification("IDとパスワードを入力してください");
-    if (!isLoginMode && !displayName)
-      return showNotification("表示名を入力してください");
-
-    // 英数字チェック
-    if (!/^[a-zA-Z0-9_]+$/.test(userId)) {
-      return showNotification("IDは半角英数字とアンダースコアのみ使用できます");
-    }
-
-    setLoading(true);
-    // Firebase AuthenticationにはEmailが必要なため、IDから擬似的なEmailを生成します
-    // これにより、ユーザーはIDだけでログインできます
-    const email = `${userId}@voom-persistent.app`;
-
-    try {
-      if (isLoginMode) {
-       const userCredential = await createUserWithEmailAndPassword(
-  auth,
-  email,
-  password
-); // ← カッコを最後に持ってくる
+  e.preventDefault();
+  // 修正：バックティックを使用し、userId（アイ）に修正
+  const email = `${userId}@voom-persistent.app`; 
+  
+  try {
+    if (isLogin) {
+      // 修正：関数名のスペースを削除
+      await signInWithEmailAndPassword(auth, email, password);
+    } else {
+      // 修正：カッコを正しく閉じ、引数を中に含める
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      
+      // ユーザー情報をFirestoreに保存する処理へ続く...
         showNotification("ログインしました");
       } else {
         const userCredential = await createUserWithEmailAndPassword(
