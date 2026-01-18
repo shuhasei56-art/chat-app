@@ -111,6 +111,7 @@ import {
 } from "lucide-react";
 
 // --- 1. Firebaseの設定 (ここを一つの { } にまとめます) ---
+// --- Firebase Configuration ---
 const firebaseConfig = {
   apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
   authDomain: "chat-app-c17bf.firebaseapp.com",
@@ -120,8 +121,13 @@ const firebaseConfig = {
   messagingSenderId: "1063497801308",
   appId: "1:1063497801308:web:8040959804832a690a1099"
 };
-// ⚠️ ここがエラーの原因でした。固定のIDを設定します。
-const appId = "voom-app-persistent-v1";
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// ⚠️ 重要：以前エラーが出ていた箇所です。このように書き換えてください。
+const appId = "chat-app-v1";
 121 | const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
 122 | const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
