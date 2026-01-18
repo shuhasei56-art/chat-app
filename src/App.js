@@ -111,6 +111,7 @@ import {
 } from "lucide-react";
 
 // --- Firebase Configuration
+// --- Firebase Configuration ---
 const firebaseConfig = {
   apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
   authDomain: "chat-app-c17bf.firebaseapp.com",
