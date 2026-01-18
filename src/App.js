@@ -16,6 +16,8 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
+  GoogleAuthProvider, 
+  signInWithPopup,     
 } from "firebase/auth";
 import {
   getFirestore,
@@ -109,11 +111,19 @@ import {
 } from "lucide-react";
 
 // --- Firebase Configuration ---
-const firebaseConfig = JSON.parse(__firebase_config);
+const firebaseConfig = {
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  databaseURL: process.env.REACT_APP_FIREBASE_DATABASE_URL,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID
+};
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-
 // Firestoreのパーミッションエラーを回避するため、環境変数からappIdを取得するように修正します。
 const appId =
   typeof __app_id !== "undefined" ? __app_id : "voom-app-persistent-v1";
@@ -374,7 +384,19 @@ const AuthView = ({ onLogin, showNotification }) => {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
-
+const handleGoogleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      setLoading(true);
+      await signInWithPopup(auth, provider);
+      showNotification("Googleでログインしました");
+    } catch (e) {
+      console.error(e);
+      showNotification("Googleログインに失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!userId || !password)
@@ -537,7 +559,14 @@ const AuthView = ({ onLogin, showNotification }) => {
               )}
             </button>
           </form>
-
+          <button
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            className="w-full bg-white border border-gray-300 text-gray-700 font-bold py-4 rounded-2xl shadow-md flex items-center justify-center gap-2 hover:bg-gray-50 transition-all mt-4"
+          >
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/action/google.svg" className="w-5 h-5" />
+            Googleでログイン
+          </button>
           <div className="mt-6 text-center space-y-4">
             <button
               onClick={() => setIsLoginMode(!isLoginMode)}
