@@ -110,7 +110,6 @@ import {
   KeyRound,
 } from "lucide-react";
 
-// --- Firebase Configuration
 // --- Firebase Configuration ---
 const firebaseConfig = {
   apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
@@ -119,7 +118,6 @@ const firebaseConfig = {
   projectId: "chat-app-c17bf",
   storageBucket: "chat-app-c17bf.firebasestorage.app",
   messagingSenderId: "1063497801308",
-  appId: "1:1063497801308:web:8040959804832a690a1099"
 };
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
