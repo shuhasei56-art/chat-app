@@ -126,7 +126,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 // Firestoreのパーミッションエラーを回避するため、環境変数からappIdを取得するように修正します。
 const appId =
-  typeof __app_id !== "undefined" ? 
+  typeof __app_id !== 'messenger-app-v9';
 
 const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
 
