@@ -111,7 +111,6 @@ import {
 } from "lucide-react";
 
 // --- 1. Firebaseの設定 (ここを一つの { } にまとめます) ---
-// --- Firebase Configuration (修正版) ---
 const firebaseConfig = {
   apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
   authDomain: "chat-app-c17bf.firebaseapp.com",
@@ -126,8 +125,8 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// ⚠️ここがエラー（indexOf）の最大の原因です。固定します。
-const appId = "chat-app-v1"  
+const appId = 'messenger-app-v9';
+const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
 
 const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
  const CHUNK_SIZE = 716799;
