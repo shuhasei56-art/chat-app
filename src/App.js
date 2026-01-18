@@ -119,8 +119,7 @@ const firebaseConfig = {
   storageBucket: "chat-app-c17bf.firebasestorage.app",
   messagingSenderId: "1063497801308",
   appId: "1:1063497801308:web:8040959804832a690a1099"
-}; // ← すべてをこの中に入れ、最後にセミコロンを置きます
-
+};
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
