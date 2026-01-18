@@ -118,13 +118,15 @@ const firebaseConfig = {
   projectId: "chat-app-c17bf",
   storageBucket: "chat-app-c17bf.firebasestorage.app",
   messagingSenderId: "1063497801308",
+  appId: "1:1063497801308:web:8040959804832a690a1099"
 };
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 // Firestoreのパーミッションエラーを回避するため、環境変数からappIdを取得するように修正します。
 const appId =
-  typeof __app_id !== "undefined" ? __app_id : "voom-app-persistent-v1";
+  typeof __app_id !== "undefined" ? 
 
 const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
 
