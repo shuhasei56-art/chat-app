@@ -121,10 +121,9 @@ const firebaseConfig = {
   appId: "1:1063497801308:web:8040959804832a690a1099"
 };
 
-// --- 2. アプリの定数 (ここがエラーの原因だった場所です) ---
-const appId = 'messenger-app-v9'; // 1回だけにします
-const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
-const CHUNK_SIZE = 716799;
+120 | const appId = 'messenger-app-v9';
+121 | const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
+122 | const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 // --- Utility Functions ---
 const formatTime = (timestamp) => {
