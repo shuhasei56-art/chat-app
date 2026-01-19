@@ -16,10 +16,10 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-  GoogleAuthProvider, 
- 　signInWithRedirect,
-　getRedirectResult,
- } from "firebase/auth";
+20 |   GoogleAuthProvider, 
+21 |   signInWithRedirect,     // 変更
+22 |   getRedirectResult       // 追加
+23 | } from "firebase/auth";
 import {
   getFirestore,
   collection,
@@ -122,15 +122,13 @@ const firebaseConfig = {
   appId: "1:1063497801308:web:8040959804832a690a1099"
 };
 
-// 【追加】Firebaseの初期化
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-
 // ⚠️ ここがエラーの原因でした。固定のIDを設定します。
-const appId = "voom-app-persistent-v1";
-121 | const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
-122 | const CHUNK_SIZE = 716799;
+130 | const appId = "voom-app-persistent-v1";
+131 | const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
+132 | const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 // --- Utility Functions ---
 const formatTime = (timestamp) => {
@@ -383,13 +381,13 @@ const AuthView = ({ onLogin, showNotification }) => {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
-378 | const handleGoogleLogin = async () => {
-379 |     const provider = new GoogleAuthProvider();
-380 |     try {
-381 |       setLoading(true);
-382 |       // ポップアップではなくリダイレクトを実行
-383 |       await signInWithRedirect(auth, provider); 
-384 |     } catch (e) {
+　const handleGoogleLogin = async () => {
+   const provider = new GoogleAuthProvider();
+     try {
+      setLoading(true);
+     // ポップアップではなくリダイレクトを実行
+      await signInWithRedirect(auth, provider); 
+    } catch (e) {
 
       console.error(e);
       showNotification("Googleログインに失敗しました");
