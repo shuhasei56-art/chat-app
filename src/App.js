@@ -17,8 +17,9 @@ import {
   signInWithEmailAndPassword,
   signOut,
   GoogleAuthProvider, 
-  signInWithPopup,     
-} from "firebase/auth";
+ 　signInWithRedirect,
+　getRedirectResult,
+ } from "firebase/auth";
 import {
   getFirestore,
   collection,
@@ -382,13 +383,14 @@ const AuthView = ({ onLogin, showNotification }) => {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
-const handleGoogleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    try {
-      setLoading(true);
-      await signInWithPopup(auth, provider);
-      showNotification("Googleでログインしました");
-    } catch (e) {
+378 | const handleGoogleLogin = async () => {
+379 |     const provider = new GoogleAuthProvider();
+380 |     try {
+381 |       setLoading(true);
+382 |       // ポップアップではなくリダイレクトを実行
+383 |       await signInWithRedirect(auth, provider); 
+384 |     } catch (e) {
+
       console.error(e);
       showNotification("Googleログインに失敗しました");
     } finally {
