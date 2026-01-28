@@ -47,7 +47,6 @@ import {
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
-// ご自身のFirebase設定に書き換えてください
 const firebaseConfig = {
   apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
   authDomain: "chat-app-c17bf.firebaseapp.com",
@@ -85,9 +84,7 @@ const isTodayBirthday = (b) => {
   return t.getMonth() + 1 === m && t.getDate() === d;
 };
 
-// --- Components ---
-
-// 1. WebRTC Video/Audio Call Component
+// --- WebRTC Video Call Component ---
 const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = true }) => {
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
@@ -101,27 +98,20 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
     const startCall = async () => {
       const pc = new RTCPeerConnection(rtcConfig);
       pcRef.current = pc;
-
       pc.onicecandidate = async (event) => {
         if (event.candidate) {
           await addDoc(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list"), {
-            candidate: event.candidate.toJSON(),
-            senderId: user.uid,
-            createdAt: serverTimestamp(),
+            candidate: event.candidate.toJSON(), senderId: user.uid, createdAt: serverTimestamp(),
           });
         }
       };
-
-      pc.ontrack = (event) => {
-        setRemoteStream(event.streams[0]);
-      };
-
+      pc.ontrack = (event) => setRemoteStream(event.streams[0]);
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: isVideoEnabled, audio: true });
         setLocalStream(stream);
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-
+        
         const isCaller = callData.callerId === user.uid;
         const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
 
@@ -134,17 +124,14 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
         onSnapshot(signalingRef, async (snap) => {
           const data = snap.data();
           if (!pc.currentRemoteDescription && data?.type === "answer" && isCaller) {
-            const answer = new RTCSessionDescription(data);
-            await pc.setRemoteDescription(answer);
+            await pc.setRemoteDescription(new RTCSessionDescription(data));
           } else if (!pc.currentRemoteDescription && data?.type === "offer" && !isCaller) {
-            const offer = new RTCSessionDescription(data);
-            await pc.setRemoteDescription(offer);
+            await pc.setRemoteDescription(new RTCSessionDescription(data));
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             await updateDoc(signalingRef, { type: "answer", sdp: answer.sdp });
           }
         });
-
         onSnapshot(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list"), (snapshot) => {
           snapshot.docChanges().forEach(async (change) => {
             if (change.type === "added") {
@@ -155,81 +142,38 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
             }
           });
         });
-
-      } catch (err) {
-        console.error("Media Error:", err);
-        onEndCall();
-      }
+      } catch (err) { console.error(err); onEndCall(); }
     };
     startCall();
-
     return () => {
       if (pcRef.current) pcRef.current.close();
       if (localStream) localStream.getTracks().forEach(t => t.stop());
     };
   }, []);
 
-  useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream;
-    }
-  }, [remoteStream]);
-
-  const toggleMute = () => {
-    if (localStream) {
-      localStream.getAudioTracks().forEach(t => t.enabled = !t.enabled);
-      setIsMuted(!isMuted);
-    }
-  };
-
-  const toggleVideo = () => {
-    if (localStream) {
-      localStream.getVideoTracks().forEach(t => t.enabled = !t.enabled);
-      setIsVideoOff(!isVideoOff);
-    }
-  };
+  useEffect(() => { if (remoteVideoRef.current && remoteStream) remoteVideoRef.current.srcObject = remoteStream; }, [remoteStream]);
+  const toggleMute = () => { if (localStream) { localStream.getAudioTracks().forEach(t => t.enabled = !t.enabled); setIsMuted(!isMuted); } };
+  const toggleVideo = () => { if (localStream) { localStream.getVideoTracks().forEach(t => t.enabled = !t.enabled); setIsVideoOff(!isVideoOff); } };
 
   return (
-    <div className="fixed inset-0 z-[1000] bg-black flex flex-col animate-in fade-in h-full overflow-hidden">
+    <div className="fixed inset-0 z-[1000] bg-black flex flex-col animate-in fade-in h-full">
       <div className="relative flex-1 bg-gray-900 flex items-center justify-center overflow-hidden">
-        {remoteStream ? (
-           <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
-        ) : (
-           <div className="text-white flex flex-col items-center gap-4">
-             <div className="w-24 h-24 rounded-full bg-gray-700 flex items-center justify-center animate-pulse"><User className="w-12 h-12"/></div>
-             <p className="font-bold">接続中...</p>
-           </div>
-        )}
-        
-        {isVideoEnabled && (
-          <div className="absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg">
-            <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]" />
-          </div>
-        )}
+        {remoteStream ? <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" /> : <div className="text-white flex flex-col items-center gap-4"><div className="w-24 h-24 rounded-full bg-gray-700 flex items-center justify-center animate-pulse"><User className="w-12 h-12"/></div><p className="font-bold">接続中...</p></div>}
+        {isVideoEnabled && <div className="absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg"><video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]" /></div>}
       </div>
-      
       <div className="h-32 bg-gradient-to-t from-black to-transparent flex items-center justify-center gap-8 pb-8 absolute bottom-0 w-full">
-        <button onClick={toggleMute} className={`p-4 rounded-full shadow-lg ${isMuted ? "bg-white text-black" : "bg-gray-600/80 text-white backdrop-blur-md"}`}>
-          {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
-        </button>
-        <button onClick={onEndCall} className="p-5 rounded-full bg-red-600 text-white shadow-xl hover:bg-red-700 transform hover:scale-110 transition-all">
-          <PhoneOff className="w-8 h-8" />
-        </button>
-        {isVideoEnabled && (
-          <button onClick={toggleVideo} className={`p-4 rounded-full shadow-lg ${isVideoOff ? "bg-white text-black" : "bg-gray-600/80 text-white backdrop-blur-md"}`}>
-            {isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
-          </button>
-        )}
+        <button onClick={toggleMute} className={`p-4 rounded-full shadow-lg ${isMuted ? "bg-white text-black" : "bg-gray-600/80 text-white backdrop-blur-md"}`}>{isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}</button>
+        <button onClick={onEndCall} className="p-5 rounded-full bg-red-600 text-white shadow-xl hover:bg-red-700 transform hover:scale-110 transition-all"><PhoneOff className="w-8 h-8" /></button>
+        {isVideoEnabled && <button onClick={toggleVideo} className={`p-4 rounded-full shadow-lg ${isVideoOff ? "bg-white text-black" : "bg-gray-600/80 text-white backdrop-blur-md"}`}>{isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}</button>}
       </div>
     </div>
   );
 };
 
-// 2. Coin Transfer Modal
+// --- Modals ---
 const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, showNotification }) => {
   const [amount, setAmount] = useState("");
   const [sending, setSending] = useState(false);
-  
   const handleSend = async () => {
     const val = parseInt(amount, 10);
     if (isNaN(val) || val <= 0) return showNotification("正の整数を入力してください");
@@ -240,38 +184,30 @@ const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, sh
         const senderRef = doc(db, "artifacts", appId, "public", "data", "users", myUid);
         const receiverRef = doc(db, "artifacts", appId, "public", "data", "users", targetUid);
         const senderDoc = await t.get(senderRef);
-        if (!senderDoc.exists() || senderDoc.data().wallet < val) throw "残高不足またはエラー";
+        if (!senderDoc.exists() || senderDoc.data().wallet < val) throw "残高不足";
         t.update(senderRef, { wallet: increment(-val) });
         t.update(receiverRef, { wallet: increment(val) });
       });
-      showNotification(`${targetName}さんに ${val}コイン送りました`);
-      onClose();
+      showNotification(`${targetName}さんに ${val}コイン送りました`); onClose();
     } catch (e) { showNotification("送金エラー: " + e); } finally { setSending(false); }
   };
   return (
-    <div className="fixed inset-0 z-[600] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in overflow-y-auto">
-      <div className="bg-white w-full max-w-sm rounded-[32px] p-6 text-center shadow-2xl my-auto">
+    <div className="fixed inset-0 z-[600] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in">
+      <div className="bg-white w-full max-w-sm rounded-[32px] p-6 text-center shadow-2xl">
         <h3 className="font-bold text-lg mb-4 text-gray-800">コインを送る</h3>
-        <div className="bg-yellow-50 p-4 rounded-2xl mb-4 border border-yellow-100">
-          <div className="text-xs text-yellow-700 font-bold uppercase tracking-widest">あなたの残高</div>
-          <div className="text-3xl font-black text-yellow-500 mt-1">{myWallet?.toLocaleString()}</div>
-        </div>
+        <div className="bg-yellow-50 p-4 rounded-2xl mb-4 border border-yellow-100"><div className="text-xs text-yellow-700 font-bold uppercase tracking-widest">あなたの残高</div><div className="text-3xl font-black text-yellow-500 mt-1">{myWallet?.toLocaleString()}</div></div>
         <p className="text-sm font-bold text-gray-500 mb-2">To: {targetName}</p>
-        <div className="relative mb-6">
-          <input type="number" className="w-full bg-gray-100 rounded-2xl p-4 text-center font-bold text-xl outline-none focus:ring-2 focus:ring-yellow-400" placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
-          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-xs">COIN</span>
-        </div>
-        <button onClick={handleSend} disabled={sending} className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-4 rounded-2xl shadow-lg transition-transform active:scale-95 mb-3">{sending ? <Loader2 className="animate-spin mx-auto"/> : "送金する"}</button>
+        <div className="relative mb-6"><input type="number" className="w-full bg-gray-100 rounded-2xl p-4 text-center font-bold text-xl outline-none focus:ring-2 focus:ring-yellow-400" placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} /><span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-xs">COIN</span></div>
+        <button onClick={handleSend} disabled={sending} className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-4 rounded-2xl shadow-lg mb-3">{sending ? <Loader2 className="animate-spin mx-auto"/> : "送金する"}</button>
         <button onClick={onClose} className="text-gray-400 text-xs font-bold hover:text-gray-600">キャンセル</button>
       </div>
     </div>
   );
 };
 
-// 3. Friend Profile Modal
 const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer }) => (
-  <div className="fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in overflow-y-auto">
-    <div className="bg-white w-full max-w-sm rounded-[40px] overflow-hidden shadow-2xl relative flex flex-col items-center pb-8 my-auto">
+  <div className="fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in">
+    <div className="bg-white w-full max-w-sm rounded-[40px] overflow-hidden shadow-2xl relative flex flex-col items-center pb-8">
       <button onClick={onClose} className="absolute top-4 right-4 z-10 bg-black/20 text-white p-2 rounded-full backdrop-blur-md hover:bg-black/30"><X className="w-6 h-6" /></button>
       <div className="w-full h-48 bg-gray-200"><img src={friend.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80"} className="w-full h-full object-cover" /></div>
       <div className="-mt-16 mb-4 relative"><img src={friend.avatar} className="w-32 h-32 rounded-[40px] border-[6px] border-white object-cover shadow-lg" /></div>
@@ -279,8 +215,8 @@ const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer }) => (
       <p className="text-xs text-gray-400 font-mono mb-4">ID: {friend.id}</p>
       <div className="w-full px-8 mb-6"><p className="text-center text-sm text-gray-600 bg-gray-50 py-3 px-4 rounded-2xl">{friend.status || "ステータスなし"}</p></div>
       <div className="flex gap-4 w-full px-8">
-        <button onClick={() => { onStartChat(friend.uid); onClose(); }} className="flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2"><MessageCircle className="w-5 h-5" /> トーク</button>
-        <button onClick={onTransfer} className="flex-1 py-3 bg-yellow-500 text-white rounded-2xl font-bold shadow-lg shadow-yellow-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2"><Coins className="w-5 h-5" /> 送金</button>
+        <button onClick={() => { onStartChat(friend.uid); onClose(); }} className="flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg flex items-center justify-center gap-2"><MessageCircle className="w-5 h-5" /> トーク</button>
+        <button onClick={onTransfer} className="flex-1 py-3 bg-yellow-500 text-white rounded-2xl font-bold shadow-lg flex items-center justify-center gap-2"><Coins className="w-5 h-5" /> 送金</button>
       </div>
     </div>
   </div>
@@ -295,17 +231,13 @@ const AuthView = ({ onLogin, showNotification }) => {
   const [loading, setLoading] = useState(false);
 
   const handleGoogleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    try { setLoading(true); await signInWithRedirect(auth, provider); }
+    try { setLoading(true); await signInWithRedirect(auth, new GoogleAuthProvider()); }
     catch (e) { console.error(e); showNotification("Googleログイン失敗"); setLoading(false); }
   };
-
   const handleGuestLogin = async () => {
-    setLoading(true);
-    try { await signInAnonymously(auth); showNotification("ゲストログインしました"); }
+    try { setLoading(true); await signInAnonymously(auth); showNotification("ゲストログインしました"); }
     catch (e) { showNotification("ゲストログイン失敗"); } finally { setLoading(false); }
   };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!userId || !password) return showNotification("IDとパスワードを入力してください");
@@ -314,9 +246,8 @@ const AuthView = ({ onLogin, showNotification }) => {
     try {
       if (isLoginMode) {
         await signInWithEmailAndPassword(auth, email, password);
-        showNotification("ログインしました");
       } else {
-        if (!displayName) { showNotification("ニックネームを入力してください"); setLoading(false); return; }
+        if (!displayName) { showNotification("表示名を入力してください"); setLoading(false); return; }
         const cred = await createUserWithEmailAndPassword(auth, email, password);
         await setDoc(doc(db, "artifacts", appId, "public", "data", "users", cred.user.uid), {
           uid: cred.user.uid, name: displayName || userId, id: userId, status: "よろしくお願いします！",
@@ -324,26 +255,23 @@ const AuthView = ({ onLogin, showNotification }) => {
           cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
           friends: [], wallet: 1000, isBanned: false,
         });
-        showNotification("アカウント作成完了");
       }
     } catch (e) { showNotification("エラー: " + e.message); } finally { setLoading(false); }
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[100dvh] bg-gradient-to-br from-indigo-50 to-purple-50 p-4 overflow-y-auto">
+    <div className="flex flex-col items-center justify-center min-h-[100dvh] bg-gradient-to-br from-indigo-50 to-purple-50 p-4">
       <div className="bg-white w-full max-w-sm rounded-[40px] shadow-2xl p-8 border border-white/50 backdrop-blur-sm">
         <div className="text-center mb-8">
           <div className="w-20 h-20 bg-indigo-500 rounded-3xl mx-auto flex items-center justify-center mb-4 shadow-lg"><MessageCircle className="w-10 h-10 text-white" /></div>
           <h1 className="text-2xl font-black text-gray-800">チャットアプリ</h1>
-          <p className="text-sm text-gray-500 mt-2">{isLoginMode ? "ログインして始めましょう" : "アカウントを作成してデータを保存"}</p>
+          <p className="text-sm text-gray-500 mt-2">{isLoginMode ? "データはIDに紐づいて保存されます" : "アカウントを作成してデータを保存"}</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
-          {!isLoginMode && (
-            <div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">表示名</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><User className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" placeholder="山田 太郎" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div></div>
-          )}
-          <div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">ユーザーID</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><AtSign className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" placeholder="user_id" value={userId} onChange={(e) => setUserId(e.target.value)} /></div></div>
+          {!isLoginMode && (<div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">表示名</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><User className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" placeholder="山田 太郎" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div></div>)}
+          <div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">ユーザーID (半角英数)</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><AtSign className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" placeholder="user_id" value={userId} onChange={(e) => setUserId(e.target.value)} /></div></div>
           <div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">パスワード</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><KeyRound className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} /></div></div>
-          <button type="submit" disabled={loading} className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl flex items-center justify-center">{loading ? <Loader2 className="animate-spin" /> : (isLoginMode ? "ログイン" : "登録")}</button>
+          <button type="submit" disabled={loading} className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl flex items-center justify-center">{loading ? <Loader2 className="animate-spin" /> : (isLoginMode ? "ログイン" : "アカウントを作成")}</button>
         </form>
         <div className="mt-6 flex flex-col gap-3">
           <button onClick={handleGoogleLogin} className="w-full bg-white border text-gray-700 font-bold py-3 rounded-2xl shadow-sm flex items-center justify-center gap-2"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/action/google.svg" className="w-4 h-4" />Googleでログイン</button>
@@ -361,9 +289,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
   const [mediaSrc, setMediaSrc] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
 
-  useEffect(() => {
-    if (m.type === "image" || m.type === "video") setMediaSrc(m.content || m.preview);
-  }, [m.content, m.preview, m.type]);
+  useEffect(() => { if (m.type === "image" || m.type === "video") setMediaSrc(m.content || m.preview); }, [m.content, m.preview, m.type]);
 
   const renderContent = (text) => {
     if (!text) return "";
@@ -382,28 +308,18 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
 
   return (
     <div className={`flex ${isMe ? "justify-end" : "justify-start"} gap-2 relative group mb-4`}>
-      {!isMe && (
-        <div className="relative mt-1 cursor-pointer" onClick={(e) => { e.stopPropagation(); onShowProfile(sender); }}>
-          <img src={sender?.avatar} className="w-8 h-8 rounded-lg object-cover border" loading="lazy" />
-          {isTodayBirthday(sender?.birthday) && <span className="absolute -top-1 -right-1 text-[8px]">🎂</span>}
-        </div>
-      )}
+      {!isMe && (<div className="relative mt-1 cursor-pointer" onClick={(e) => { e.stopPropagation(); onShowProfile(sender); }}><img src={sender?.avatar} className="w-8 h-8 rounded-lg object-cover border" loading="lazy" />{isTodayBirthday(sender?.birthday) && <span className="absolute -top-1 -right-1 text-[8px]">🎂</span>}</div>)}
       <div className={`flex flex-col ${isMe ? "items-end" : "items-start"} max-w-[75%]`}>
         {!isMe && isGroup && <div className="text-[10px] text-gray-600 font-bold mb-1 ml-1 cursor-pointer hover:underline" onClick={() => onShowProfile(sender)}>{sender?.name}</div>}
         <div className="relative" onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}>
-          <div className={`p-2 px-3 rounded-2xl text-[13px] shadow-sm relative ${m.type === "sticker" ? "bg-transparent p-0" : isMe ? "bg-[#7cfc00] rounded-tr-none" : "bg-white rounded-tl-none"}`}>
+          <div className={`p-2 px-3 rounded-2xl text-[13px] shadow-sm relative ${m.type === "sticker" ? "bg-transparent p-0" : isMe ? "bg-[#7cfc00] rounded-tr-none" : "bg-white rounded-tl-none"} ${["image", "video"].includes(m.type) ? "p-0 bg-transparent shadow-none" : ""}`}>
             {m.type === "text" && <div className="whitespace-pre-wrap">{renderContent(m.content)}</div>}
             {m.type === "sticker" && <img src={m.content} className="w-32 h-32 object-contain" onClick={(e) => { e.stopPropagation(); onStickerClick(m.packId); }} />}
             {m.type === "image" && <img src={mediaSrc} className="max-w-full rounded-xl border" />}
             {m.type === "video" && <video src={mediaSrc} className="max-w-full rounded-xl border bg-black" controls />}
             {m.type === "audio" && <audio src={m.content} controls className="h-8 max-w-[200px]" />}
             <div className="text-[8px] opacity-50 mt-1 text-right">{formatDateTime(m.createdAt)}</div>
-            {showMenu && (
-              <div className={`absolute top-full ${isMe ? "right-0" : "left-0"} mt-1 z-[100] bg-white rounded-xl shadow-2xl border overflow-hidden min-w-[120px]`}>
-                <button onClick={(e) => { e.stopPropagation(); onReply(m); setShowMenu(false); }} className="w-full px-4 py-3 text-xs font-bold text-left hover:bg-gray-100 flex items-center gap-2"><Reply className="w-4 h-4" />リプライ</button>
-                {isMe && <button onClick={(e) => { e.stopPropagation(); onDelete(m.id); }} className="w-full px-4 py-3 text-xs font-bold text-red-500 text-left hover:bg-red-50 flex items-center gap-2"><Trash2 className="w-4 h-4" />削除</button>}
-              </div>
-            )}
+            {showMenu && (<div className={`absolute top-full ${isMe ? "right-0" : "left-0"} mt-1 z-[100] bg-white rounded-xl shadow-2xl border overflow-hidden min-w-[120px]`}><button onClick={(e) => { e.stopPropagation(); onReply(m); setShowMenu(false); }} className="w-full px-4 py-3 text-xs font-bold text-left hover:bg-gray-100 flex items-center gap-2"><Reply className="w-4 h-4" />リプライ</button>{isMe && <button onClick={(e) => { e.stopPropagation(); onDelete(m.id); }} className="w-full px-4 py-3 text-xs font-bold text-red-500 text-left hover:bg-red-50 flex items-center gap-2"><Trash2 className="w-4 h-4" />削除</button>}</div>)}
           </div>
         </div>
       </div>
@@ -483,7 +399,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   );
 };
 
-// --- Home View ---
+// --- Home View (Matches Attached Image Design) ---
 const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }) => {
   const [tab, setTab] = useState("chats"), [selectedFriend, setSelectedFriend] = useState(null), [coinModalTarget, setCoinModalTarget] = useState(null);
   const friends = useMemo(() => allUsers.filter(u => profile?.friends?.includes(u.uid)), [allUsers, profile]);
@@ -492,10 +408,12 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
       <div className="p-4 border-b flex justify-between items-center bg-white shrink-0 sticky top-0 z-10">
         <h1 className="text-xl font-bold">ホーム</h1>
         <div className="flex gap-4 items-center">
-          <div className="bg-yellow-100 px-3 py-1 rounded-full flex items-center gap-1"><Coins className="w-4 h-4 text-yellow-600" /><span className="text-sm font-bold">{profile?.wallet || 0}</span></div>
-          <Search className="w-6 h-6 cursor-pointer" onClick={() => setSearchModalOpen(true)} />
-          <UserPlus className="w-6 h-6 cursor-pointer" onClick={() => setView("qr")} />
-          <Settings className="w-6 h-6 cursor-pointer" onClick={() => setView("profile")} />
+          <Store className="w-6 h-6 cursor-pointer text-orange-500" onClick={() => setView("sticker-store")} />
+          <Gift className="w-6 h-6 cursor-pointer text-pink-500" onClick={() => setView("birthday-cards")} />
+          <Users className="w-6 h-6 cursor-pointer text-gray-700" onClick={() => setView("group-create")} />
+          <Search className="w-6 h-6 cursor-pointer text-gray-700" onClick={() => setSearchModalOpen(true)} />
+          <UserPlus className="w-6 h-6 cursor-pointer text-gray-700" onClick={() => setView("qr")} />
+          <Settings className="w-6 h-6 cursor-pointer text-gray-700" onClick={() => setView("profile")} />
         </div>
       </div>
       <div className="flex border-b">
@@ -504,7 +422,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
       </div>
       <div className="flex-1 overflow-y-auto scrollbar-hide min-h-0">
         <div className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer border-b" onClick={() => setView("profile")}>
-          <img src={profile?.avatar} className="w-16 h-16 rounded-2xl object-cover border" /><div className="flex-1 font-bold text-lg">{profile?.name}</div>
+          <img src={profile?.avatar} className="w-16 h-16 rounded-2xl object-cover border" /><div className="flex-1"><div className="font-bold text-lg">{profile?.name}</div><div className="text-xs text-gray-400 font-mono">ID: {profile?.id}</div></div>
         </div>
         {tab === "friends" && friends.map(f => (<div key={f.uid} className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedFriend(f)}><img src={f.avatar} className="w-12 h-12 rounded-xl object-cover border" /><div className="flex-1 font-bold text-sm">{f.name}</div></div>))}
         {tab === "chats" && chats.sort((a,b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)).map(chat => {
@@ -642,21 +560,17 @@ export default function App() {
       const chatList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setChats(chatList);
       
-      // 着信チェック
       const incoming = chatList.find(c => c.callStatus?.status === "ringing" && c.callStatus.callerId !== user.uid);
       if (incoming) setIncomingCall({ chatId: incoming.id, callData: incoming.callStatus });
       else setIncomingCall(null);
 
-      // 発信中チェック (自分がかけた場合)
       const outgoing = chatList.find(c => c.callStatus?.status === "ringing" && c.callStatus.callerId === user.uid);
       if (outgoing) setOutgoingCall({ chatId: outgoing.id, callData: outgoing.callStatus });
       else setOutgoingCall(null);
 
-      // 通話開始チェック (応答された場合)
       const accepted = chatList.find(c => c.callStatus?.status === "accepted" && c.callStatus.callerId === user.uid);
       if (accepted) {
-        setActiveCall({ chatId: accepted.id, callData: accepted.callStatus, isVideo: true }); // ビデオONで開始（要調整）
-        // 通話ステータスをクリアして通話画面へ遷移
+        setActiveCall({ chatId: accepted.id, callData: accepted.callStatus, isVideo: true });
         updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", accepted.id), { callStatus: deleteField() });
       }
 
@@ -675,12 +589,10 @@ export default function App() {
 
   const startVideoCall = async (chatId, isVideo = true) => {
     await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { "callStatus.status": "ringing", "callStatus.callerId": user.uid, "callStatus.timestamp": Date.now() });
-    // 発信側は即座に待機画面などは出さず、OutgoingCallOverlayで管理するが、今回はVideoCallViewへ直結させる簡略実装も可。
-    // ここでは一般的な「相手の応答待ち」状態にするため、OutgoingCallOverlayを表示させるロジック（useEffect内）に任せます。
+    setActiveCall({ chatId, callData: { callerId: user.uid }, isVideo });
   };
 
   const acceptCall = async (chatId) => {
-     // 応答側：通話ステータスをacceptedに変更し、VideoCallViewを表示
      await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { "callStatus.status": "accepted" });
      setActiveCall({ chatId, callData: incomingCall.callData, isVideo: true });
      setIncomingCall(null);
