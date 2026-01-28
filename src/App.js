@@ -1718,8 +1718,8 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
   const startScanner = async () => {
     setScanning(true);
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      setStream(mediaStream); if (videoRef.current) { videoRef.current.srcObject = mediaStream; videoRef.current.play(); requestAnimationFrame(tick); }
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      setStream(s); if (videoRef.current) { videoRef.current.srcObject = s; videoRef.current.play(); requestAnimationFrame(tick); }
     } catch (e) { setScanning(false); }
   };
   const tick = () => {
