@@ -47,7 +47,7 @@ import {
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
-// 重要: ご自身のFirebase設定に書き換えてください
+// ご自身のFirebase設定に書き換えてください
 const firebaseConfig = {
   apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
   authDomain: "chat-app-c17bf.firebaseapp.com",
@@ -67,7 +67,7 @@ const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
 const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
 
-// WebRTC STUN Servers (Googleのパブリックサーバーを使用)
+// WebRTC STUN Servers
 const rtcConfig = {
   iceServers: [
     { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
@@ -102,12 +102,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
       const pc = new RTCPeerConnection(rtcConfig);
       pcRef.current = pc;
 
-      // 相手からの映像・音声を受け取った時の処理
-      pc.ontrack = (event) => {
-        setRemoteStream(event.streams[0]);
-      };
-
-      // 経路候補(ICE Candidate)が見つかったらFirestoreに保存
       pc.onicecandidate = async (event) => {
         if (event.candidate) {
           await addDoc(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list"), {
@@ -118,25 +112,25 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
         }
       };
 
+      pc.ontrack = (event) => {
+        setRemoteStream(event.streams[0]);
+      };
+
       try {
-        // 自分のカメラ・マイクを取得
         const stream = await navigator.mediaDevices.getUserMedia({ video: isVideoEnabled, audio: true });
         setLocalStream(stream);
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-        
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
         const isCaller = callData.callerId === user.uid;
         const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
 
-        // 発信者の場合：Offerを作成
         if (isCaller) {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           await setDoc(signalingRef, { type: "offer", sdp: offer.sdp, callerId: user.uid });
         }
 
-        // Firestoreのシグナリング情報を監視
         onSnapshot(signalingRef, async (snap) => {
           const data = snap.data();
           if (!pc.currentRemoteDescription && data?.type === "answer" && isCaller) {
@@ -151,7 +145,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
           }
         });
 
-        // ICE Candidateの監視
         onSnapshot(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list"), (snapshot) => {
           snapshot.docChanges().forEach(async (change) => {
             if (change.type === "added") {
@@ -165,13 +158,12 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
 
       } catch (err) {
         console.error("Media Error:", err);
-        onEndCall(); // エラー時は通話を終了
+        onEndCall();
       }
     };
     startCall();
 
     return () => {
-      // クリーンアップ
       if (pcRef.current) pcRef.current.close();
       if (localStream) localStream.getTracks().forEach(t => t.stop());
     };
@@ -198,9 +190,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] bg-black flex flex-col animate-in fade-in">
-      <div className="relative flex-1 bg-gray-900 flex items-center justify-center">
-        {/* 相手の映像 */}
+    <div className="fixed inset-0 z-[1000] bg-black flex flex-col animate-in fade-in h-full overflow-hidden">
+      <div className="relative flex-1 bg-gray-900 flex items-center justify-center overflow-hidden">
         {remoteStream ? (
            <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
         ) : (
@@ -210,7 +201,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
            </div>
         )}
         
-        {/* 自分の映像 (ピクチャーインピクチャー) */}
         {isVideoEnabled && (
           <div className="absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg">
             <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]" />
@@ -218,7 +208,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
         )}
       </div>
       
-      {/* 操作ボタン */}
       <div className="h-32 bg-gradient-to-t from-black to-transparent flex items-center justify-center gap-8 pb-8 absolute bottom-0 w-full">
         <button onClick={toggleMute} className={`p-4 rounded-full shadow-lg ${isMuted ? "bg-white text-black" : "bg-gray-600/80 text-white backdrop-blur-md"}`}>
           {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
@@ -260,8 +249,8 @@ const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, sh
     } catch (e) { showNotification("送金エラー: " + e); } finally { setSending(false); }
   };
   return (
-    <div className="fixed inset-0 z-[600] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in">
-      <div className="bg-white w-full max-w-sm rounded-[32px] p-6 text-center shadow-2xl">
+    <div className="fixed inset-0 z-[600] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in overflow-y-auto">
+      <div className="bg-white w-full max-w-sm rounded-[32px] p-6 text-center shadow-2xl my-auto">
         <h3 className="font-bold text-lg mb-4 text-gray-800">コインを送る</h3>
         <div className="bg-yellow-50 p-4 rounded-2xl mb-4 border border-yellow-100">
           <div className="text-xs text-yellow-700 font-bold uppercase tracking-widest">あなたの残高</div>
@@ -279,10 +268,10 @@ const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, sh
   );
 };
 
-// 3. Friend Profile Modal (Updated with Actions)
+// 3. Friend Profile Modal
 const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer }) => (
-  <div className="fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in">
-    <div className="bg-white w-full max-w-sm rounded-[40px] overflow-hidden shadow-2xl relative flex flex-col items-center pb-8">
+  <div className="fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in overflow-y-auto">
+    <div className="bg-white w-full max-w-sm rounded-[40px] overflow-hidden shadow-2xl relative flex flex-col items-center pb-8 my-auto">
       <button onClick={onClose} className="absolute top-4 right-4 z-10 bg-black/20 text-white p-2 rounded-full backdrop-blur-md hover:bg-black/30"><X className="w-6 h-6" /></button>
       <div className="w-full h-48 bg-gray-200"><img src={friend.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80"} className="w-full h-full object-cover" /></div>
       <div className="-mt-16 mb-4 relative"><img src={friend.avatar} className="w-32 h-32 rounded-[40px] border-[6px] border-white object-cover shadow-lg" /></div>
@@ -298,7 +287,6 @@ const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer }) => (
 );
 
 // --- Auth Components ---
-
 const AuthView = ({ onLogin, showNotification }) => {
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [userId, setUserId] = useState("");
@@ -342,7 +330,7 @@ const AuthView = ({ onLogin, showNotification }) => {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50 p-4">
+    <div className="flex flex-col items-center justify-center min-h-[100dvh] bg-gradient-to-br from-indigo-50 to-purple-50 p-4 overflow-y-auto">
       <div className="bg-white w-full max-w-sm rounded-[40px] shadow-2xl p-8 border border-white/50 backdrop-blur-sm">
         <div className="text-center mb-8">
           <div className="w-20 h-20 bg-indigo-500 rounded-3xl mx-auto flex items-center justify-center mb-4 shadow-lg"><MessageCircle className="w-10 h-10 text-white" /></div>
@@ -367,7 +355,7 @@ const AuthView = ({ onLogin, showNotification }) => {
   );
 };
 
-// --- Message Item (with Mention Support) ---
+// --- Message Item ---
 const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, addFriendById, onEdit, onDelete, onPreview, onReply, onReaction, allUsers, onStickerClick, onShowProfile }) => {
   const isMe = m.senderId === user.uid;
   const [mediaSrc, setMediaSrc] = useState(null);
@@ -377,7 +365,6 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
     if (m.type === "image" || m.type === "video") setMediaSrc(m.content || m.preview);
   }, [m.content, m.preview, m.type]);
 
-  // @メンションやリンクをパースして表示
   const renderContent = (text) => {
     if (!text) return "";
     const regex = /(https?:\/\/[^\s]+)|(@[^\s]+)/g;
@@ -385,7 +372,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
       if (!part) return null;
       if (part.match(/^https?:\/\//)) return <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">{part}</a>;
       if (part.startsWith('@')) {
-        const name = part.substring(1); // @を除去
+        const name = part.substring(1);
         const u = allUsers.find(user => user.name === name);
         if (u) return <span key={i} className="text-blue-500 font-bold cursor-pointer hover:underline bg-blue-50 px-1 rounded mx-0.5" onClick={(e) => { e.stopPropagation(); onShowProfile(u); }}>{part}</span>;
       }
@@ -462,7 +449,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
 
   return (
     <div className="flex flex-col h-full bg-[#8fb2c9] relative">
-      <div className="p-3 bg-white/95 backdrop-blur border-b flex items-center gap-3 sticky top-0 z-10">
+      <div className="p-3 bg-white/95 backdrop-blur border-b flex items-center gap-3 sticky top-0 z-10 shadow-sm">
         <ChevronLeft className="cursor-pointer w-6 h-6" onClick={() => setView("home")} />
         <img src={icon} className="w-10 h-10 rounded-xl object-cover border" />
         <div className="font-bold text-sm flex-1 truncate">{title}</div>
@@ -471,7 +458,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           <button onClick={() => startVideoCall(activeChatId, false)} title="音声通話"><Phone className="w-6 h-6 text-gray-600 hover:text-green-500" /></button>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide min-h-0">
         {messages.map((m) => (
           <MessageItem key={m.id} m={m} user={user} sender={allUsers.find(u => u.uid === m.senderId)} isGroup={isGroup} db={db} appId={appId} chatId={activeChatId} addFriendById={addFriendById} onDelete={(id) => deleteDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeChatId, "messages", id))} onReply={setReplyTo} allUsers={allUsers} onShowProfile={setViewProfile} />
         ))}
@@ -515,7 +502,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
         <button className={`flex-1 py-3 text-sm font-bold ${tab === "friends" ? "border-b-2 border-black" : "text-gray-400"}`} onClick={() => setTab("friends")}>友だち</button>
         <button className={`flex-1 py-3 text-sm font-bold ${tab === "chats" ? "border-b-2 border-black" : "text-gray-400"}`} onClick={() => setTab("chats")}>トーク</button>
       </div>
-      <div className="flex-1 overflow-y-auto scrollbar-hide">
+      <div className="flex-1 overflow-y-auto scrollbar-hide min-h-0">
         <div className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer border-b" onClick={() => setView("profile")}>
           <img src={profile?.avatar} className="w-16 h-16 rounded-2xl object-cover border" /><div className="flex-1 font-bold text-lg">{profile?.name}</div>
         </div>
@@ -524,6 +511,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
           let name = chat.name, icon = chat.icon; if (!chat.isGroup) { const p = allUsers.find(u => u.uid === chat.participants.find(id => id !== user.uid)); if (p) { name = p.name; icon = p.avatar; } }
           return (<div key={chat.id} className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer" onClick={() => { setActiveChatId(chat.id); setView("chatroom"); }}><img src={icon} className="w-12 h-12 rounded-xl object-cover border" /><div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{name}</div><div className="text-xs text-gray-400 truncate">{chat.lastMessage?.content}</div></div><div className="text-[10px] text-gray-300">{formatTime(chat.updatedAt)}</div></div>);
         })}
+        <div className="h-24"></div> 
       </div>
       {selectedFriend && <FriendProfileModal friend={selectedFriend} onClose={() => setSelectedFriend(null)} onStartChat={startChatWithUser} onTransfer={() => { setCoinModalTarget(selectedFriend); setSelectedFriend(null); }} />}
       {coinModalTarget && <CoinTransferModal onClose={() => setCoinModalTarget(null)} myWallet={profile.wallet} myUid={user.uid} targetUid={coinModalTarget.uid} targetName={coinModalTarget.name} showNotification={showNotification} />}
@@ -541,7 +529,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db, appId 
   return (
     <div className="flex flex-col h-full bg-gray-50">
       <div className="bg-white p-4 border-b font-bold">VOOM</div>
-      <div className="flex-1 overflow-y-auto pb-20 scrollbar-hide">
+      <div className="flex-1 overflow-y-auto pb-24 scrollbar-hide min-h-0">
         <div className="bg-white p-4 mb-2">
           <textarea className="w-full text-sm outline-none resize-none min-h-[60px]" placeholder="何をしていますか？" value={content} onChange={(e) => setContent(e.target.value)} />
           {media && <div className="relative mt-2"><img src={media} className="max-h-60 rounded-xl" /><button onClick={() => setMedia(null)} className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1"><X className="w-3 h-3" /></button></div>}
@@ -572,7 +560,7 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
   return (
     <div className="flex flex-col h-full bg-white">
       <div className="p-4 border-b flex items-center gap-4"><ChevronLeft className="cursor-pointer" onClick={() => setView("home")} /><span className="font-bold">設定</span></div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto pb-8">
         <div className="w-full h-48 bg-gray-200 relative"><img src={edit.cover} className="w-full h-full object-cover" /><label className="absolute inset-0 flex items-center justify-center bg-black/20 text-white cursor-pointer opacity-0 hover:opacity-100">背景変更<input type="file" className="hidden" accept="image/*" onChange={(e) => handleCompressedUpload(e, (d) => setEdit({ ...edit, cover: d }))} /></label></div>
         <div className="px-8 -mt-12 flex flex-col items-center gap-6">
           <div className="relative"><img src={edit.avatar} className="w-24 h-24 rounded-3xl border-4 border-white object-cover" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={(e) => handleCompressedUpload(e, (d) => setEdit({ ...edit, avatar: d }))} /></label></div>
@@ -595,8 +583,8 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
   const startScanner = async () => {
     setScanning(true);
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      setStream(mediaStream); if (videoRef.current) { videoRef.current.srcObject = mediaStream; videoRef.current.play(); requestAnimationFrame(tick); }
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      setStream(s); if (videoRef.current) { videoRef.current.srcObject = s; videoRef.current.play(); requestAnimationFrame(tick); }
     } catch (e) { setScanning(false); }
   };
   const tick = () => {
@@ -630,6 +618,7 @@ export default function App() {
   const [searchModalOpen, setSearchModalOpen] = useState(false), [searchQuery, setSearchQuery] = useState("");
   const [activeCall, setActiveCall] = useState(null);
   const [incomingCall, setIncomingCall] = useState(null);
+  const [outgoingCall, setOutgoingCall] = useState(null);
 
   useEffect(() => {
     const script = document.createElement("script"); script.src = JSQR_URL; document.head.appendChild(script);
@@ -652,9 +641,25 @@ export default function App() {
     onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "chats"), where("participants", "array-contains", user.uid)), (snapshot) => {
       const chatList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setChats(chatList);
+      
+      // 着信チェック
       const incoming = chatList.find(c => c.callStatus?.status === "ringing" && c.callStatus.callerId !== user.uid);
       if (incoming) setIncomingCall({ chatId: incoming.id, callData: incoming.callStatus });
       else setIncomingCall(null);
+
+      // 発信中チェック (自分がかけた場合)
+      const outgoing = chatList.find(c => c.callStatus?.status === "ringing" && c.callStatus.callerId === user.uid);
+      if (outgoing) setOutgoingCall({ chatId: outgoing.id, callData: outgoing.callStatus });
+      else setOutgoingCall(null);
+
+      // 通話開始チェック (応答された場合)
+      const accepted = chatList.find(c => c.callStatus?.status === "accepted" && c.callStatus.callerId === user.uid);
+      if (accepted) {
+        setActiveCall({ chatId: accepted.id, callData: accepted.callStatus, isVideo: true }); // ビデオONで開始（要調整）
+        // 通話ステータスをクリアして通話画面へ遷移
+        updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", accepted.id), { callStatus: deleteField() });
+      }
+
     });
     onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(50)), (snapshot) => setPosts(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))));
   }, [user]);
@@ -670,17 +675,25 @@ export default function App() {
 
   const startVideoCall = async (chatId, isVideo = true) => {
     await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { "callStatus.status": "ringing", "callStatus.callerId": user.uid, "callStatus.timestamp": Date.now() });
-    setActiveCall({ chatId, callData: { callerId: user.uid }, isVideo });
+    // 発信側は即座に待機画面などは出さず、OutgoingCallOverlayで管理するが、今回はVideoCallViewへ直結させる簡略実装も可。
+    // ここでは一般的な「相手の応答待ち」状態にするため、OutgoingCallOverlayを表示させるロジック（useEffect内）に任せます。
+  };
+
+  const acceptCall = async (chatId) => {
+     // 応答側：通話ステータスをacceptedに変更し、VideoCallViewを表示
+     await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { "callStatus.status": "accepted" });
+     setActiveCall({ chatId, callData: incomingCall.callData, isVideo: true });
+     setIncomingCall(null);
   };
 
   return (
-    <div className="w-screen h-screen overflow-hidden flex flex-col items-center justify-center bg-gray-50">
+    <div className="w-full h-[100dvh] flex flex-col items-center justify-center bg-gray-50 overflow-hidden">
       {notification && <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[999] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-in fade-in slide-in-from-top-4">{notification}</div>}
       
       {!user ? (
         <AuthView onLogin={setUser} showNotification={showNotification} />
       ) : (
-        <div className="w-full max-w-md h-full bg-white shadow-2xl overflow-hidden relative border-x border-gray-200">
+        <div className="w-full max-w-md h-full bg-white shadow-2xl overflow-hidden relative border-x border-gray-200 flex flex-col">
           {activeCall ? (
             <VideoCallView user={user} chatId={activeCall.chatId} callData={activeCall.callData} isVideoEnabled={activeCall.isVideo} onEndCall={async () => { await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: deleteField() }); setActiveCall(null); }} />
           ) : incomingCall ? (
@@ -688,8 +701,13 @@ export default function App() {
               <div className="text-white text-2xl font-bold mb-8 flex flex-col items-center gap-4"><div className="w-32 h-32 bg-gray-700 rounded-full flex items-center justify-center animate-pulse"><Phone className="w-16 h-16"/></div>着信中...</div>
               <div className="flex gap-8">
                 <button onClick={async () => { await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", incomingCall.chatId), { callStatus: deleteField() }); setIncomingCall(null); }} className="p-6 bg-red-500 rounded-full shadow-lg text-white"><PhoneOff className="w-8 h-8"/></button>
-                <button onClick={() => { setActiveCall({ chatId: incomingCall.chatId, callData: incomingCall.callData, isVideo: true }); setIncomingCall(null); }} className="p-6 bg-green-500 rounded-full shadow-lg text-white animate-bounce"><Video className="w-8 h-8"/></button>
+                <button onClick={() => acceptCall(incomingCall.chatId)} className="p-6 bg-green-500 rounded-full shadow-lg text-white animate-bounce"><Video className="w-8 h-8"/></button>
               </div>
+            </div>
+          ) : outgoingCall ? (
+             <div className="fixed inset-0 z-[1000] bg-gray-900 flex flex-col items-center justify-center p-6 animate-in fade-in">
+              <div className="text-white text-2xl font-bold mb-8 flex flex-col items-center gap-4"><div className="w-32 h-32 bg-gray-700 rounded-full flex items-center justify-center animate-pulse"><Phone className="w-16 h-16"/></div>発信中...</div>
+              <button onClick={async () => { await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", outgoingCall.chatId), { callStatus: deleteField() }); setOutgoingCall(null); }} className="p-6 bg-red-500 rounded-full shadow-lg text-white"><PhoneOff className="w-8 h-8"/></button>
             </div>
           ) : (
             <>
