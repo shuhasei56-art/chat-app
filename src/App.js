@@ -61,12 +61,14 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// アプリID
 const appId = "voom-app-persistent-v1";
 
 const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
 const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
 
+// WebRTC STUN Servers
 const rtcConfig = {
   iceServers: [
     { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
@@ -1485,4 +1487,417 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           {messages.map(m => { const sender = allUsers.find(u => u.uid === m.senderId); return (<MessageItem key={m.id} m={m} user={user} sender={sender} isGroup={isGroup} db={db} appId={appId} chatId={activeChatId} addFriendById={addFriendById} onEdit={handleEditMessage} onDelete={handleDeleteMessage} onPreview={handlePreviewMedia} onReply={setReplyTo} onReaction={handleReaction} allUsers={allUsers} onStickerClick={onStickerClick} onShowProfile={setViewProfile} />); })}
           <div ref={scrollRef} className="h-2 w-full" />
         </div>
-        {previewMedia && (<div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center p-4" onClick={() => setPreviewMedia(null)}><button className="absolute top-6 right-6 text-white p-2 rounded-full bg-white/20"><X className="w
+        {previewMedia && (<div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center p-4" onClick={() => setPreviewMedia(null)}><button className="absolute top-6 right-6 text-white p-2 rounded-full bg-white/20"><X className="w-6 h-6"/></button>{previewMedia.type === 'video' ? <video src={previewMedia.src} controls autoPlay className="max-w-full max-h-[85vh] rounded shadow-2xl" onClick={e=>e.stopPropagation()}/> : <img src={previewMedia.src} className="max-w-full max-h-[85vh] object-contain rounded shadow-2xl" onClick={e=>e.stopPropagation()}/>}</div>)}
+        {editingMsgId && (<div className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-2xl p-4"><h3 className="font-bold mb-2">メッセージを編集</h3><textarea className="w-full bg-gray-50 p-2 rounded-xl mb-4 border focus:outline-none" value={editingText} onChange={e => setEditingText(e.target.value)} rows={3}/><div className="flex gap-2"><button onClick={() => setEditingMsgId(null)} className="flex-1 py-2 bg-gray-100 rounded-xl font-bold text-gray-600">キャンセル</button><button onClick={submitEditMessage} className="flex-1 py-2 bg-green-500 rounded-xl font-bold text-white">更新</button></div></div></div>)}
+        {addMemberModalOpen && <GroupAddMemberModal onClose={() => setAddMemberModalOpen(false)} currentMembers={chatData?.participants || []} chatId={activeChatId} allUsers={allUsers} profile={profile} user={user} showNotification={showNotification} />}
+        {groupEditModalOpen && <GroupEditModal onClose={() => setGroupEditModalOpen(false)} chatId={activeChatId} currentName={chatData.name} currentIcon={chatData.icon} currentMembers={chatData.participants} allUsers={allUsers} showNotification={showNotification} user={user} profile={profile} />}
+        {leaveModalOpen && <LeaveGroupConfirmModal onClose={() => setLeaveModalOpen(false)} onLeave={handleLeaveGroup} />}
+        {cardModalOpen && <BirthdayCardModal onClose={() => setCardModalOpen(false)} onSend={sendBirthdayCard} toName={title} />}
+        {contactModalOpen && <ContactSelectModal onClose={() => setContactModalOpen(false)} onSend={(c) => sendMessage("", "contact", { contactId: c.uid, contactName: c.name, contactAvatar: c.avatar })} friends={allUsers.filter(u => (profile?.friends || []).includes(u.uid))}/>}
+        {buyStickerModalPackId && <StickerBuyModal onClose={() => setBuyStickerModalPackId(null)} packId={buyStickerModalPackId} onGoToStore={(id) => { setView('sticker-store'); setBuyStickerModalPackId(null); }} />}
+        
+        {plusMenuOpen && (<div className="absolute bottom-16 left-4 right-4 bg-white rounded-3xl p-4 shadow-2xl grid grid-cols-4 gap-4 animate-in slide-in-from-bottom-4 z-20"><label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-green-50 rounded-2xl"><ImageIcon className="w-6 h-6 text-green-500" /></div><span className="text-[10px] font-bold">画像</span><input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label><label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-blue-50 rounded-2xl"><Play className="w-6 h-6 text-blue-500" /></div><span className="text-[10px] font-bold">動画</span><input type="file" className="hidden" accept="video/*" onChange={(e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label><label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-gray-100 rounded-2xl"><Paperclip className="w-6 h-6 text-gray-600" /></div><span className="text-[10px] font-bold">ファイル</span><input type="file" className="hidden" onChange={(e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label><div className="flex flex-col items-center gap-2 cursor-pointer" onClick={() => setContactModalOpen(true)}><div className="p-3 bg-yellow-50 rounded-2xl"><Contact className="w-6 h-6 text-yellow-500" /></div><span className="text-[10px] font-bold">連絡先</span></div><div className="flex flex-col items-center gap-2 cursor-pointer" onClick={() => setCardModalOpen(true)}><div className="p-3 bg-pink-50 rounded-2xl"><Gift className="w-6 h-6 text-pink-500" /></div><span className="text-[10px] font-bold">カード</span></div></div>)}
+        
+        <div className="p-3 bg-white border-t flex flex-col gap-2 relative z-10">
+          {stickerMenuOpen && myStickerPacks.length > 0 && (
+            <div className="absolute bottom-full left-0 right-0 bg-gray-50 border-t h-72 flex flex-col shadow-2xl rounded-t-3xl overflow-hidden animate-in slide-in-from-bottom-2 z-20">
+                <div className="flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-4 content-start">
+                     {myStickerPacks.find(p => p.id === selectedPackId)?.stickers.map((s, i) => (
+                         <div key={i} className="relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm" onClick={() => sendMessage(s, 'sticker', { packId: selectedPackId })}>
+                            <img src={typeof s === 'string' ? s : s.image} className="w-full aspect-square object-contain" />
+                            {(typeof s !== 'string' && s.audio) && <div className="absolute bottom-0 right-0 bg-black/20 text-white rounded-full p-1"><Volume2 className="w-3 h-3"/></div>}
+                         </div>
+                     ))}
+                </div>
+                <div className="bg-white border-t flex overflow-x-auto p-2 gap-2 scrollbar-hide shrink-0">
+                    {myStickerPacks.map(pack => (
+                        <div key={pack.id} onClick={() => setSelectedPackId(pack.id)} className={`flex-shrink-0 cursor-pointer p-2 rounded-xl transition-colors ${selectedPackId === pack.id ? 'bg-gray-200' : 'hover:bg-gray-100'}`}>
+                             <img src={typeof pack.stickers[0] === 'string' ? pack.stickers[0] : pack.stickers[0].image} className="w-8 h-8 object-contain" />
+                        </div>
+                    ))}
+                </div>
+            </div>
+          )}
+
+          {replyTo && (
+            <div className="flex items-center justify-between bg-gray-100 p-2 rounded-xl text-xs mb-1 border-l-4 border-green-500">
+              <div className="flex flex-col max-w-[90%]">
+                <span className="font-bold text-green-600 mb-0.5">{allUsers.find(u => u.uid === replyTo.senderId)?.name || 'Unknown'} への返信</span>
+                <div className="truncate text-gray-600 flex items-center gap-1">
+                  {replyTo.type === 'image' && <ImageIcon className="w-3 h-3" />}
+                  {replyTo.type === 'video' && <Video className="w-3 h-3" />}
+                  {['image', 'video'].includes(replyTo.type) 
+                    ? (replyTo.type === 'image' ? '[画像]' : '[動画]') 
+                    : (replyTo.content || '[メッセージ]')}
+                </div>
+              </div>
+              <button onClick={() => setReplyTo(null)} className="p-1 hover:bg-gray-200 rounded-full"><X className="w-4 h-4 text-gray-500"/></button>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <button onClick={() => setPlusMenuOpen(!plusMenuOpen)} className={`p-2 rounded-full ${plusMenuOpen ? 'bg-gray-100 rotate-45' : ''}`}><Plus className="w-5 h-5 text-gray-400" /></button>
+            <div className="flex-1 flex gap-2 relative">
+               {!isRecording ? (<div className="flex-1 flex gap-2"><input className="flex-1 bg-gray-100 rounded-2xl px-4 py-2 text-sm focus:outline-none" placeholder="メッセージを入力" value={text} onChange={e => setText(e.target.value)} onKeyPress={e => e.key === 'Enter' && sendMessage(text)} /><button onClick={() => setStickerMenuOpen(!stickerMenuOpen)} className={`p-2 rounded-full hover:bg-gray-100 ${stickerMenuOpen ? 'text-green-500 bg-green-50' : 'text-gray-400'}`}><Smile className="w-5 h-5"/></button></div>) : (<div className="flex-1 bg-red-50 rounded-2xl px-4 py-2 flex items-center justify-between animate-pulse"><div className="flex items-center gap-2 text-red-500 font-bold text-xs"><div className="w-2 h-2 rounded-full bg-red-500 animate-ping"></div>録音中... {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}</div></div>)}
+               {!text && !isUploading && (<>{!isRecording ? (<button onClick={startRecording} className="p-2 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200"><Mic className="w-5 h-5" /></button>) : (<div className="flex gap-2"><button onClick={cancelRecording} className="p-2 rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300" title="キャンセル"><Trash2 className="w-5 h-5" /></button><button onClick={stopRecording} className="p-2 rounded-full bg-red-500 text-white hover:bg-red-600 animate-bounce" title="停止して送信"><StopCircle className="w-5 h-5 fill-current" /></button></div>)}</>)}
+            </div>
+            {(text || isUploading) && <button onClick={() => sendMessage(text)} disabled={!text && !isUploading} className={`p-2 rounded-full ${text ? 'text-green-500' : 'text-gray-300'}`}>{isUploading ? <div className="relative"><Loader2 className="w-6 h-6 animate-spin text-green-500" />{uploadProgress > 0 && <div className="absolute top-full left-1/2 -translate-x-1/2 text-[8px] font-bold mt-1">{uploadProgress}%</div>}</div> : <Send className="w-6 h-6" />}</button>}
+          </div>
+        </div>
+        {viewProfile && <FriendProfileModal friend={viewProfile} onClose={() => setViewProfile(null)} onStartChat={(uid) => { setViewProfile(null); }} onTransfer={() => { setCoinModalTarget(viewProfile); setViewProfile(null); }} />}
+        {coinModalTarget && <CoinTransferModal onClose={() => setCoinModalTarget(null)} myWallet={profile.wallet} myUid={user.uid} targetUid={coinModalTarget.uid} targetName={coinModalTarget.name} showNotification={showNotification} />}
+      </div>
+    );
+};
+
+const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard }) => {
+    const [edit, setEdit] = useState(profile || {});
+    useEffect(() => { if (profile) setEdit(prev => (!prev || Object.keys(prev).length === 0) ? { ...profile } : { ...profile, name: prev.name, id: prev.id, status: prev.status, birthday: prev.birthday, avatar: prev.avatar, cover: prev.cover }); }, [profile]);
+    const handleSave = () => { updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), edit); showNotification("保存しました ✅"); };
+    return (
+      <div className="flex flex-col h-full bg-white">
+        <div className="p-4 border-b flex items-center gap-4 sticky top-0 bg-white shrink-0"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><span className="font-bold">設定</span></div>
+        <div className="flex-1 overflow-y-auto pb-8">
+          <div className="w-full h-48 relative bg-gray-200"><img src={edit.cover} className="w-full h-full object-cover" /><label className="absolute inset-0 flex items-center justify-center bg-black/20 text-white font-bold cursor-pointer opacity-0 hover:opacity-100 transition-opacity">背景変更<input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, d => setEdit({...edit, cover: d}))} /></label></div>
+          <div className="px-8 -mt-12 flex flex-col items-center gap-6">
+            <div className="relative"><img src={edit.avatar} className="w-24 h-24 rounded-3xl border-4 border-white object-cover" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, d => setEdit({...edit, avatar: d}))} /></label></div>
+            <div className="w-full space-y-4">
+              <div><label className="text-xs font-bold text-gray-400">名前</label><input className="w-full border-b py-2 outline-none" value={edit.name || ''} onChange={e => setEdit({...edit, name: e.target.value})} /></div>
+              <div><label className="text-xs font-bold text-gray-400">ID</label><div className="flex items-center gap-2 border-b py-2"><span className="flex-1 font-mono text-gray-600">{edit.id}</span><button onClick={() => copyToClipboard(edit.id)} className="p-1 hover:bg-gray-100 rounded-full"><Copy className="w-4 h-4 text-gray-500" /></button></div></div>
+              <div><label className="text-xs font-bold text-gray-400">誕生日</label><input type="date" className="w-full border-b py-2 outline-none bg-transparent" value={edit.birthday || ''} onChange={e => setEdit({...edit, birthday: e.target.value})} /></div>
+              <div><label className="text-xs font-bold text-gray-400">ひとこと</label><input className="w-full border-b py-2 outline-none" value={edit.status || ''} onChange={e => setEdit({...edit, status: e.target.value})} /></div>
+              <button onClick={handleSave} className="w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg">保存</button>
+              <button onClick={() => signOut(auth)} className="w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4">ログアウト</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+};
+
+const QRScannerView = ({ user, setView, addFriendById }) => {
+    const videoRef = useRef(null);
+    const canvasRef = useRef(null);
+    const [scanning, setScanning] = useState(false);
+    
+    const startScanner = async () => { 
+        setScanning(true); 
+        try { 
+            const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }); 
+            if (videoRef.current) { 
+                videoRef.current.srcObject = mediaStream; 
+                videoRef.current.setAttribute("playsinline", true);
+                videoRef.current.play(); 
+                requestAnimationFrame(tick); 
+            } 
+        } catch (err) { 
+            setScanning(false); 
+        } 
+    };
+
+    useEffect(() => {
+        return () => {
+            if (videoRef.current && videoRef.current.srcObject) {
+                videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+            }
+        };
+    }, []);
+
+    const tick = () => { 
+        if (videoRef.current?.readyState === videoRef.current?.HAVE_ENOUGH_DATA) { 
+            const c = canvasRef.current;
+            const ctx = c.getContext("2d"); 
+            c.height = videoRef.current.videoHeight; 
+            c.width = videoRef.current.videoWidth; 
+            ctx.drawImage(videoRef.current, 0, 0, c.width, c.height); 
+            
+            if (window.jsQR) {
+                const code = window.jsQR(ctx.getImageData(0,0,c.width,c.height).data, c.width, c.height); 
+                if (code) { 
+                    if (videoRef.current.srcObject) {
+                        videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+                    }
+                    setScanning(false); 
+                    addFriendById(code.data); 
+                    return; 
+                } 
+            }
+        } 
+        requestAnimationFrame(tick); 
+    };
+
+    return (<div className="flex flex-col h-full bg-white"><div className="p-4 border-b flex items-center gap-4"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><span className="font-bold">QR</span></div><div className="flex-1 flex flex-col items-center justify-center p-8 gap-8">{scanning ? <div className="relative w-64 h-64 border-4 border-green-500 rounded-3xl overflow-hidden"><video ref={videoRef} className="w-full h-full object-cover" /><canvas ref={canvasRef} className="hidden" /></div> : <div className="bg-white p-6 rounded-[40px] shadow-xl border"><img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user?.uid}`} className="w-48 h-48" /></div>}<div className="grid grid-cols-2 gap-4 w-full"><button onClick={startScanner} className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border"><Maximize className="w-6 h-6 text-green-500" /><span>スキャン</span></button><label className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border cursor-pointer"><Upload className="w-6 h-6 text-blue-500" /><span>読込</span><input type="file" className="hidden" accept="image/*" onChange={e => { const r = new FileReader(); r.onload = (ev) => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'), ctx = c.getContext('2d'); c.width = img.width; c.height = img.height; ctx.drawImage(img,0,0); const code = window.jsQR(ctx.getImageData(0,0,c.width,c.height).data, c.width, c.height); if (code) addFriendById(code.data); }; img.src = ev.target.result; }; r.readAsDataURL(e.target.files[0]); }} /></label></div></div></div>);
+};
+
+const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }) => {
+    const [tab, setTab] = useState('chats');
+    const [selectedFriend, setSelectedFriend] = useState(null);
+    const [coinModalTarget, setCoinModalTarget] = useState(null);
+    const friendsList = useMemo(() => allUsers.filter(u => (profile?.friends || []).includes(u.uid)), [allUsers, profile]);
+    return (
+      <div className="flex flex-col h-full bg-white">
+        <div className="p-4 border-b flex justify-between items-center bg-white shrink-0"><h1 className="text-xl font-bold">ホーム</h1><div className="flex gap-4 items-center"><Store className="w-6 h-6 cursor-pointer text-orange-500" onClick={() => setView('sticker-store')} /><Gift className="w-6 h-6 cursor-pointer text-pink-500" onClick={() => setView('birthday-cards')} /><Users className="w-6 h-6 cursor-pointer" onClick={() => setView('group-create')} /><Search className="w-6 h-6 cursor-pointer" onClick={() => setSearchModalOpen(true)} /><UserPlus className="w-6 h-6 cursor-pointer" onClick={() => setView('qr')} /><Settings className="w-6 h-6 cursor-pointer" onClick={() => setView('profile')} /></div></div>
+        <div className="flex border-b"><button className={`flex-1 py-3 text-sm font-bold ${tab === 'friends' ? 'border-b-2 border-black' : 'text-gray-400'}`} onClick={() => setTab('friends')}>友だち</button><button className={`flex-1 py-3 text-sm font-bold ${tab === 'chats' ? 'border-b-2 border-black' : 'text-gray-400'}`} onClick={() => setTab('chats')}>トーク</button></div>
+        <div className="flex-1 overflow-y-auto scrollbar-hide">
+          <div className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer border-b" onClick={() => setView('profile')}><div className="relative"><img key={profile?.avatar} src={profile?.avatar} className="w-16 h-16 rounded-2xl object-cover border" />{isTodayBirthday(profile?.birthday) && <span className="absolute -top-1 -right-1 text-base">🎂</span>}</div><div className="flex-1"><div className="font-bold text-lg">{profile?.name}</div><div className="text-xs text-gray-400 font-mono">ID: {profile?.id}</div></div></div>
+          {tab === 'friends' && friendsList.map(friend => (<div key={friend.uid} className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedFriend(friend)}><div className="relative"><img key={friend.avatar} src={friend.avatar} className="w-12 h-12 rounded-xl object-cover border" />{isTodayBirthday(friend.birthday) && <span className="absolute -top-1 -right-1 text-xs">🎂</span>}</div><div className="flex-1"><div className="font-bold text-sm">{friend.name}</div><div className="text-xs text-gray-400 truncate">{friend.status}</div></div></div>))}
+          {tab === 'chats' && chats.sort((a,b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)).map(chat => {
+            let name = chat.name, icon = chat.icon, partnerData = null; if (!chat.isGroup) { partnerData = allUsers.find(u => u.uid === chat.participants.find(p => p !== user.uid)); if (partnerData) { name = partnerData.name; icon = partnerData.avatar; } }
+            return (<div key={chat.id} className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer" onClick={() => { setActiveChatId(chat.id); setView('chatroom'); }}><div className="relative"><img key={icon} src={icon} className="w-12 h-12 rounded-xl object-cover border" />{!chat.isGroup && partnerData && isTodayBirthday(partnerData.birthday) && <span className="absolute -top-1 -right-1 text-xs">🎂</span>}</div><div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{name} {chat.isGroup ? `(${chat.participants.length})` : ''}</div><div className="text-xs text-gray-400 truncate">{chat.lastMessage?.content}</div></div><div className="text-[10px] text-gray-300 self-start mt-1">{formatTime(chat.updatedAt)}</div></div>);
+          })}
+        </div>
+        {selectedFriend && <FriendProfileModal friend={selectedFriend} onClose={() => setSelectedFriend(null)} onStartChat={startChatWithUser} onTransfer={() => { setCoinModalTarget(selectedFriend); setSelectedFriend(null); }} />}
+        {coinModalTarget && <CoinTransferModal onClose={() => setCoinModalTarget(null)} myWallet={profile.wallet} myUid={user.uid} targetUid={coinModalTarget.uid} targetName={coinModalTarget.name} showNotification={showNotification} />}
+      </div>
+    );
+};
+
+const VoomView = ({ user, allUsers, profile, posts, showNotification, db, appId }) => { 
+    const [content, setContent] = useState(''), [media, setMedia] = useState(null), [mediaType, setMediaType] = useState('image'), [isUploading, setIsUploading] = useState(false);
+    const postMessage = async () => { 
+        if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
+        if ((!content && !media) || isUploading) return; 
+        setIsUploading(true); 
+        try { 
+            let hasChunks = false, chunkCount = 0, storedMedia = media; 
+            if (media && media.length > CHUNK_SIZE) { hasChunks = true; chunkCount = Math.ceil(media.length / CHUNK_SIZE); storedMedia = null; } 
+            const newPostRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'posts')); 
+            
+            if (hasChunks) { 
+                const CONCURRENCY = 100;
+                const executing = new Set();
+                for (let i = 0; i < chunkCount; i++) { 
+                    const start = i * CHUNK_SIZE; const end = Math.min(start + CHUNK_SIZE, media.length); const chunkData = media.slice(start, end); 
+                    const p = setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'posts', newPostRef.id, 'chunks', `${i}`), { data: chunkData, index: i }); 
+                    const pWrapper = p.then(() => executing.delete(pWrapper));
+                    executing.add(pWrapper);
+                    if (executing.size >= CONCURRENCY) { await Promise.race(executing); }
+                } 
+                await Promise.all(executing);
+            }
+            
+            let mimeType = null; if (media && media.startsWith('data:')) { mimeType = media.split(';')[0].split(':')[1]; }
+            await setDoc(newPostRef, { userId: user.uid, content, media: storedMedia, mediaType, mimeType, hasChunks, chunkCount, likes: [], comments: [], createdAt: serverTimestamp() }); 
+            setContent(''); setMedia(null); showNotification("投稿しました"); 
+        } finally { setIsUploading(false); } 
+    };
+    const handleVoomFileUpload = (e) => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev) => { setMedia(ev.target.result); setMediaType(file.type.startsWith('video') ? 'video' : 'image'); }; reader.readAsDataURL(file); };
+    return (<div className="flex flex-col h-full bg-gray-50"><div className="bg-white p-4 border-b shrink-0"><h1 className="text-xl font-bold">VOOM</h1></div><div className="flex-1 overflow-y-auto scrollbar-hide pb-20"><div className="bg-white p-4 mb-2"><textarea className="w-full text-sm outline-none resize-none min-h-[60px]" placeholder="何をしていますか？" value={content} onChange={e => setContent(e.target.value)} />{media && <div className="relative mt-2">{mediaType === 'video' ? <video src={media} className="w-full rounded-xl bg-black" controls /> : <img src={media} className="max-h-60 rounded-xl" />}<button onClick={() => setMedia(null)} className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1"><X className="w-3 h-3"/></button></div>}<div className="flex justify-between items-center pt-2 border-t mt-2"><label className="cursor-pointer p-2 flex items-center gap-2"><ImageIcon className="w-5 h-5 text-gray-400" /><input type="file" className="hidden" accept="image/*,video/*" onChange={handleVoomFileUpload} /></label><button onClick={postMessage} disabled={isUploading} className={`text-xs font-bold px-4 py-2 rounded-full ${content || media ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-400'}`}>投稿</button></div></div>{posts.map(p => <PostItem key={p.id} post={p} user={user} allUsers={allUsers} db={db} appId={appId} profile={profile} />)}</div></div>);
+};
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [view, setView] = useState('auth'); 
+  const [activeChatId, setActiveChatId] = useState(null);
+  const [allUsers, setAllUsers] = useState([]);
+  const [chats, setChats] = useState([]);
+  const [posts, setPosts] = useState([]);
+  const [notification, setNotification] = useState(null);
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [mutedChats, setMutedChats] = useState(() => {
+    const saved = localStorage.getItem('mutedChats');
+    return saved ? JSON.parse(saved) : [];
+  });
+  
+  const [activeCall, setActiveCall] = useState(null);
+
+  const toggleMuteChat = (chatId) => {
+    setMutedChats(prev => {
+      const next = prev.includes(chatId) ? prev.filter(id => id !== chatId) : [...prev, chatId];
+      localStorage.setItem('mutedChats', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = JSQR_URL;
+    document.head.appendChild(script);
+    
+    // 404エラー回避のためのダミーファビコン
+    const link = document.createElement('link');
+    link.rel = 'icon';
+    link.href = 'data:image/x-icon;base64,';
+    document.head.appendChild(link);
+    
+    setPersistence(auth, browserLocalPersistence);
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      if (u) {
+        setUser(u);
+        const docSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid));
+        if (docSnap.exists()) {
+             setProfile(docSnap.data());
+        } else {
+            const initialProfile = {
+              uid: u.uid, name: u.displayName || `User_${u.uid.slice(0,4)}`, id: `user_${u.uid.slice(0,6)}`,
+              status: "よろしくお願いします！", birthday: "", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
+              cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80", friends: [], wallet: 1000, isBanned: false
+            };
+            await setDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid), initialProfile);
+            setProfile(initialProfile);
+        }
+        setView('home');
+      } else {
+        setUser(null);
+        setProfile(null);
+        setView('auth');
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const showNotification = (msg) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  const copyToClipboard = (text) => {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
+    showNotification("IDをコピーしました");
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), (doc) => {
+      if (doc.exists()) setProfile(doc.data());
+    });
+    const unsubUsers = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'users')), (snap) => {
+      setAllUsers(snap.docs.map(d => d.data()));
+    });
+    const unsubChats = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'chats'), where('participants', 'array-contains', user.uid)), (snap) => {
+      const chatList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setChats(chatList);
+      
+      const incoming = chatList.find(c => c.callStatus?.status === 'ringing' && c.callStatus.callerId !== user.uid);
+      if (incoming) {
+          if (!activeCall || activeCall.chatId !== incoming.id) {
+             setActiveCall({ chatId: incoming.id, callData: incoming.callStatus, isIncoming: true, isVideo: true }); 
+          }
+      } else {
+          if (activeCall && activeCall.isIncoming) {
+              const callStillExists = chatList.find(c => c.id === activeCall.chatId && c.callStatus?.status === 'ringing');
+              if (!callStillExists) setActiveCall(null);
+          }
+      }
+    });
+    const unsubPosts = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'posts'), orderBy('createdAt', 'desc'), limit(50)), (snap) => {
+      setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => {
+      unsubProfile(); unsubUsers(); unsubChats(); unsubPosts();
+    };
+  }, [user, activeCall]);
+
+  const addFriendById = async (targetId) => {
+    if (!targetId) return;
+    const targetUser = allUsers.find(u => u.id === targetId || u.uid === targetId);
+    if (targetUser && targetUser.uid !== user.uid) {
+      if ((profile.friends || []).includes(targetUser.uid)) {
+        showNotification("既に友だちです。");
+        return;
+      }
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { friends: arrayUnion(targetUser.uid) });
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', targetUser.uid), { friends: arrayUnion(user.uid) });
+      showNotification(`${targetUser.name}を追加しました`);
+      setSearchModalOpen(false);
+    } else {
+      showNotification("ユーザーが見つかりません");
+    }
+  };
+
+  const startChatWithUser = async (targetUid) => {
+    const existingChat = chats.find(c => 
+      !c.isGroup && c.participants.includes(targetUid) && c.participants.includes(user.uid)
+    );
+    if (existingChat) {
+      setActiveChatId(existingChat.id);
+      setView('chatroom');
+    } else {
+      const targetUser = allUsers.find(u => u.uid === targetUid);
+      const newChat = {
+        name: targetUser ? targetUser.name : "Chat", icon: targetUser ? targetUser.avatar : "",
+        participants: [user.uid, targetUid], isGroup: false, createdBy: user.uid, updatedAt: serverTimestamp(),
+        lastMessage: { content: "チャットを開始しました", senderId: user.uid }
+      };
+      try {
+        const ref = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats'), newChat);
+        setActiveChatId(ref.id);
+        setView('chatroom');
+      } catch (e) {
+        showNotification("エラーが発生しました");
+      }
+    }
+  };
+
+  const startVideoCall = async (chatId, isVideo = true) => {
+    try {
+        await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { 
+            "callStatus.status": "ringing", 
+            "callStatus.callerId": user.uid, 
+            "callStatus.timestamp": Date.now() 
+        });
+        setActiveCall({ chatId, callData: { callerId: user.uid }, isVideo });
+    } catch(e) {
+        showNotification("発信に失敗しました");
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto h-screen border-x bg-white flex flex-col relative overflow-hidden shadow-2xl">
+      {notification && <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce">{notification}</div>}
+      
+      {!user ? (
+          <AuthView onLogin={setUser} showNotification={showNotification} />
+      ) : (
+          <>
+            {activeCall ? (
+                activeCall.isIncoming ? (
+                    <IncomingCallOverlay 
+                        callData={activeCall.callData} 
+                        allUsers={allUsers} 
+                        onDecline={async () => { await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: deleteField() }); setActiveCall(null); }} 
+                        onAccept={() => setActiveCall({ ...activeCall, isIncoming: false })} 
+                    />
+                ) : (
+                    <VideoCallView 
+                        user={user} 
+                        chatId={activeCall.chatId} 
+                        callData={activeCall.callData} 
+                        isVideoEnabled={activeCall.isVideo} 
+                        onEndCall={async () => { await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: deleteField() }); setActiveCall(null); }} 
+                    />
+                )
+            ) : (
+                <div className="flex-1 overflow-hidden relative">
+                    {view === 'home' && <HomeView user={user} profile={profile} allUsers={allUsers} chats={chats} setView={setView} setActiveChatId={setActiveChatId} setSearchModalOpen={setSearchModalOpen} startChatWithUser={startChatWithUser} showNotification={showNotification} />}
+                    {view === 'voom' && <VoomView user={user} allUsers={allUsers} profile={profile} posts={posts} showNotification={showNotification} db={db} appId={appId} />}
+                    {view === 'chatroom' && <ChatRoomView user={user} profile={profile} allUsers={allUsers} chats={chats} activeChatId={activeChatId} setActiveChatId={setActiveChatId} setView={setView} db={db} appId={appId} mutedChats={mutedChats} toggleMuteChat={toggleMuteChat} showNotification={showNotification} addFriendById={addFriendById} startVideoCall={startVideoCall} />}
+                    {view === 'profile' && <ProfileEditView user={user} profile={profile} setView={setView} showNotification={showNotification} copyToClipboard={copyToClipboard} />}
+                    {view === 'qr' && <QRScannerView user={user} setView={setView} addFriendById={addFriendById} />}
+                    {view === 'group-create' && <GroupCreateView user={user} profile={profile} allUsers={allUsers} setView={setView} showNotification={showNotification} />}
+                    {view === 'birthday-cards' && <BirthdayCardBox user={user} setView={setView} />}
+                    {view === 'sticker-create' && <StickerEditor user={user} profile={profile} onClose={() => setView('sticker-store')} showNotification={showNotification} />}
+                    {view === 'sticker-store' && <StickerStoreView user={user} setView={setView} showNotification={showNotification} profile={profile} allUsers={allUsers} />}
+                </div>
+            )}
+            
+            {searchModalOpen && <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/60"><div className="bg-white w-full max-w-sm rounded-[32px] p-8"><h2 className="text-xl font-bold mb-6">検索</h2><input className="w-full bg-gray-50 rounded-2xl py-4 px-6 mb-6 outline-none" placeholder="IDを入力" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /><div className="flex gap-4"><button className="flex-1 py-4 text-gray-600 font-bold" onClick={() => setSearchModalOpen(false)}>閉じる</button><button className="flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold" onClick={() => addFriendById(searchQuery)}>追加</button></div></div></div>}
+            
+            {user && !activeCall && ['home', 'voom'].includes(view) && (
+                <div className="h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0">
+                    <div className={`flex flex-col items-center gap-1 cursor-pointer transition-all ${view === 'home' ? 'text-green-500' : 'text-gray-400'}`} onClick={() => setView('home')}><Home className="w-6 h-6" /><span className="text-[10px] font-bold">ホーム</span></div>
+                    <div className={`flex flex-col items-center gap-1 cursor-pointer transition-all ${view === 'voom' ? 'text-green-500' : 'text-gray-400'}`} onClick={() => setView('voom')}><LayoutGrid className="w-6 h-6" /><span className="text-[10px] font-bold">VOOM</span></div>
+                </div>
+            )}
+          </>
+      )}
+      <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
+    </div>
+  );
+}
