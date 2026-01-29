@@ -284,7 +284,23 @@ const AuthView = ({ onLogin, showNotification }) => {
         });
         showNotification("アカウント作成完了");
       }
-    } catch (e) { showNotification("エラー: " + e.message); } finally { setLoading(false); }
+    } catch (e) { 
+        console.error("Auth Error:", e.code, e.message);
+        let msg = "エラーが発生しました";
+        // 日本語エラーメッセージへの変換 (400エラー対策)
+        if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials') {
+            msg = "ユーザーが見つかりません。IDを確認するか、新規登録してください。";
+        } else if (e.code === 'auth/wrong-password') {
+            msg = "パスワードが間違っています。";
+        } else if (e.code === 'auth/email-already-in-use') {
+            msg = "このIDは既に使用されています。";
+        } else if (e.code === 'auth/invalid-email') {
+            msg = "IDの形式が正しくありません。";
+        } else if (e.code === 'auth/operation-not-allowed') {
+            msg = "このログイン方法は現在無効です (Firebase設定を確認してください)";
+        }
+        showNotification(msg); 
+    } finally { setLoading(false); }
   };
 
   return (
@@ -1579,6 +1595,9 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
     const canvasRef = useRef(null);
     const [scanning, setScanning] = useState(false);
     
+    // ERROR FIX: Removed `s` variable usage that caused ReferenceError.
+    // Logic updated to use videoRef directly for stream access.
+    
     const startScanner = async () => { 
         setScanning(true); 
         try { 
@@ -1687,7 +1706,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db, appId 
 export default function App() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [view, setView] = useState('auth'); 
+  const [view, setView] = useState('auth'); // Auto-login removed
   const [activeChatId, setActiveChatId] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
   const [chats, setChats] = useState([]);
@@ -1700,6 +1719,7 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
   
+  // Call State
   const [activeCall, setActiveCall] = useState(null);
 
   const toggleMuteChat = (chatId) => {
@@ -1715,12 +1735,13 @@ export default function App() {
     script.src = JSQR_URL;
     document.head.appendChild(script);
     
-    // 404エラー回避のためのダミーファビコン
+    // Add dummy favicon to prevent 404 error
     const link = document.createElement('link');
     link.rel = 'icon';
     link.href = 'data:image/x-icon;base64,';
     document.head.appendChild(link);
     
+    // Auth Initialization - REMOVED AUTOMATIC LOGIN
     setPersistence(auth, browserLocalPersistence);
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (u) {
@@ -1774,12 +1795,14 @@ export default function App() {
       const chatList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setChats(chatList);
       
+      // Incoming Call Logic
       const incoming = chatList.find(c => c.callStatus?.status === 'ringing' && c.callStatus.callerId !== user.uid);
       if (incoming) {
           if (!activeCall || activeCall.chatId !== incoming.id) {
-             setActiveCall({ chatId: incoming.id, callData: incoming.callStatus, isIncoming: true, isVideo: true }); 
+             setActiveCall({ chatId: incoming.id, callData: incoming.callStatus, isIncoming: true, isVideo: true }); // Default to video true for incoming
           }
       } else {
+          // Auto close call screen if call status is removed (ended by other)
           if (activeCall && activeCall.isIncoming) {
               const callStillExists = chatList.find(c => c.id === activeCall.chatId && c.callStatus?.status === 'ringing');
               if (!callStillExists) setActiveCall(null);
@@ -1856,6 +1879,7 @@ export default function App() {
           <AuthView onLogin={setUser} showNotification={showNotification} />
       ) : (
           <>
+            {/* Active Call View Overlay */}
             {activeCall ? (
                 activeCall.isIncoming ? (
                     <IncomingCallOverlay 
@@ -1887,8 +1911,10 @@ export default function App() {
                 </div>
             )}
             
+            {/* Overlay Modals (Global) */}
             {searchModalOpen && <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/60"><div className="bg-white w-full max-w-sm rounded-[32px] p-8"><h2 className="text-xl font-bold mb-6">検索</h2><input className="w-full bg-gray-50 rounded-2xl py-4 px-6 mb-6 outline-none" placeholder="IDを入力" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /><div className="flex gap-4"><button className="flex-1 py-4 text-gray-600 font-bold" onClick={() => setSearchModalOpen(false)}>閉じる</button><button className="flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold" onClick={() => addFriendById(searchQuery)}>追加</button></div></div></div>}
             
+            {/* Bottom Navigation */}
             {user && !activeCall && ['home', 'voom'].includes(view) && (
                 <div className="h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0">
                     <div className={`flex flex-col items-center gap-1 cursor-pointer transition-all ${view === 'home' ? 'text-green-500' : 'text-gray-400'}`} onClick={() => setView('home')}><Home className="w-6 h-6" /><span className="text-[10px] font-bold">ホーム</span></div>
