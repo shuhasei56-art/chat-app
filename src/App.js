@@ -1,25 +1,27 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { 
-  initializeApp 
-} from 'firebase/app';
-import { 
-  getAuth, 
-  signInAnonymously, 
-  signInWithCustomToken, 
+import { initializeApp } from 'firebase/app';
+import {
+  getAuth,
+  signInAnonymously,
   onAuthStateChanged,
   setPersistence,
-  browserLocalPersistence
+  browserLocalPersistence,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  GoogleAuthProvider,
+  signInWithRedirect
 } from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  doc, 
-  setDoc, 
-  getDoc, 
-  updateDoc, 
-  onSnapshot, 
-  query, 
-  addDoc, 
+import {
+  getFirestore,
+  collection,
+  doc,
+  setDoc,
+  getDoc,
+  updateDoc,
+  onSnapshot,
+  query,
+  addDoc,
   deleteDoc,
   where,
   arrayUnion,
@@ -34,85 +36,44 @@ import {
   increment,
   runTransaction
 } from 'firebase/firestore';
-import { 
-  Search, 
-  UserPlus, 
-  Image as ImageIcon, 
-  Send, 
-  X, 
-  ChevronLeft, 
-  Settings, 
-  Home, 
-  LayoutGrid, 
-  Trash2,
-  Plus, 
-  Video,
-  Heart,
-  MessageCircle,
-  Camera as CameraIcon,
-  Maximize,
-  Upload,
-  Copy,
-  Contact,
-  Play,
-  Gift,
-  Cake,
-  Users,
-  Check,
-  Loader2,
-  Bell,
-  BellOff,
-  Mic,
-  Square,
-  Ban,
-  Edit2,
-  Palette,
-  PhoneOff,
-  LogOut,
-  RefreshCcw,
-  ArrowUpCircle,
-  Reply,
-  Smile,
-  StopCircle,
-  PhoneCall,
-  Phone,
-  FileText,
-  Paperclip,
-  Download,
-  UserMinus,
-  AtSign,
-  Store,
-  PenTool,
-  Eraser,
-  Type,
-  CheckCircle,
-  XCircle,
-  Lock,
-  ShoppingBag,
-  Coins,
-  Scissors,
-  Star,
-  Disc,
-  ShieldAlert,
-  Music,
-  Volume2,
-  ShoppingCart
+import {
+  Search, UserPlus, Image as ImageIcon, Send, X, ChevronLeft, Settings, Home, LayoutGrid, Trash2,
+  Plus, Video, Heart, MessageCircle, Camera as CameraIcon, Maximize, Upload, Copy, Contact, Play,
+  Gift, Cake, Users, Check, Loader2, Bell, BellOff, Mic, Square, Ban, Edit2, Palette, PhoneOff,
+  LogOut, RefreshCcw, ArrowUpCircle, Reply, Smile, StopCircle, PhoneCall, Phone, FileText,
+  Paperclip, Download, UserMinus, AtSign, Store, PenTool, Eraser, Type, CheckCircle, XCircle,
+  Lock, ShoppingBag, Coins, Scissors, Star, Disc, ShieldAlert, Music, Volume2, ShoppingCart,
+  User, KeyRound, MicOff, VideoOff, Aperture, PhoneIncoming
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
-const firebaseConfig = JSON.parse(__firebase_config);
+const firebaseConfig = {
+  apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
+  authDomain: "chat-app-c17bf.firebaseapp.com",
+  databaseURL: "https://chat-app-c17bf-default-rtdb.firebaseio.com",
+  projectId: "chat-app-c17bf",
+  storageBucket: "chat-app-c17bf.firebasestorage.app",
+  messagingSenderId: "1063497801308",
+  appId: "1:1063497801308:web:8040959804832a690a1099"
+};
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// データを維持するためにIDを固定 (このIDを変更するとデータがリセットされます)
-// 現在のID: 'messenger-app-v9' を維持しています
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'messenger-app-v9';
+// アプリID
+const appId = "voom-app-persistent-v1";
 
 const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
-
 const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
+
+// WebRTC STUN Servers
+const rtcConfig = {
+  iceServers: [
+    { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
+  ],
+};
 
 // --- Utility Functions ---
 const formatTime = (timestamp) => {
@@ -140,6 +101,7 @@ const isTodayBirthday = (birthdayString) => {
   return (today.getMonth() + 1) === m && today.getDate() === d;
 };
 
+// 画像圧縮等のユーティリティ
 const processFileBeforeUpload = (file) => {
   return new Promise((resolve) => {
     if (!file || !file.type.startsWith('image') || file.type === 'image/gif') {
@@ -282,7 +244,275 @@ const generateThumbnail = (file) => {
   });
 };
 
-// --- Modals & Sub-components ---
+// --- Auth Component ---
+const AuthView = ({ onLogin, showNotification }) => {
+  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [userId, setUserId] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleGoogleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try { setLoading(true); await signInWithRedirect(auth, provider); }
+    catch (e) { console.error(e); showNotification("Googleログイン失敗"); setLoading(false); }
+  };
+
+  const handleGuestLogin = async () => {
+    setLoading(true);
+    try { await signInAnonymously(auth); showNotification("ゲストログインしました"); }
+    catch (e) { showNotification("ゲストログイン失敗"); } finally { setLoading(false); }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!userId || !password) return showNotification("IDとパスワードを入力してください");
+    const email = `${userId}@voom-persistent.app`;
+    setLoading(true);
+    try {
+      if (isLoginMode) {
+        await signInWithEmailAndPassword(auth, email, password);
+        showNotification("ログインしました");
+      } else {
+        if (!displayName) { showNotification("ニックネームを入力してください"); setLoading(false); return; }
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        await setDoc(doc(db, "artifacts", appId, "public", "data", "users", cred.user.uid), {
+          uid: cred.user.uid, name: displayName || userId, id: userId, status: "よろしくお願いします！",
+          birthday: "", avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cred.user.uid}`,
+          cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
+          friends: [], wallet: 1000, isBanned: false,
+        });
+        showNotification("アカウント作成完了");
+      }
+    } catch (e) { 
+        let msg = "エラーが発生しました";
+        if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials') msg = "ユーザーが見つかりません。IDを確認するか、新規登録してください。";
+        else if (e.code === 'auth/wrong-password') msg = "パスワードが間違っています。";
+        else if (e.code === 'auth/email-already-in-use') msg = "このIDは既に使用されています。";
+        showNotification(msg); 
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50 p-4">
+      <div className="bg-white w-full max-w-sm rounded-[40px] shadow-2xl p-8 border border-white/50 backdrop-blur-sm">
+        <div className="text-center mb-8">
+          <div className="w-20 h-20 bg-indigo-500 rounded-3xl mx-auto flex items-center justify-center mb-4 shadow-lg"><MessageCircle className="w-10 h-10 text-white" /></div>
+          <h1 className="text-2xl font-black text-gray-800">チャットアプリ</h1>
+          <p className="text-sm text-gray-500 mt-2">{isLoginMode ? "ログインして始めましょう" : "アカウントを作成してデータを保存"}</p>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {!isLoginMode && (
+            <div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">表示名</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><User className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" placeholder="山田 太郎" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div></div>
+          )}
+          <div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">ユーザーID</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><AtSign className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" placeholder="user_id" value={userId} onChange={(e) => setUserId(e.target.value)} /></div></div>
+          <div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">パスワード</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><KeyRound className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} /></div></div>
+          <button type="submit" disabled={loading} className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl flex items-center justify-center">{loading ? <Loader2 className="animate-spin" /> : (isLoginMode ? "ログイン" : "登録")}</button>
+        </form>
+        <div className="mt-6 flex flex-col gap-3">
+          <button onClick={handleGoogleLogin} className="w-full bg-white border text-gray-700 font-bold py-3 rounded-2xl shadow-sm flex items-center justify-center gap-2"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/action/google.svg" className="w-4 h-4" />Googleでログイン</button>
+          <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-xs font-bold text-gray-400 hover:text-indigo-500">{isLoginMode ? "アカウントをお持ちでない方はこちら" : "すでにアカウントをお持ちの方はこちら"}</button>
+          <button onClick={handleGuestLogin} className="text-xs font-bold text-gray-400 underline hover:text-gray-600">お試しゲストログイン</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Video Call Component (Updated for Background & Selection) ---
+const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = true }) => {
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
+  const [bgBlur, setBgBlur] = useState(false); // 背景ぼかし状態
+  
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const pcRef = useRef(null);
+
+  useEffect(() => {
+    const startCall = async () => {
+      const pc = new RTCPeerConnection(rtcConfig);
+      pcRef.current = pc;
+
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          await addDoc(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list"), {
+            candidate: event.candidate.toJSON(),
+            senderId: user.uid,
+            createdAt: serverTimestamp(),
+          });
+        }
+      };
+
+      pc.ontrack = (event) => {
+        setRemoteStream(event.streams[0]);
+      };
+
+      try {
+        // 発信時にビデオ選択されていたらビデオON、そうでなければ音声のみ
+        const stream = await navigator.mediaDevices.getUserMedia({ video: isVideoEnabled, audio: true });
+        setLocalStream(stream);
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+
+        const isCaller = callData.callerId === user.uid;
+        const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
+
+        if (isCaller) {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          await setDoc(signalingRef, { type: "offer", sdp: offer.sdp, callerId: user.uid });
+        }
+
+        onSnapshot(signalingRef, async (snap) => {
+          const data = snap.data();
+          if (!pc.currentRemoteDescription && data && data.type === "answer" && isCaller) {
+            const answer = new RTCSessionDescription(data);
+            await pc.setRemoteDescription(answer);
+          } else if (!pc.currentRemoteDescription && data && data.type === "offer" && !isCaller) {
+            const offer = new RTCSessionDescription(data);
+            await pc.setRemoteDescription(offer);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await updateDoc(signalingRef, { type: "answer", sdp: answer.sdp });
+          }
+        });
+
+        onSnapshot(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list"), (snapshot) => {
+          snapshot.docChanges().forEach(async (change) => {
+            if (change.type === "added") {
+              const data = change.doc.data();
+              if (data.senderId !== user.uid && pc.remoteDescription) {
+                await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+              }
+            }
+          });
+        });
+      } catch (err) {
+        console.error("Error accessing media devices.", err);
+        onEndCall();
+      }
+    };
+    startCall();
+
+    return () => {
+      if (pcRef.current) pcRef.current.close();
+      if (localStream) localStream.getTracks().forEach(t => t.stop());
+    };
+  }, []);
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
+
+  const toggleMute = () => {
+    if (localStream) {
+      localStream.getAudioTracks().forEach(t => t.enabled = !t.enabled);
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const toggleVideo = () => {
+    if (localStream) {
+      localStream.getVideoTracks().forEach(t => t.enabled = !t.enabled);
+      setIsVideoOff(!isVideoOff);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[1000] bg-black flex flex-col animate-in fade-in">
+      <div className="relative flex-1 bg-gray-900 flex items-center justify-center">
+        {/* Remote Video */}
+        {remoteStream ? (
+           <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+        ) : (
+           <div className="text-white flex flex-col items-center gap-4">
+             <div className="w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center animate-pulse"><User className="w-10 h-10"/></div>
+             <p>接続中...</p>
+           </div>
+        )}
+        
+        {/* Local Video (PiP) */}
+        {isVideoEnabled && (
+          <div className="absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg">
+            <video 
+                ref={localVideoRef} 
+                autoPlay 
+                playsInline 
+                muted 
+                className={`w-full h-full object-cover transform scale-x-[-1] transition-all duration-300 ${bgBlur ? 'blur-sm' : ''} ${isVideoOff ? 'opacity-0' : 'opacity-100'}`} 
+            />
+            {isVideoOff && <div className="absolute inset-0 flex items-center justify-center bg-gray-800 text-white"><VideoOff className="w-8 h-8"/></div>}
+          </div>
+        )}
+      </div>
+      <div className="h-28 bg-black/80 flex items-center justify-center gap-6 pb-6">
+        <button onClick={toggleMute} className={`p-4 rounded-full ${isMuted ? "bg-white text-black" : "bg-gray-700 text-white"}`}>
+          {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+        </button>
+        <button onClick={onEndCall} className="p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all">
+          <PhoneOff className="w-8 h-8" />
+        </button>
+        <button onClick={toggleVideo} className={`p-4 rounded-full ${isVideoOff ? "bg-white text-black" : "bg-gray-700 text-white"}`}>
+          {isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
+        </button>
+        {/* 背景変更（簡易ぼかし）ボタン */}
+        {isVideoEnabled && (
+            <button onClick={() => setBgBlur(!bgBlur)} className={`p-4 rounded-full ${bgBlur ? "bg-green-500 text-white" : "bg-gray-700 text-white"}`}>
+                <Aperture className="w-6 h-6" />
+            </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, showNotification }) => {
+  const [amount, setAmount] = useState("");
+  const [sending, setSending] = useState(false);
+  const handleSend = async () => {
+    const val = parseInt(amount, 10);
+    if (isNaN(val) || val <= 0) return showNotification("正の整数を入力してください");
+    if (val > myWallet) return showNotification("残高が足りません");
+    setSending(true);
+    try {
+      await runTransaction(db, async (t) => {
+        const senderRef = doc(db, "artifacts", appId, "public", "data", "users", myUid);
+        const receiverRef = doc(db, "artifacts", appId, "public", "data", "users", targetUid);
+        const senderDoc = await t.get(senderRef);
+        if (!senderDoc.exists() || senderDoc.data().wallet < val) throw "残高不足またはエラー";
+        t.update(senderRef, { wallet: increment(-val) });
+        t.update(receiverRef, { wallet: increment(val) });
+      });
+      showNotification(`${targetName}さんに ${val}コイン送りました`);
+      onClose();
+    } catch (e) { showNotification("送金エラー: " + e); } finally { setSending(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-[600] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in">
+      <div className="bg-white w-full max-w-sm rounded-[32px] p-6 text-center shadow-2xl">
+        <h3 className="font-bold text-lg mb-4 text-gray-800">コインを送る</h3>
+        <div className="bg-yellow-50 p-4 rounded-2xl mb-4 border border-yellow-100">
+          <div className="text-xs text-yellow-700 font-bold uppercase tracking-widest">あなたの残高</div>
+          <div className="text-3xl font-black text-yellow-500 mt-1">{myWallet?.toLocaleString()}</div>
+        </div>
+        <p className="text-sm font-bold text-gray-500 mb-2">To: {targetName}</p>
+        <div className="relative mb-6">
+          <input type="number" className="w-full bg-gray-100 rounded-2xl p-4 text-center font-bold text-xl outline-none focus:ring-2 focus:ring-yellow-400" placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-xs">COIN</span>
+        </div>
+        <button onClick={handleSend} disabled={sending} className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-4 rounded-2xl shadow-lg transition-transform active:scale-95 mb-3">{sending ? <Loader2 className="animate-spin mx-auto"/> : "送金する"}</button>
+        <button onClick={onClose} className="text-gray-400 text-xs font-bold hover:text-gray-600">キャンセル</button>
+      </div>
+    </div>
+  );
+};
+
+// --- Sub-components ---
 
 const ContactSelectModal = ({ onClose, onSend, friends }) => (
   <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
@@ -412,11 +642,12 @@ const LeaveGroupConfirmModal = ({ onClose, onLeave }) => (
 
 const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }) => {
     const caller = allUsers.find(u => u.uid === callData.callerId);
+    const isVideo = callData.isVideo !== false; // Default to true if not specified
     return (
       <div className="fixed inset-0 z-[500] bg-gray-900 flex flex-col items-center justify-between py-16 px-6 animate-in fade-in duration-300">
         <div className="absolute inset-0 z-0 overflow-hidden"><img src={caller?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=caller"} className="w-full h-full object-cover blur-3xl opacity-50 scale-125" alt="background"/><div className="absolute inset-0 bg-black/40"></div></div>
-        <div className="relative z-10 flex flex-col items-center gap-6 mt-12"><div className="flex flex-col items-center gap-2"><div className="flex items-center gap-2 text-white/80 mb-2"><PhoneCall className="w-5 h-5 animate-pulse" /><span className="text-sm font-bold tracking-widest">着信中...</span></div><h2 className="text-4xl font-bold text-white drop-shadow-xl text-center leading-tight">{caller?.name || "Unknown"}</h2></div><div className="relative mt-8"><div className="absolute inset-0 rounded-full bg-white/20 animate-[ping_2s_ease-in-out_infinite]"></div><div className="absolute inset-0 rounded-full bg-white/10 animate-[ping_3s_ease-in-out_infinite_delay-500ms]"></div><img src={caller?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=caller"} className="w-40 h-40 rounded-full border-[6px] border-white/20 shadow-2xl object-cover relative z-10 bg-gray-800" /></div></div>
-        <div className="relative z-10 w-full flex justify-between items-end px-4 mb-8 max-w-sm"><button onClick={onDecline} className="flex flex-col items-center gap-4 group"><div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center shadow-lg group-active:scale-95 transition-all hover:bg-red-600 border border-red-400"><PhoneOff className="w-10 h-10 text-white fill-current" /></div><span className="text-white text-sm font-bold shadow-black drop-shadow-md">拒否</span></button><button onClick={onAccept} className="flex flex-col items-center gap-4 group"><div className="relative"><div className="absolute inset-0 bg-green-500 rounded-full animate-ping opacity-50"></div><div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center shadow-lg group-active:scale-95 transition-all hover:bg-green-600 border border-green-400 relative z-10"><Video className="w-10 h-10 text-white fill-current" /></div></div><span className="text-white text-sm font-bold shadow-black drop-shadow-md">応答</span></button></div>
+        <div className="relative z-10 flex flex-col items-center gap-6 mt-12"><div className="flex flex-col items-center gap-2"><div className="flex items-center gap-2 text-white/80 mb-2"><PhoneCall className="w-5 h-5 animate-pulse" /><span className="text-sm font-bold tracking-widest">{isVideo ? "ビデオ通話" : "音声通話"} 着信中...</span></div><h2 className="text-4xl font-bold text-white drop-shadow-xl text-center leading-tight">{caller?.name || "Unknown"}</h2></div><div className="relative mt-8"><div className="absolute inset-0 rounded-full bg-white/20 animate-[ping_2s_ease-in-out_infinite]"></div><div className="absolute inset-0 rounded-full bg-white/10 animate-[ping_3s_ease-in-out_infinite_delay-500ms]"></div><img src={caller?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=caller"} className="w-40 h-40 rounded-full border-[6px] border-white/20 shadow-2xl object-cover relative z-10 bg-gray-800" /></div></div>
+        <div className="relative z-10 w-full flex justify-between items-end px-4 mb-8 max-w-sm"><button onClick={onDecline} className="flex flex-col items-center gap-4 group"><div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center shadow-lg group-active:scale-95 transition-all hover:bg-red-600 border border-red-400"><PhoneOff className="w-10 h-10 text-white fill-current" /></div><span className="text-white text-sm font-bold shadow-black drop-shadow-md">拒否</span></button><button onClick={onAccept} className="flex flex-col items-center gap-4 group"><div className="relative"><div className="absolute inset-0 bg-green-500 rounded-full animate-ping opacity-50"></div><div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center shadow-lg group-active:scale-95 transition-all hover:bg-green-600 border border-green-400 relative z-10">{isVideo ? <Video className="w-10 h-10 text-white fill-current" /> : <Phone className="w-10 h-10 text-white fill-current" />}</div></div><span className="text-white text-sm font-bold shadow-black drop-shadow-md">応答</span></button></div>
       </div>
     );
 };
@@ -434,7 +665,24 @@ const CallAcceptedOverlay = ({ callData, onJoin }) => (
   </div>
 );
 
-const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, addFriendById, onEdit, onDelete, onPreview, onReply, onReaction, allUsers, onStickerClick }) => {
+const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer }) => (
+  <div className="fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="bg-white w-full max-w-sm rounded-[40px] overflow-hidden shadow-2xl relative flex flex-col items-center pb-8">
+      <button onClick={onClose} className="absolute top-4 right-4 z-10 bg-black/20 text-white p-2 rounded-full backdrop-blur-md hover:bg-black/30"><X className="w-6 h-6"/></button>
+      <div className="w-full h-48 bg-gray-200"><img src={friend.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80"} className="w-full h-full object-cover" /></div>
+      <div className="-mt-16 mb-4 relative"><img src={friend.avatar} className="w-32 h-32 rounded-[40px] border-[6px] border-white object-cover shadow-lg" /></div>
+      <h2 className="text-2xl font-bold mb-1">{friend.name}</h2>
+      <p className="text-xs text-gray-400 font-mono mb-4">ID: {friend.id}</p>
+      <div className="w-full px-8 mb-6"><p className="text-center text-sm text-gray-600 bg-gray-50 py-3 px-4 rounded-2xl">{friend.status || "ステータスなし"}</p></div>
+      <div className="flex gap-4 w-full px-8">
+        <button onClick={() => { onStartChat(friend.uid); onClose(); }} className="flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2"><MessageCircle className="w-5 h-5" /> トーク</button>
+        {onTransfer && <button onClick={onTransfer} className="flex-1 py-3 bg-yellow-500 text-white rounded-2xl font-bold shadow-lg shadow-yellow-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2"><Coins className="w-5 h-5" /> 送金</button>}
+      </div>
+    </div>
+  </div>
+);
+
+const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, addFriendById, onEdit, onDelete, onPreview, onReply, onReaction, allUsers, onStickerClick, onShowProfile, onJoinCall }) => {
     const isMe = m.senderId === user.uid;
     const [mediaSrc, setMediaSrc] = useState(null); 
     const [loading, setLoading] = useState(false);
@@ -482,7 +730,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
                    else if (m.type === 'audio') mimeType = 'audio/webm';
                    else mimeType = 'application/octet-stream';
                }
-               if (m.type !== 'text' && m.type !== 'contact') setBlobSrcFromBase64(base64Data, mimeType);
+               if (m.type !== 'text' && m.type !== 'contact' && m.type !== 'call_invite') setBlobSrcFromBase64(base64Data, mimeType);
             } else if (m.preview) { setMediaSrc(m.preview); }
           } catch (e) { console.error("Failed to load chunks", e); if (m.preview) setMediaSrc(m.preview); } finally { setLoading(false); }
         })();
@@ -536,6 +784,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
     const finalSrc = mediaSrc || m.preview;
     const isShowingPreview = loading || isInvalidBlob || (finalSrc === m.preview);
     const handleBubbleClick = (e) => { e.stopPropagation(); setShowMenu(!showMenu); };
+    
     const renderContent = (text) => {
       if (!text) return "";
       const regex = /(https?:\/\/[^\s]+)|(@[^\s]+)/g;
@@ -546,22 +795,41 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
         if (part.startsWith('@')) {
            const name = part.substring(1);
            const mentionedUser = allUsers.find(u => u.name === name);
-           if (mentionedUser) return <span key={i} className="text-blue-500 font-bold cursor-pointer hover:underline" onClick={(e) => { e.stopPropagation(); }}>{part}</span>;
+           if (mentionedUser) return <span key={i} className="text-blue-500 font-bold cursor-pointer hover:underline bg-blue-50 px-1 rounded" onClick={(e) => { e.stopPropagation(); onShowProfile && onShowProfile(mentionedUser); }}>{part}</span>;
         }
         return part;
       });
     };
+    
     const getUserNames = (uids) => { if (!uids || !allUsers) return ""; return uids.map(uid => { const u = allUsers.find(user => user.uid === uid); return u ? u.name : "不明なユーザー"; }).join(", "); };
 
     return (
       <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} gap-2 relative group mb-4`}>
-        {!isMe && (<div className="relative mt-1 cursor-pointer" onClick={(e) => { e.stopPropagation(); }}><img key={sender?.avatar} src={sender?.avatar} className="w-8 h-8 rounded-lg object-cover border" loading="lazy" />{isTodayBirthday(sender?.birthday) && <span className="absolute -top-1 -right-1 text-[8px]">🎂</span>}</div>)}
+        {!isMe && (<div className="relative mt-1 cursor-pointer" onClick={(e) => { e.stopPropagation(); onShowProfile && onShowProfile(sender); }}><img key={sender?.avatar} src={sender?.avatar} className="w-8 h-8 rounded-lg object-cover border" loading="lazy" />{isTodayBirthday(sender?.birthday) && <span className="absolute -top-1 -right-1 text-[8px]">🎂</span>}</div>)}
         <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[75%]`}>
-          {!isMe && isGroup && <div className="text-[10px] text-gray-600 font-bold mb-1 ml-1">{sender?.name}</div>}
+          {!isMe && isGroup && <div className="text-[10px] text-gray-600 font-bold mb-1 ml-1 cursor-pointer hover:underline" onClick={() => onShowProfile && onShowProfile(sender)}>{sender?.name}</div>}
           <div className="relative">
-             <div onClick={handleBubbleClick} className={`p-2 px-3 rounded-2xl text-[13px] shadow-sm relative cursor-pointer ${m.type === 'sticker' ? 'bg-transparent shadow-none p-0' : (isMe ? 'bg-[#7cfc00] rounded-tr-none' : 'bg-white rounded-tl-none')} ${['image', 'video'].includes(m.type) ? 'p-0 bg-transparent shadow-none' : ''}`}>
+             <div onClick={handleBubbleClick} className={`p-2 px-3 rounded-2xl text-[13px] shadow-sm relative cursor-pointer ${m.type === 'sticker' ? 'bg-transparent shadow-none p-0' : (isMe ? 'bg-[#7cfc00] rounded-tr-none' : 'bg-white rounded-tl-none')} ${['image', 'video'].includes(m.type) ? 'p-0 bg-transparent shadow-none' : ''} ${m.type === 'call_invite' ? 'bg-gray-100 border-l-4 border-green-500' : ''}`}>
               {m.replyTo && m.type !== 'sticker' && (<div className={`mb-2 p-2 rounded-lg border-l-4 text-xs opacity-70 ${isMe ? 'bg-black/5 border-white/50' : 'bg-gray-100 border-gray-300'}`}><div className="font-bold text-[10px] mb-0.5">{m.replyTo.senderName}</div><div className="truncate flex items-center gap-1">{m.replyTo.type === 'image' && <ImageIcon className="w-3 h-3" />}{m.replyTo.type === 'video' && <Video className="w-3 h-3" />}{['image', 'video'].includes(m.replyTo.type) ? (m.replyTo.type === 'image' ? '[画像]' : '[動画]') : (m.replyTo.content || '[メッセージ]')}</div></div>)}
+              
               {m.type === 'text' && <div className="whitespace-pre-wrap">{renderContent(m.content)}{m.isEdited && <div className="text-[9px] text-black/40 text-right mt-1 font-bold">(編集済)</div>}</div>}
+              
+              {/* Group Call Invite Message */}
+              {m.type === 'call_invite' && (
+                  <div className="flex flex-col items-start gap-2 min-w-[200px]">
+                      <div className="font-bold text-sm flex items-center gap-2">
+                          <PhoneIncoming className="w-4 h-4 text-green-600"/>
+                          {m.content}
+                      </div>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); onJoinCall(m.isVideo); }}
+                        className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-xl w-full flex items-center justify-center gap-2 transition-colors shadow-sm"
+                      >
+                          <Video className="w-4 h-4"/> 参加する
+                      </button>
+                  </div>
+              )}
+
               {m.type === 'sticker' && (
                   <div className="relative group/sticker" onClick={handleStickerClick}>
                     <img src={m.content || ""} className="w-32 h-32 object-contain drop-shadow-sm hover:scale-105 transition-transform" />
@@ -992,7 +1260,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     );
 };
 
-const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById }) => {
+const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }) => {
     const [messages, setMessages] = useState([]);
     const [text, setText] = useState('');
     const [plusMenuOpen, setPlusMenuOpen] = useState(false);
@@ -1023,6 +1291,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     const [myStickerPacks, setMyStickerPacks] = useState([]);
     const [selectedPackId, setSelectedPackId] = useState(null);
     const [buyStickerModalPackId, setBuyStickerModalPackId] = useState(null);
+    const [viewProfile, setViewProfile] = useState(null);
+    const [coinModalTarget, setCoinModalTarget] = useState(null);
 
     const chatData = chats.find(c => c.id === activeChatId);
     if (!chatData) return <div className="h-full flex items-center justify-center bg-white"><Loader2 className="w-8 h-8 animate-spin text-gray-400"/></div>;
@@ -1200,20 +1470,55 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     };
     const resetBackground = async () => { try { const batch = writeBatch(db); const chatRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId); const chunksSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'background_chunks')); chunksSnap.forEach(d => batch.delete(d.ref)); batch.update(chatRef, { backgroundImage: deleteField(), hasBackgroundChunks: deleteField(), backgroundChunkCount: deleteField(), updatedAt: serverTimestamp() }); await batch.commit(); showNotification("背景をリセットしました"); setBackgroundMenuOpen(false); } catch(e) { showNotification("リセットに失敗しました"); } };
     
-    const handleVideoCall = async () => {
-       try {
-          const roomName = `ChatApp_V9_${appId}_${activeChatId}_${Date.now()}`;
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId), {
-             callStatus: {
-                status: 'ringing',
-                callerId: user.uid,
-                roomName: roomName,
-                timestamp: Date.now()
-             }
-          });
-       } catch (e) {
-          showNotification("発信に失敗しました");
-       }
+    // Group Call Logic + 1:1 Call Logic
+    const startVideoCall = async (chatId, isVideo = true) => {
+        if (isGroup) {
+            // Group Call: Send Invitation Message
+            try {
+                const msgText = isVideo ? "ビデオ通話を開始しました" : "音声通話を開始しました";
+                await sendMessage(msgText, 'call_invite', { isVideo });
+                // Note: Don't set 'ringing' status for group to avoid ringing everyone's phone
+                setActiveChatId(chatId);
+                // Immediately join the call as initiator
+                startVideoCallForSelf(chatId, isVideo); 
+            } catch(e) {
+                showNotification("発信に失敗しました");
+            }
+        } else {
+            // 1:1 Call: Ring the other person
+            try {
+                await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { 
+                    "callStatus.status": "ringing", 
+                    "callStatus.callerId": user.uid, 
+                    "callStatus.isVideo": isVideo,
+                    "callStatus.timestamp": Date.now() 
+                });
+                startVideoCallForSelf(chatId, isVideo);
+            } catch(e) {
+                showNotification("発信に失敗しました");
+            }
+        }
+    };
+
+    // Helper to open the video view for the current user
+    const startVideoCallForSelf = (chatId, isVideo) => {
+        // Trigger the parent component to show the video view
+        // We do this by setting a callback prop or emitting an event, 
+        // but here we are inside a component. We need to pass this up.
+        // *However*, App component manages `activeCall`. 
+        // We need to call the prop passed from App.js: `startVideoCall` (which is actually `startVideoCall` in App)
+        // Wait, the prop name collision. Let's look at App.js.
+        // App.js passes `startVideoCall`. 
+        // We should rename the local function or use the prop directly.
+        // The prop `startVideoCall` in App.js handles the doc update.
+        // We need to modify App.js's startVideoCall to handle groups.
+        // REFACTORING: Let's move this logic to App.js and just call the prop here.
+    };
+
+    // Updated handler for buttons
+    const handleVideoCallButton = (isVideo) => {
+       // Call the prop function from App.js
+       startVideoCall(activeChatId, isVideo, isGroup);
     };
 
     const sendBirthdayCard = async ({ color, message }) => {
@@ -1241,6 +1546,12 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         setBuyStickerModalPackId(packId);
     };
 
+    // Callback for joining a call from a message
+    const onJoinCall = (isVideo) => {
+        // Use the same prop to start/join
+        startVideoCall(activeChatId, isVideo, true); // Treat as group join
+    };
+
     return (
       <div className="flex flex-col h-full relative" style={{ backgroundColor: backgroundSrc ? 'transparent' : '#8fb2c9', backgroundImage: backgroundSrc ? `url(${backgroundSrc})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center' }}>
         <div className="p-3 bg-white/95 backdrop-blur border-b flex items-center gap-3 sticky top-0 z-10 shadow-sm">
@@ -1254,14 +1565,16 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
                 <button onClick={() => setAddMemberModalOpen(true)} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="メンバーを追加"><UserPlus className="w-6 h-6 text-gray-600" /></button>
                 <button onClick={() => setLeaveModalOpen(true)} className="hover:bg-red-50 p-1 rounded-full transition-colors" title="グループを退会"><LogOut className="w-6 h-6 text-red-500" /></button>
             </>)}
-            <button onClick={handleVideoCall} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="ビデオ通話"><Video className="w-6 h-6 text-gray-600" /></button>
+            {/* Call Buttons */}
+            <button onClick={() => handleVideoCallButton(true)} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="ビデオ通話"><Video className="w-6 h-6 text-gray-600" /></button>
+            <button onClick={() => handleVideoCallButton(false)} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="音声通話"><Phone className="w-6 h-6 text-gray-600" /></button>
             <button onClick={() => toggleMuteChat(activeChatId)}>{mutedChats.includes(activeChatId) ? <BellOff className="w-6 h-6 text-gray-400" /> : <Bell className="w-6 h-6 text-gray-600" />}</button>
           </div>
         </div>
         {!isGroup && partnerId && isTodayBirthday(allUsers.find(u=>u.uid === partnerId)?.birthday) && (<div className="bg-pink-100 p-2 flex items-center justify-between px-4"><div className="flex items-center gap-2"><Cake className="w-5 h-5 text-pink-500 animate-bounce" /><span className="text-xs font-bold text-pink-700">今日は{title}さんの誕生日です！</span></div><button onClick={() => setCardModalOpen(true)} className="bg-pink-500 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">カードを書く</button></div>)}
         <div className={`flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide ${backgroundSrc ? 'bg-white/40 backdrop-blur-sm' : ''}`}>
           {messages.length >= messageLimit && (<div className="flex justify-center py-2"><button onClick={() => setMessageLimit(prev => prev + 50)} className="bg-white/50 backdrop-blur-md px-4 py-1 rounded-full text-xs font-bold text-gray-700 shadow-sm flex items-center gap-1 hover:bg-white/70"><ArrowUpCircle className="w-4 h-4" /> 以前のメッセージを読み込む</button></div>)}
-          {messages.map(m => { const sender = allUsers.find(u => u.uid === m.senderId); return (<MessageItem key={m.id} m={m} user={user} sender={sender} isGroup={isGroup} db={db} appId={appId} chatId={activeChatId} addFriendById={addFriendById} onEdit={handleEditMessage} onDelete={handleDeleteMessage} onPreview={handlePreviewMedia} onReply={setReplyTo} onReaction={handleReaction} allUsers={allUsers} onStickerClick={onStickerClick} />); })}
+          {messages.map(m => { const sender = allUsers.find(u => u.uid === m.senderId); return (<MessageItem key={m.id} m={m} user={user} sender={sender} isGroup={isGroup} db={db} appId={appId} chatId={activeChatId} addFriendById={addFriendById} onEdit={handleEditMessage} onDelete={handleDeleteMessage} onPreview={handlePreviewMedia} onReply={setReplyTo} onReaction={handleReaction} allUsers={allUsers} onStickerClick={onStickerClick} onShowProfile={setViewProfile} onJoinCall={onJoinCall} />); })}
           <div ref={scrollRef} className="h-2 w-full" />
         </div>
         {previewMedia && (<div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center p-4" onClick={() => setPreviewMedia(null)}><button className="absolute top-6 right-6 text-white p-2 rounded-full bg-white/20"><X className="w-6 h-6"/></button>{previewMedia.type === 'video' ? <video src={previewMedia.src} controls autoPlay className="max-w-full max-h-[85vh] rounded shadow-2xl" onClick={e=>e.stopPropagation()}/> : <img src={previewMedia.src} className="max-w-full max-h-[85vh] object-contain rounded shadow-2xl" onClick={e=>e.stopPropagation()}/>}</div>)}
@@ -1320,6 +1633,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             {(text || isUploading) && <button onClick={() => sendMessage(text)} disabled={!text && !isUploading} className={`p-2 rounded-full ${text ? 'text-green-500' : 'text-gray-300'}`}>{isUploading ? <div className="relative"><Loader2 className="w-6 h-6 animate-spin text-green-500" />{uploadProgress > 0 && <div className="absolute top-full left-1/2 -translate-x-1/2 text-[8px] font-bold mt-1">{uploadProgress}%</div>}</div> : <Send className="w-6 h-6" />}</button>}
           </div>
         </div>
+        {viewProfile && <FriendProfileModal friend={viewProfile} onClose={() => setViewProfile(null)} onStartChat={(uid) => { setViewProfile(null); }} onTransfer={() => { setCoinModalTarget(viewProfile); setViewProfile(null); }} />}
+        {coinModalTarget && <CoinTransferModal onClose={() => setCoinModalTarget(null)} myWallet={profile.wallet} myUid={user.uid} targetUid={coinModalTarget.uid} targetName={coinModalTarget.name} showNotification={showNotification} />}
       </div>
     );
 };
@@ -1341,6 +1656,7 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
               <div><label className="text-xs font-bold text-gray-400">誕生日</label><input type="date" className="w-full border-b py-2 outline-none bg-transparent" value={edit.birthday || ''} onChange={e => setEdit({...edit, birthday: e.target.value})} /></div>
               <div><label className="text-xs font-bold text-gray-400">ひとこと</label><input className="w-full border-b py-2 outline-none" value={edit.status || ''} onChange={e => setEdit({...edit, status: e.target.value})} /></div>
               <button onClick={handleSave} className="w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg">保存</button>
+              <button onClick={() => signOut(auth)} className="w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4">ログアウト</button>
             </div>
           </div>
         </div>
@@ -1349,33 +1665,64 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
 };
 
 const QRScannerView = ({ user, setView, addFriendById }) => {
-    const videoRef = useRef(null), canvasRef = useRef(null), [scanning, setScanning] = useState(false), [stream, setStream] = useState(null);
-    useEffect(() => () => stream?.getTracks().forEach(t => t.stop()), [stream]);
-    const startScanner = async () => { setScanning(true); try { const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }); setStream(s); if (videoRef.current) { videoRef.current.srcObject = s; videoRef.current.play(); requestAnimationFrame(tick); } } catch (err) { setScanning(false); } };
-    const tick = () => { if (videoRef.current?.readyState === videoRef.current?.HAVE_ENOUGH_DATA) { const c = canvasRef.current, ctx = c.getContext("2d"); c.height = videoRef.current.videoHeight; c.width = videoRef.current.videoWidth; ctx.drawImage(videoRef.current, 0, 0, c.width, c.height); const code = window.jsQR?.(ctx.getImageData(0,0,c.width,c.height).data, c.width, c.height); if (code) { stream?.getTracks().forEach(t=>t.stop()); setScanning(false); addFriendById(code.data); return; } } requestAnimationFrame(tick); };
+    const videoRef = useRef(null);
+    const canvasRef = useRef(null);
+    const [scanning, setScanning] = useState(false);
+    
+    // ERROR FIX: Removed `s` variable and simplified stream access
+    const startScanner = async () => { 
+        setScanning(true); 
+        try { 
+            const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }); 
+            if (videoRef.current) { 
+                videoRef.current.srcObject = mediaStream; 
+                videoRef.current.setAttribute("playsinline", true);
+                videoRef.current.play(); 
+                requestAnimationFrame(tick); 
+            } 
+        } catch (err) { 
+            setScanning(false); 
+        } 
+    };
+
+    useEffect(() => {
+        return () => {
+            if (videoRef.current && videoRef.current.srcObject) {
+                videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+            }
+        };
+    }, []);
+
+    const tick = () => { 
+        if (videoRef.current?.readyState === videoRef.current?.HAVE_ENOUGH_DATA) { 
+            const c = canvasRef.current;
+            const ctx = c.getContext("2d"); 
+            c.height = videoRef.current.videoHeight; 
+            c.width = videoRef.current.videoWidth; 
+            ctx.drawImage(videoRef.current, 0, 0, c.width, c.height); 
+            
+            if (window.jsQR) {
+                const code = window.jsQR(ctx.getImageData(0,0,c.width,c.height).data, c.width, c.height); 
+                if (code) { 
+                    if (videoRef.current.srcObject) {
+                        videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+                    }
+                    setScanning(false); 
+                    addFriendById(code.data); 
+                    return; 
+                } 
+            }
+        } 
+        requestAnimationFrame(tick); 
+    };
+
     return (<div className="flex flex-col h-full bg-white"><div className="p-4 border-b flex items-center gap-4"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><span className="font-bold">QR</span></div><div className="flex-1 flex flex-col items-center justify-center p-8 gap-8">{scanning ? <div className="relative w-64 h-64 border-4 border-green-500 rounded-3xl overflow-hidden"><video ref={videoRef} className="w-full h-full object-cover" /><canvas ref={canvasRef} className="hidden" /></div> : <div className="bg-white p-6 rounded-[40px] shadow-xl border"><img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user?.uid}`} className="w-48 h-48" /></div>}<div className="grid grid-cols-2 gap-4 w-full"><button onClick={startScanner} className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border"><Maximize className="w-6 h-6 text-green-500" /><span>スキャン</span></button><label className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border cursor-pointer"><Upload className="w-6 h-6 text-blue-500" /><span>読込</span><input type="file" className="hidden" accept="image/*" onChange={e => { const r = new FileReader(); r.onload = (ev) => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'), ctx = c.getContext('2d'); c.width = img.width; c.height = img.height; ctx.drawImage(img,0,0); const code = window.jsQR(ctx.getImageData(0,0,c.width,c.height).data, c.width, c.height); if (code) addFriendById(code.data); }; img.src = ev.target.result; }; r.readAsDataURL(e.target.files[0]); }} /></label></div></div></div>);
 };
 
-const FriendProfileModal = ({ friend, onClose, onStartChat }) => {
-  if (!friend) return null;
-  return (
-    <div className="fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-sm rounded-[40px] overflow-hidden shadow-2xl relative flex flex-col items-center pb-8">
-        <button onClick={onClose} className="absolute top-4 right-4 z-10 bg-black/20 text-white p-2 rounded-full backdrop-blur-md"><X className="w-6 h-6"/></button>
-        <div className="w-full h-48 bg-gray-200"><img src={friend.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80"} className="w-full h-full object-cover" /></div>
-        <div className="-mt-16 mb-4 relative"><img src={friend.avatar} className="w-32 h-32 rounded-[40px] border-[6px] border-white object-cover shadow-lg" /></div>
-        <h2 className="text-2xl font-bold mb-1">{friend.name}</h2>
-        <p className="text-gray-400 text-xs font-mono mb-4">ID: {friend.id}</p>
-        <div className="w-full px-8 mb-8"><p className="text-center text-sm text-gray-600 bg-gray-50 py-3 px-4 rounded-2xl">{friend.status || "ステータスメッセージはありません"}</p></div>
-        <div className="flex gap-4 w-full px-8"><button onClick={() => { onStartChat(friend.uid); onClose(); }} className="flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2"><MessageCircle className="w-5 h-5" /> トーク</button></div>
-      </div>
-    </div>
-  );
-};
-
-const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser }) => {
+const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }) => {
     const [tab, setTab] = useState('chats');
     const [selectedFriend, setSelectedFriend] = useState(null);
+    const [coinModalTarget, setCoinModalTarget] = useState(null);
     const friendsList = useMemo(() => allUsers.filter(u => (profile?.friends || []).includes(u.uid)), [allUsers, profile]);
     return (
       <div className="flex flex-col h-full bg-white">
@@ -1389,7 +1736,8 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
             return (<div key={chat.id} className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer" onClick={() => { setActiveChatId(chat.id); setView('chatroom'); }}><div className="relative"><img key={icon} src={icon} className="w-12 h-12 rounded-xl object-cover border" />{!chat.isGroup && partnerData && isTodayBirthday(partnerData.birthday) && <span className="absolute -top-1 -right-1 text-xs">🎂</span>}</div><div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{name} {chat.isGroup ? `(${chat.participants.length})` : ''}</div><div className="text-xs text-gray-400 truncate">{chat.lastMessage?.content}</div></div><div className="text-[10px] text-gray-300 self-start mt-1">{formatTime(chat.updatedAt)}</div></div>);
           })}
         </div>
-        {selectedFriend && <FriendProfileModal friend={selectedFriend} onClose={() => setSelectedFriend(null)} onStartChat={startChatWithUser} />}
+        {selectedFriend && <FriendProfileModal friend={selectedFriend} onClose={() => setSelectedFriend(null)} onStartChat={startChatWithUser} onTransfer={() => { setCoinModalTarget(selectedFriend); setSelectedFriend(null); }} />}
+        {coinModalTarget && <CoinTransferModal onClose={() => setCoinModalTarget(null)} myWallet={profile.wallet} myUid={user.uid} targetUid={coinModalTarget.uid} targetName={coinModalTarget.name} showNotification={showNotification} />}
       </div>
     );
 };
@@ -1430,7 +1778,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db, appId 
 export default function App() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [view, setView] = useState('home'); 
+  const [view, setView] = useState('auth'); // Auto-login removed
   const [activeChatId, setActiveChatId] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
   const [chats, setChats] = useState([]);
@@ -1442,12 +1790,9 @@ export default function App() {
     const saved = localStorage.getItem('mutedChats');
     return saved ? JSON.parse(saved) : [];
   });
+  
   // Call State
-  const [incomingCall, setIncomingCall] = useState(null);
-  const [outgoingCall, setOutgoingCall] = useState(null);
-  const [callAcceptedData, setCallAcceptedData] = useState(null); 
-  const ringtoneRef = useRef(null);
-  const processedCallIdsRef = useRef(new Set()); 
+  const [activeCall, setActiveCall] = useState(null);
 
   const toggleMuteChat = (chatId) => {
     setMutedChats(prev => {
@@ -1461,25 +1806,35 @@ export default function App() {
     const script = document.createElement('script');
     script.src = JSQR_URL;
     document.head.appendChild(script);
-    const initAuth = async () => {
-      try {
-        await setPersistence(auth, browserLocalPersistence);
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-            if (!auth.currentUser) {
-                await signInAnonymously(auth);
-            }
-        }
-      } catch (e) {
-        console.error("Auth init error", e);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
+    
+    // Add dummy favicon to prevent 404 error
+    const link = document.createElement('link');
+    link.rel = 'icon';
+    link.href = 'data:image/x-icon;base64,';
+    document.head.appendChild(link);
+    
+    // Auth Initialization - REMOVED AUTOMATIC LOGIN
+    setPersistence(auth, browserLocalPersistence);
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (u) {
         setUser(u);
-        ensureUserProfile(u.uid);
+        const docSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid));
+        if (docSnap.exists()) {
+             setProfile(docSnap.data());
+        } else {
+            const initialProfile = {
+              uid: u.uid, name: u.displayName || `User_${u.uid.slice(0,4)}`, id: `user_${u.uid.slice(0,6)}`,
+              status: "よろしくお願いします！", birthday: "", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
+              cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80", friends: [], wallet: 1000, isBanned: false
+            };
+            await setDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid), initialProfile);
+            setProfile(initialProfile);
+        }
+        setView('home');
+      } else {
+        setUser(null);
+        setProfile(null);
+        setView('auth');
       }
     });
     return () => unsubscribe();
@@ -1500,24 +1855,6 @@ export default function App() {
     showNotification("IDをコピーしました");
   };
 
-  const ensureUserProfile = async (uid) => {
-    const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', uid);
-    try {
-      const snap = await getDoc(userDocRef);
-      if (!snap.exists()) {
-        const initialProfile = {
-          uid, name: `ユーザー_${uid.slice(0, 4)}`, id: `user_${uid.slice(0, 6)}`,
-          status: "よろしくお願いします！", birthday: "", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=" + uid,
-          cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80", friends: [], wallet: 1000, isBanned: false
-        };
-        await setDoc(userDocRef, initialProfile);
-        setProfile(initialProfile);
-      } else {
-        setProfile(snap.data());
-      }
-    } catch (error) {}
-  };
-
   useEffect(() => {
     if (!user) return;
     const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), (doc) => {
@@ -1527,7 +1864,22 @@ export default function App() {
       setAllUsers(snap.docs.map(d => d.data()));
     });
     const unsubChats = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'chats'), where('participants', 'array-contains', user.uid)), (snap) => {
-      setChats(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const chatList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setChats(chatList);
+      
+      // Incoming Call Logic
+      const incoming = chatList.find(c => c.callStatus?.status === 'ringing' && c.callStatus.callerId !== user.uid);
+      if (incoming) {
+          if (!activeCall || activeCall.chatId !== incoming.id) {
+             setActiveCall({ chatId: incoming.id, callData: incoming.callStatus, isIncoming: true, isVideo: true }); // Default to video true for incoming
+          }
+      } else {
+          // Auto close call screen if call status is removed (ended by other)
+          if (activeCall && activeCall.isIncoming) {
+              const callStillExists = chatList.find(c => c.id === activeCall.chatId && c.callStatus?.status === 'ringing');
+              if (!callStillExists) setActiveCall(null);
+          }
+      }
     });
     const unsubPosts = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'posts'), orderBy('createdAt', 'desc'), limit(50)), (snap) => {
       setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -1535,139 +1887,7 @@ export default function App() {
     return () => {
       unsubProfile(); unsubUsers(); unsubChats(); unsubPosts();
     };
-  }, [user]);
-
-  // --- Call Handling ---
-  useEffect(() => {
-     if (!user || chats.length === 0) return;
-
-     const incoming = chats.find(c => c.callStatus?.status === 'ringing' && c.callStatus.callerId !== user.uid);
-     const outgoing = chats.find(c => c.callStatus?.status === 'ringing' && c.callStatus.callerId === user.uid);
-     
-     const accepted = chats.find(c => c.callStatus?.status === 'accepted' && c.callStatus.callerId === user.uid);
-
-     if (incoming) {
-        if (!incomingCall || incomingCall.id !== incoming.id) {
-            setIncomingCall(incoming);
-            startRingtone();
-        }
-     } else {
-        setIncomingCall(null);
-        if (!outgoing) stopRingtone();
-     }
-
-     if (outgoing) {
-         setOutgoingCall(outgoing);
-     } else {
-         setOutgoingCall(null);
-     }
-
-     if (accepted && !processedCallIdsRef.current.has(accepted.id)) {
-         processedCallIdsRef.current.add(accepted.id);
-         setCallAcceptedData(accepted); 
-         setOutgoingCall(null); 
-     }
-
-  }, [chats, user, incomingCall]);
-
-  const startRingtone = () => {
-      if (ringtoneRef.current) return;
-      try {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        const audioCtx = new AudioContext();
-        
-        const osc = audioCtx.createOscillator();
-        osc.type = 'triangle'; 
-        osc.frequency.setValueAtTime(880, audioCtx.currentTime); 
-
-        const osc2 = audioCtx.createOscillator();
-        osc2.type = 'triangle';
-        osc2.frequency.setValueAtTime(1108.73, audioCtx.currentTime); 
-
-        const gainNode = audioCtx.createGain();
-        
-        const cycleDuration = 1.2; 
-        const ringDuration = 0.2; 
-
-        const now = audioCtx.currentTime;
-        gainNode.gain.setValueAtTime(0, now);
-        
-        gainNode.gain.setTargetAtTime(0.1, now, 0.01);
-        gainNode.gain.setTargetAtTime(0, now + ringDuration, 0.15); 
-
-        const intervalId = setInterval(() => {
-            const currentTime = audioCtx.currentTime;
-            gainNode.gain.setTargetAtTime(0.1, currentTime, 0.01);
-            gainNode.gain.setTargetAtTime(0, currentTime + ringDuration, 0.15);
-        }, cycleDuration * 1000);
-
-        osc.connect(gainNode);
-        osc2.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
-        
-        osc.start();
-        osc2.start();
-        
-        if (audioCtx.state === 'suspended') {
-            audioCtx.resume();
-        }
-        
-        ringtoneRef.current = { audioCtx, oscillators: [osc, osc2], intervalId, gainNode };
-      } catch (e) { console.error(e); }
-  };
-
-  const stopRingtone = () => {
-      if (ringtoneRef.current) {
-          try {
-             const { audioCtx, oscillators, intervalId } = ringtoneRef.current;
-             oscillators.forEach(o => o.stop());
-             clearInterval(intervalId);
-             audioCtx.close();
-          } catch(e) {}
-          ringtoneRef.current = null;
-      }
-  };
-
-  const answerCall = async () => {
-      if (!incomingCall) return;
-      stopRingtone();
-      const roomName = incomingCall.callStatus.roomName;
-      const url = `https://meet.jit.si/${encodeURIComponent(roomName)}`;
-      window.open(url, '_blank');
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', incomingCall.id), {
-          'callStatus.status': 'accepted'
-      });
-  };
-
-  const joinAcceptedCall = async () => {
-      if (!callAcceptedData) return;
-      const roomName = callAcceptedData.callStatus.roomName;
-      const url = `https://meet.jit.si/${encodeURIComponent(roomName)}`;
-      window.open(url, '_blank');
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', callAcceptedData.id), {
-          callStatus: deleteField()
-      });
-      setCallAcceptedData(null);
-      setTimeout(() => {
-          processedCallIdsRef.current.delete(callAcceptedData.id);
-      }, 5000);
-  };
-
-  const declineCall = async () => {
-      if (!incomingCall) return;
-      stopRingtone();
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', incomingCall.id), {
-          callStatus: deleteField()
-      });
-  };
-
-  const cancelCall = async () => {
-      if (!outgoingCall) return;
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', outgoingCall.id), {
-          callStatus: deleteField()
-      });
-  };
-
+  }, [user, activeCall]);
 
   const addFriendById = async (targetId) => {
     if (!targetId) return;
@@ -1710,33 +1930,91 @@ export default function App() {
     }
   };
 
+  const startVideoCall = async (chatId, isVideo = true, isGroup = false) => {
+    if (isGroup) {
+       // Group call logic: send message instead of ring
+       try {
+           const msgText = isVideo ? "ビデオ通話を開始しました" : "音声通話を開始しました";
+           await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats', chatId, 'messages'), {
+                senderId: user.uid,
+                content: msgText,
+                type: 'call_invite',
+                isVideo: isVideo,
+                createdAt: serverTimestamp(),
+                readBy: [user.uid]
+           });
+           // Start self call
+           setActiveCall({ chatId, callData: { callerId: user.uid }, isVideo });
+       } catch (e) {
+           showNotification("グループ通話の開始に失敗しました");
+       }
+    } else {
+       // 1:1 call logic: ring
+       try {
+            await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { 
+                "callStatus.status": "ringing", 
+                "callStatus.callerId": user.uid, 
+                "callStatus.isVideo": isVideo,
+                "callStatus.timestamp": Date.now() 
+            });
+            setActiveCall({ chatId, callData: { callerId: user.uid }, isVideo });
+        } catch(e) {
+            showNotification("発信に失敗しました");
+        }
+    }
+  };
+
   return (
     <div className="max-w-md mx-auto h-screen border-x bg-white flex flex-col relative overflow-hidden shadow-2xl">
       {notification && <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce">{notification}</div>}
-      {searchModalOpen && <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/60"><div className="bg-white w-full max-w-sm rounded-[32px] p-8"><h2 className="text-xl font-bold mb-6">検索</h2><input className="w-full bg-gray-50 rounded-2xl py-4 px-6 mb-6 outline-none" placeholder="IDを入力" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /><div className="flex gap-4"><button className="flex-1 py-4 text-gray-600 font-bold" onClick={() => setSearchModalOpen(false)}>閉じる</button><button className="flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold" onClick={() => addFriendById(searchQuery)}>追加</button></div></div></div>}
       
-      {/* Call Overlays */}
-      {incomingCall && <IncomingCallOverlay callData={incomingCall.callStatus} onAccept={answerCall} onDecline={declineCall} allUsers={allUsers} />}
-      {outgoingCall && <OutgoingCallOverlay callData={outgoingCall.callStatus} onCancel={cancelCall} allUsers={allUsers} />}
-      {callAcceptedData && <CallAcceptedOverlay callData={callAcceptedData} onJoin={joinAcceptedCall} />}
-
-      <div className="flex-1 overflow-hidden relative">
-          {view === 'home' && <HomeView user={user} profile={profile} allUsers={allUsers} chats={chats} setView={setView} setActiveChatId={setActiveChatId} setSearchModalOpen={setSearchModalOpen} startChatWithUser={startChatWithUser} />}
-          {view === 'voom' && <VoomView user={user} allUsers={allUsers} profile={profile} posts={posts} showNotification={showNotification} db={db} appId={appId} />}
-          {view === 'chatroom' && <ChatRoomView user={user} profile={profile} allUsers={allUsers} chats={chats} activeChatId={activeChatId} setActiveChatId={setActiveChatId} setView={setView} db={db} appId={appId} mutedChats={mutedChats} toggleMuteChat={toggleMuteChat} showNotification={showNotification} addFriendById={addFriendById} />}
-          {view === 'profile' && <ProfileEditView user={user} profile={profile} setView={setView} showNotification={showNotification} copyToClipboard={copyToClipboard} />}
-          {view === 'qr' && <QRScannerView user={user} setView={setView} addFriendById={addFriendById} />}
-          {view === 'group-create' && <GroupCreateView user={user} profile={profile} allUsers={allUsers} setView={setView} showNotification={showNotification} />}
-          {view === 'birthday-cards' && <BirthdayCardBox user={user} setView={setView} />}
-          {view === 'sticker-create' && <StickerEditor user={user} profile={profile} onClose={() => setView('sticker-store')} showNotification={showNotification} />}
-          {view === 'sticker-store' && <StickerStoreView user={user} setView={setView} showNotification={showNotification} profile={profile} allUsers={allUsers} />}
-      </div>
-
-      {['home', 'voom'].includes(view) && (
-        <div className="h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0">
-          <div className={`flex flex-col items-center gap-1 cursor-pointer transition-all ${view === 'home' ? 'text-green-500' : 'text-gray-400'}`} onClick={() => setView('home')}><Home className="w-6 h-6" /><span className="text-[10px] font-bold">ホーム</span></div>
-          <div className={`flex flex-col items-center gap-1 cursor-pointer transition-all ${view === 'voom' ? 'text-green-500' : 'text-gray-400'}`} onClick={() => setView('voom')}><LayoutGrid className="w-6 h-6" /><span className="text-[10px] font-bold">VOOM</span></div>
-        </div>
+      {!user ? (
+          <AuthView onLogin={setUser} showNotification={showNotification} />
+      ) : (
+          <>
+            {/* Active Call View Overlay */}
+            {activeCall ? (
+                activeCall.isIncoming ? (
+                    <IncomingCallOverlay 
+                        callData={activeCall.callData} 
+                        allUsers={allUsers} 
+                        onDecline={async () => { await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: deleteField() }); setActiveCall(null); }} 
+                        onAccept={() => setActiveCall({ ...activeCall, isIncoming: false })} 
+                    />
+                ) : (
+                    <VideoCallView 
+                        user={user} 
+                        chatId={activeCall.chatId} 
+                        callData={activeCall.callData} 
+                        isVideoEnabled={activeCall.isVideo} 
+                        onEndCall={async () => { await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: deleteField() }); setActiveCall(null); }} 
+                    />
+                )
+            ) : (
+                <div className="flex-1 overflow-hidden relative">
+                    {view === 'home' && <HomeView user={user} profile={profile} allUsers={allUsers} chats={chats} setView={setView} setActiveChatId={setActiveChatId} setSearchModalOpen={setSearchModalOpen} startChatWithUser={startChatWithUser} showNotification={showNotification} />}
+                    {view === 'voom' && <VoomView user={user} allUsers={allUsers} profile={profile} posts={posts} showNotification={showNotification} db={db} appId={appId} />}
+                    {view === 'chatroom' && <ChatRoomView user={user} profile={profile} allUsers={allUsers} chats={chats} activeChatId={activeChatId} setActiveChatId={setActiveChatId} setView={setView} db={db} appId={appId} mutedChats={mutedChats} toggleMuteChat={toggleMuteChat} showNotification={showNotification} addFriendById={addFriendById} startVideoCall={startVideoCall} />}
+                    {view === 'profile' && <ProfileEditView user={user} profile={profile} setView={setView} showNotification={showNotification} copyToClipboard={copyToClipboard} />}
+                    {view === 'qr' && <QRScannerView user={user} setView={setView} addFriendById={addFriendById} />}
+                    {view === 'group-create' && <GroupCreateView user={user} profile={profile} allUsers={allUsers} setView={setView} showNotification={showNotification} />}
+                    {view === 'birthday-cards' && <BirthdayCardBox user={user} setView={setView} />}
+                    {view === 'sticker-create' && <StickerEditor user={user} profile={profile} onClose={() => setView('sticker-store')} showNotification={showNotification} />}
+                    {view === 'sticker-store' && <StickerStoreView user={user} setView={setView} showNotification={showNotification} profile={profile} allUsers={allUsers} />}
+                </div>
+            )}
+            
+            {/* Overlay Modals (Global) */}
+            {searchModalOpen && <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/60"><div className="bg-white w-full max-w-sm rounded-[32px] p-8"><h2 className="text-xl font-bold mb-6">検索</h2><input className="w-full bg-gray-50 rounded-2xl py-4 px-6 mb-6 outline-none" placeholder="IDを入力" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /><div className="flex gap-4"><button className="flex-1 py-4 text-gray-600 font-bold" onClick={() => setSearchModalOpen(false)}>閉じる</button><button className="flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold" onClick={() => addFriendById(searchQuery)}>追加</button></div></div></div>}
+            
+            {/* Bottom Navigation */}
+            {user && !activeCall && ['home', 'voom'].includes(view) && (
+                <div className="h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0">
+                    <div className={`flex flex-col items-center gap-1 cursor-pointer transition-all ${view === 'home' ? 'text-green-500' : 'text-gray-400'}`} onClick={() => setView('home')}><Home className="w-6 h-6" /><span className="text-[10px] font-bold">ホーム</span></div>
+                    <div className={`flex flex-col items-center gap-1 cursor-pointer transition-all ${view === 'voom' ? 'text-green-500' : 'text-gray-400'}`} onClick={() => setView('voom')}><LayoutGrid className="w-6 h-6" /><span className="text-[10px] font-bold">VOOM</span></div>
+                </div>
+            )}
+          </>
       )}
       <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
     </div>
