@@ -1,27 +1,25 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
-import {
-  getAuth,
-  signInAnonymously,
+import { 
+  getAuth, 
+  signInAnonymously, 
   onAuthStateChanged,
-  setPersistence,
-  browserLocalPersistence,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  signOut,
+  signInWithRedirect,
   GoogleAuthProvider,
-  signInWithRedirect
+  signOut
 } from 'firebase/auth';
-import {
-  getFirestore,
-  collection,
-  doc,
-  setDoc,
-  getDoc,
-  updateDoc,
-  onSnapshot,
-  query,
-  addDoc,
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  updateDoc, 
+  onSnapshot, 
+  query, 
+  addDoc, 
   deleteDoc,
   where,
   arrayUnion,
@@ -36,14 +34,14 @@ import {
   increment,
   runTransaction
 } from 'firebase/firestore';
-import {
+import { 
   Search, UserPlus, Image as ImageIcon, Send, X, ChevronLeft, Settings, Home, LayoutGrid, Trash2,
   Plus, Video, Heart, MessageCircle, Camera as CameraIcon, Maximize, Upload, Copy, Contact, Play,
   Gift, Cake, Users, Check, Loader2, Bell, BellOff, Mic, Square, Ban, Edit2, Palette, PhoneOff,
   LogOut, RefreshCcw, ArrowUpCircle, Reply, Smile, StopCircle, PhoneCall, Phone, FileText,
   Paperclip, Download, UserMinus, AtSign, Store, PenTool, Eraser, Type, CheckCircle, XCircle,
   Lock, ShoppingBag, Coins, Scissors, Star, Disc, ShieldAlert, Music, Volume2, ShoppingCart,
-  User, KeyRound, MicOff, VideoOff
+  User, KeyRound, MicOff, VideoOff, ArrowRightLeft, MoreVertical
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -61,14 +59,13 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// アプリID
+// データを維持するためのID
 const appId = "voom-app-persistent-v1";
 
-const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
-const CHUNK_SIZE = 716799;
+const CHUNK_SIZE = 700000; // Firestore制限回避のための分割サイズ
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
 
-// WebRTC STUN Servers
+// WebRTC Configuration
 const rtcConfig = {
   iceServers: [
     { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
@@ -152,9 +149,9 @@ const handleFileUpload = async (e, callback) => {
   else if (file.type.startsWith('video')) type = 'video';
   else if (file.type.startsWith('audio')) type = 'audio';
 
+  // 動画や大きなファイルはURL変換せずにFileオブジェクトのまま渡す（チャンク処理用）
   if (file.size > 1024 * 1024 || type === 'video' || type === 'file') {
-    const objectUrl = URL.createObjectURL(file);
-    callback(objectUrl, type, file);
+    callback(null, type, file); 
   } else {
     const reader = new FileReader();
     reader.onload = (event) => callback(event.target.result, type, file);
@@ -187,150 +184,7 @@ const handleCompressedUpload = (e, callback) => {
   reader.readAsDataURL(file);
 };
 
-const generateThumbnail = (file) => {
-  return new Promise((resolve) => {
-    if (!file) { resolve(null); return; }
-    const MAX_SIZE = 320; 
-    if (file.type.startsWith('image')) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                let width = img.width;
-                let height = img.height;
-                if (width > height) { if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; } } else { if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; } }
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
-                resolve(canvas.toDataURL('image/jpeg', 0.5));
-            };
-            img.onerror = () => resolve(null);
-            img.src = e.target.result;
-        };
-        reader.onerror = () => resolve(null);
-        reader.readAsDataURL(file);
-    } else if (file.type.startsWith('video')) {
-        const video = document.createElement('video');
-        video.muted = true;
-        video.playsInline = true;
-        video.crossOrigin = "anonymous";
-        video.preload = "metadata";
-        const capture = () => {
-            try {
-                const canvas = document.createElement('canvas');
-                let width = video.videoWidth;
-                let height = video.videoHeight;
-                if (!width || !height) { resolve(null); return; }
-                if (width > height) { if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; } } else { if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; } }
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(video, 0, 0, width, height);
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
-                video.src = "";
-                video.load();
-                resolve(dataUrl);
-            } catch(e) { resolve(null); }
-        };
-        video.onloadeddata = () => { video.currentTime = 0.5; };
-        video.onseeked = () => { capture(); };
-        video.onerror = () => resolve(null);
-        setTimeout(() => resolve(null), 2000);
-        try { video.src = URL.createObjectURL(file); } catch(e) { resolve(null); }
-    } else { resolve(null); }
-  });
-};
-
-// --- Auth Component (Login) ---
-
-const AuthView = ({ onLogin, showNotification }) => {
-  const [isLoginMode, setIsLoginMode] = useState(true);
-  const [userId, setUserId] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const handleGoogleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    try { setLoading(true); await signInWithRedirect(auth, provider); }
-    catch (e) { console.error(e); showNotification("Googleログイン失敗"); setLoading(false); }
-  };
-
-  const handleGuestLogin = async () => {
-    setLoading(true);
-    try { await signInAnonymously(auth); showNotification("ゲストログインしました"); }
-    catch (e) { showNotification("ゲストログイン失敗"); } finally { setLoading(false); }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!userId || !password) return showNotification("IDとパスワードを入力してください");
-    const email = `${userId}@voom-persistent.app`;
-    setLoading(true);
-    try {
-      if (isLoginMode) {
-        await signInWithEmailAndPassword(auth, email, password);
-        showNotification("ログインしました");
-      } else {
-        if (!displayName) { showNotification("ニックネームを入力してください"); setLoading(false); return; }
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
-        await setDoc(doc(db, "artifacts", appId, "public", "data", "users", cred.user.uid), {
-          uid: cred.user.uid, name: displayName || userId, id: userId, status: "よろしくお願いします！",
-          birthday: "", avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cred.user.uid}`,
-          cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
-          friends: [], wallet: 1000, isBanned: false,
-        });
-        showNotification("アカウント作成完了");
-      }
-    } catch (e) { 
-        console.error("Auth Error:", e.code, e.message);
-        let msg = "エラーが発生しました";
-        // 日本語エラーメッセージへの変換 (400エラー対策)
-        if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials') {
-            msg = "ユーザーが見つかりません。IDを確認するか、新規登録してください。";
-        } else if (e.code === 'auth/wrong-password') {
-            msg = "パスワードが間違っています。";
-        } else if (e.code === 'auth/email-already-in-use') {
-            msg = "このIDは既に使用されています。";
-        } else if (e.code === 'auth/invalid-email') {
-            msg = "IDの形式が正しくありません。";
-        } else if (e.code === 'auth/operation-not-allowed') {
-            msg = "このログイン方法は現在無効です (Firebase設定を確認してください)";
-        }
-        showNotification(msg); 
-    } finally { setLoading(false); }
-  };
-
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50 p-4">
-      <div className="bg-white w-full max-w-sm rounded-[40px] shadow-2xl p-8 border border-white/50 backdrop-blur-sm">
-        <div className="text-center mb-8">
-          <div className="w-20 h-20 bg-indigo-500 rounded-3xl mx-auto flex items-center justify-center mb-4 shadow-lg"><MessageCircle className="w-10 h-10 text-white" /></div>
-          <h1 className="text-2xl font-black text-gray-800">チャットアプリ</h1>
-          <p className="text-sm text-gray-500 mt-2">{isLoginMode ? "ログインして始めましょう" : "アカウントを作成してデータを保存"}</p>
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {!isLoginMode && (
-            <div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">表示名</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><User className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" placeholder="山田 太郎" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div></div>
-          )}
-          <div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">ユーザーID</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><AtSign className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" placeholder="user_id" value={userId} onChange={(e) => setUserId(e.target.value)} /></div></div>
-          <div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">パスワード</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><KeyRound className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} /></div></div>
-          <button type="submit" disabled={loading} className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl flex items-center justify-center">{loading ? <Loader2 className="animate-spin" /> : (isLoginMode ? "ログイン" : "登録")}</button>
-        </form>
-        <div className="mt-6 flex flex-col gap-3">
-          <button onClick={handleGoogleLogin} className="w-full bg-white border text-gray-700 font-bold py-3 rounded-2xl shadow-sm flex items-center justify-center gap-2"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/action/google.svg" className="w-4 h-4" />Googleでログイン</button>
-          <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-xs font-bold text-gray-400 hover:text-indigo-500">{isLoginMode ? "アカウントをお持ちでない方はこちら" : "すでにアカウントをお持ちの方はこちら"}</button>
-          <button onClick={handleGuestLogin} className="text-xs font-bold text-gray-400 underline hover:text-gray-600">お試しゲストログイン</button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // --- Video Call Component ---
-
 const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = true }) => {
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
@@ -434,7 +288,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   return (
     <div className="fixed inset-0 z-[1000] bg-black flex flex-col animate-in fade-in">
       <div className="relative flex-1 bg-gray-900 flex items-center justify-center">
-        {/* Remote Video */}
         {remoteStream ? (
            <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
         ) : (
@@ -443,8 +296,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
              <p>接続中...</p>
            </div>
         )}
-        
-        {/* Local Video (PiP) */}
         {isVideoEnabled && (
           <div className="absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg">
             <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]" />
@@ -467,6 +318,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
     </div>
   );
 };
+
+// --- Modals ---
 
 const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, showNotification }) => {
   const [amount, setAmount] = useState("");
@@ -508,8 +361,6 @@ const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, sh
     </div>
   );
 };
-
-// --- Modals & Sub-components ---
 
 const ContactSelectModal = ({ onClose, onSend, friends }) => (
   <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
@@ -655,29 +506,6 @@ const OutgoingCallOverlay = ({ callData, onCancel, allUsers }) => (
   </div>
 );
 
-const CallAcceptedOverlay = ({ callData, onJoin }) => (
-  <div className="fixed inset-0 z-[500] bg-gray-900/90 flex flex-col items-center justify-center px-6 animate-in fade-in duration-300 backdrop-blur-sm">
-    <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border border-white/20"><div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce"><Video className="w-10 h-10 text-green-600" /></div><h2 className="text-2xl font-bold text-gray-800 mb-2">相手が応答しました</h2><p className="text-gray-500 mb-8 text-sm">下のボタンを押して通話を開始してください</p><button onClick={onJoin} className="w-full py-4 bg-green-500 hover:bg-green-600 text-white font-bold rounded-2xl transition-all shadow-lg shadow-green-200 transform hover:scale-[1.02] flex items-center justify-center gap-2"><Video className="w-5 h-5" />通話に参加する</button></div>
-  </div>
-);
-
-const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer }) => (
-  <div className="fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in duration-200">
-    <div className="bg-white w-full max-w-sm rounded-[40px] overflow-hidden shadow-2xl relative flex flex-col items-center pb-8">
-      <button onClick={onClose} className="absolute top-4 right-4 z-10 bg-black/20 text-white p-2 rounded-full backdrop-blur-md hover:bg-black/30"><X className="w-6 h-6"/></button>
-      <div className="w-full h-48 bg-gray-200"><img src={friend.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80"} className="w-full h-full object-cover" /></div>
-      <div className="-mt-16 mb-4 relative"><img src={friend.avatar} className="w-32 h-32 rounded-[40px] border-[6px] border-white object-cover shadow-lg" /></div>
-      <h2 className="text-2xl font-bold mb-1">{friend.name}</h2>
-      <p className="text-xs text-gray-400 font-mono mb-4">ID: {friend.id}</p>
-      <div className="w-full px-8 mb-6"><p className="text-center text-sm text-gray-600 bg-gray-50 py-3 px-4 rounded-2xl">{friend.status || "ステータスなし"}</p></div>
-      <div className="flex gap-4 w-full px-8">
-        <button onClick={() => { onStartChat(friend.uid); onClose(); }} className="flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2"><MessageCircle className="w-5 h-5" /> トーク</button>
-        {onTransfer && <button onClick={onTransfer} className="flex-1 py-3 bg-yellow-500 text-white rounded-2xl font-bold shadow-lg shadow-yellow-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2"><Coins className="w-5 h-5" /> 送金</button>}
-      </div>
-    </div>
-  </div>
-);
-
 const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, addFriendById, onEdit, onDelete, onPreview, onReply, onReaction, allUsers, onStickerClick, onShowProfile }) => {
     const isMe = m.senderId === user.uid;
     const [mediaSrc, setMediaSrc] = useState(null); 
@@ -780,7 +608,6 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
     const finalSrc = mediaSrc || m.preview;
     const isShowingPreview = loading || isInvalidBlob || (finalSrc === m.preview);
     const handleBubbleClick = (e) => { e.stopPropagation(); setShowMenu(!showMenu); };
-    
     const renderContent = (text) => {
       if (!text) return "";
       const regex = /(https?:\/\/[^\s]+)|(@[^\s]+)/g;
@@ -791,19 +618,18 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
         if (part.startsWith('@')) {
            const name = part.substring(1);
            const mentionedUser = allUsers.find(u => u.name === name);
-           if (mentionedUser) return <span key={i} className="text-blue-500 font-bold cursor-pointer hover:underline bg-blue-50 px-1 rounded" onClick={(e) => { e.stopPropagation(); onShowProfile && onShowProfile(mentionedUser); }}>{part}</span>;
+           if (mentionedUser) return <span key={i} className="text-blue-500 font-bold cursor-pointer hover:underline" onClick={(e) => { e.stopPropagation(); onShowProfile(mentionedUser); }}>{part}</span>;
         }
         return part;
       });
     };
-    
     const getUserNames = (uids) => { if (!uids || !allUsers) return ""; return uids.map(uid => { const u = allUsers.find(user => user.uid === uid); return u ? u.name : "不明なユーザー"; }).join(", "); };
 
     return (
       <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} gap-2 relative group mb-4`}>
-        {!isMe && (<div className="relative mt-1 cursor-pointer" onClick={(e) => { e.stopPropagation(); onShowProfile && onShowProfile(sender); }}><img key={sender?.avatar} src={sender?.avatar} className="w-8 h-8 rounded-lg object-cover border" loading="lazy" />{isTodayBirthday(sender?.birthday) && <span className="absolute -top-1 -right-1 text-[8px]">🎂</span>}</div>)}
+        {!isMe && (<div className="relative mt-1 cursor-pointer" onClick={(e) => { e.stopPropagation(); onShowProfile(sender); }}><img key={sender?.avatar} src={sender?.avatar} className="w-8 h-8 rounded-lg object-cover border" loading="lazy" />{isTodayBirthday(sender?.birthday) && <span className="absolute -top-1 -right-1 text-[8px]">🎂</span>}</div>)}
         <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[75%]`}>
-          {!isMe && isGroup && <div className="text-[10px] text-gray-600 font-bold mb-1 ml-1 cursor-pointer hover:underline" onClick={() => onShowProfile && onShowProfile(sender)}>{sender?.name}</div>}
+          {!isMe && isGroup && <div className="text-[10px] text-gray-600 font-bold mb-1 ml-1">{sender?.name}</div>}
           <div className="relative">
              <div onClick={handleBubbleClick} className={`p-2 px-3 rounded-2xl text-[13px] shadow-sm relative cursor-pointer ${m.type === 'sticker' ? 'bg-transparent shadow-none p-0' : (isMe ? 'bg-[#7cfc00] rounded-tr-none' : 'bg-white rounded-tl-none')} ${['image', 'video'].includes(m.type) ? 'p-0 bg-transparent shadow-none' : ''}`}>
               {m.replyTo && m.type !== 'sticker' && (<div className={`mb-2 p-2 rounded-lg border-l-4 text-xs opacity-70 ${isMe ? 'bg-black/5 border-white/50' : 'bg-gray-100 border-gray-300'}`}><div className="font-bold text-[10px] mb-0.5">{m.replyTo.senderName}</div><div className="truncate flex items-center gap-1">{m.replyTo.type === 'image' && <ImageIcon className="w-3 h-3" />}{m.replyTo.type === 'video' && <Video className="w-3 h-3" />}{['image', 'video'].includes(m.replyTo.type) ? (m.replyTo.type === 'image' ? '[画像]' : '[動画]') : (m.replyTo.content || '[メッセージ]')}</div></div>)}
@@ -860,11 +686,11 @@ const PostItem = ({ post, user, allUsers, db, appId, profile }) => {
             })(); 
         } 
     }, [post.id, post.chunkCount]);
-    useEffect(() => { return () => { if (mediaSrc && mediaSrc.startsWith('blob:')) URL.revokeObjectURL(mediaSrc); }; }, [mediaSrc]);
+    useEffect(() => { return () => { if (mediaSrc && mediaSrc.startsWith('blob:') && !isMe) URL.revokeObjectURL(mediaSrc); }; }, [mediaSrc]);
     const toggleLike = async () => await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'posts', post.id), { likes: isLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
     const submitComment = async () => { if (!commentText.trim()) return; await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'posts', post.id), { comments: arrayUnion({ userId: user.uid, userName: profile.name, text: commentText, createdAt: new Date().toISOString() }) }); setCommentText(''); };
     return (
-      <div className="bg-white p-4 mb-2 border-b">
+      <div className="bg-white p-4 mb-2 border-b shadow-sm rounded-xl mx-2 mt-2">
         <div className="flex items-center gap-3 mb-3"><div className="relative"><img key={u?.avatar} src={u?.avatar} className="w-10 h-10 rounded-xl border" loading="lazy" />{isTodayBirthday(u?.birthday) && <span className="absolute -top-1 -right-1 text-xs">🎂</span>}</div><div className="font-bold text-sm">{u?.name}</div></div>
         <div className="text-sm mb-3 whitespace-pre-wrap">{post.content}</div>
         {(mediaSrc || isLoadingMedia) && <div className="mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px]">{isLoadingMedia ? <Loader2 className="animate-spin w-5 h-5"/> : post.mediaType === 'video' ? <video src={mediaSrc} className="w-full rounded-2xl max-h-96 bg-black" controls playsInline /> : <img src={mediaSrc} className="w-full rounded-2xl max-h-96 object-cover" loading="lazy" />}</div>}
@@ -872,304 +698,6 @@ const PostItem = ({ post, user, allUsers, db, appId, profile }) => {
         <div className="space-y-3 mb-4">{post.comments?.map((c, i) => <div key={i} className="bg-gray-50 rounded-2xl px-3 py-2"><div className="text-[10px] font-bold text-gray-500">{c.userName}</div><div className="text-xs">{c.text}</div></div>)}</div>
         <div className="flex items-center gap-2 bg-gray-100 rounded-full px-4 py-1"><input className="flex-1 bg-transparent text-xs py-2 outline-none" placeholder="コメント..." value={commentText} onChange={e => setCommentText(e.target.value)} onKeyPress={e => e.key === 'Enter' && submitComment()} /><button onClick={submitComment} className="text-green-500"><Send className="w-4 h-4" /></button></div>
       </div>
-    );
-};
-
-const GroupCreateView = ({ user, profile, allUsers, setView, showNotification }) => {
-    const [groupName, setGroupName] = useState('');
-    const [groupIcon, setGroupIcon] = useState("https://api.dicebear.com/7.x/shapes/svg?seed=group");
-    const [selectedMembers, setSelectedMembers] = useState([]);
-    const friendsList = allUsers.filter(u => profile?.friends?.includes(u.uid));
-    const toggleMember = (uid) => { setSelectedMembers(prev => prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid]); };
-    const handleCreate = async () => {
-      if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
-      if (!groupName.trim()) return showNotification("グループ名を入力してください");
-      if (selectedMembers.length === 0) return showNotification("メンバーを選択してください");
-      const participants = [user.uid, ...selectedMembers];
-      const newGroupChat = { name: groupName, icon: groupIcon, participants, isGroup: true, createdBy: user.uid, updatedAt: serverTimestamp(), lastMessage: { content: "グループを作成しました", senderId: user.uid } };
-      try { const chatRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats'), newGroupChat); await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats', chatRef.id, 'messages'), { senderId: user.uid, content: `${profile.name}がグループを作成しました。`, type: 'text', createdAt: serverTimestamp(), readBy: [user.uid] }); showNotification("グループを作成しました"); setView('home'); } catch (err) { showNotification("作成に失敗しました"); }
-    };
-    return (
-      <div className="flex flex-col h-full bg-white">
-        <div className="p-4 flex items-center gap-4 bg-white border-b sticky top-0 z-10"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><span className="font-bold flex-1">グループ作成</span><button onClick={handleCreate} className="text-green-500 font-bold text-sm">作成</button></div>
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide">
-          <div className="flex flex-col items-center gap-4"><div className="relative"><img src={groupIcon} className="w-24 h-24 rounded-3xl object-cover bg-gray-100 border shadow-sm" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer shadow-lg border-2 border-white"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, d => setGroupIcon(d))} /></label></div><input className="w-full text-center text-lg font-bold border-b py-2 focus:outline-none focus:border-green-500" placeholder="グループ名を入力" value={groupName} onChange={e => setGroupName(e.target.value)} /></div>
-          <div className="space-y-3"><h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest px-1">友だちを選択</h3><div className="divide-y border-y">{friendsList.map(f => (<div key={f.uid} className="flex items-center gap-4 py-3 cursor-pointer" onClick={() => toggleMember(f.uid)}><div className="relative"><img src={f.avatar} className="w-10 h-10 rounded-xl object-cover border" /></div><span className="flex-1 font-bold text-sm">{f.name}</span><div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${selectedMembers.includes(f.uid) ? 'bg-green-500 border-green-500' : 'border-gray-200'}`}>{selectedMembers.includes(f.uid) && <Check className="w-4 h-4 text-white" />}</div></div>))}</div></div>
-        </div>
-      </div>
-    );
-};
-
-const BirthdayCardBox = ({ user, setView }) => {
-    const [myCards, setMyCards] = useState([]);
-    useEffect(() => {
-      if (!user) return;
-      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'birthday_cards'), where('toUserId', '==', user.uid));
-      const unsub = onSnapshot(q, (snap) => {
-        const cards = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        cards.sort((a, b) => (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0) - (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0));
-        setMyCards(cards);
-      });
-      return () => unsub();
-    }, [user]);
-    const getColorClass = (color) => { switch(color) { case 'pink': return 'bg-pink-100 border-pink-200 text-pink-800'; case 'blue': return 'bg-blue-100 border-blue-200 text-blue-800'; case 'yellow': return 'bg-yellow-100 border-yellow-200 text-yellow-800'; case 'green': return 'bg-green-100 border-green-200 text-green-800'; default: return 'bg-white border-gray-200'; } };
-    return (
-      <div className="flex flex-col h-full bg-white">
-        <div className="p-4 border-b flex items-center gap-4 sticky top-0 bg-white z-10 shrink-0"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><h1 className="text-xl font-bold flex items-center gap-2"><Gift className="w-6 h-6 text-pink-500"/> カードBOX</h1></div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide bg-gray-50">{myCards.length === 0 ? <div className="text-center py-20 text-gray-400 font-bold">カードはまだありません</div> : myCards.map(card => (<div key={card.id} className={`p-6 rounded-3xl border-2 shadow-sm relative ${getColorClass(card.color)}`}><div className="absolute top-4 right-4 text-4xl opacity-50">🎂</div><div className="font-bold text-lg mb-2">Happy Birthday!</div><div className="whitespace-pre-wrap text-sm font-medium mb-4">{card.message}</div><div className="flex items-center justify-between mt-4 pt-4 border-t border-black/10"><div className="text-xs font-bold opacity-70">From: {card.fromName}</div><div className="text-[10px] opacity-60">{formatDate(card.createdAt)}</div></div></div>))}</div>
-      </div>
-    );
-};
-
-const StickerEditor = ({ user, profile, onClose, showNotification }) => {
-    const canvasRef = useRef(null);
-    const containerRef = useRef(null);
-    const cuttingSnapshotRef = useRef(null);
-    const [color, setColor] = useState('#000000');
-    const [lineWidth, setLineWidth] = useState(5);
-    const [fontSize, setFontSize] = useState(24);
-    const [createdStickers, setCreatedStickers] = useState([]);
-    const [packName, setPackName] = useState('');
-    const [packDescription, setPackDescription] = useState('');
-    const [isDrawing, setIsDrawing] = useState(false);
-    const [mode, setMode] = useState('pen');
-    const [textInput, setTextInput] = useState('');
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [cutPoints, setCutPoints] = useState([]);
-    const [audioData, setAudioData] = useState(null);
-    const [isRecordingSticker, setIsRecordingSticker] = useState(false);
-    const stickerMediaRecorderRef = useRef(null);
-    const [textObjects, setTextObjects] = useState([]);
-    const [draggingTextId, setDraggingTextId] = useState(null);
-
-    useEffect(() => {
-        const canvas = canvasRef.current;
-        if (canvas) {
-            canvas.width = 250; canvas.height = 250;
-            const ctx = canvas.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 250, 250); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        }
-    }, []);
-
-    const startDraw = (e) => {
-        if (draggingTextId) return;
-        const canvas = canvasRef.current; const ctx = canvas.getContext('2d'); const rect = canvas.getBoundingClientRect(); const x = (e.clientX || e.touches[0].clientX) - rect.left; const y = (e.clientY || e.touches[0].clientY) - rect.top;
-        if (mode === 'scissors') {
-            setIsDrawing(true); setCutPoints([{x, y}]); cuttingSnapshotRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height); ctx.beginPath(); ctx.moveTo(x, y); return;
-        }
-        ctx.beginPath(); ctx.moveTo(x, y); setIsDrawing(true);
-    };
-
-    const draw = (e) => {
-        if (!isDrawing) return;
-        const canvas = canvasRef.current; const ctx = canvas.getContext('2d'); const rect = canvas.getBoundingClientRect(); const x = (e.clientX || e.touches[0].clientX) - rect.left; const y = (e.clientY || e.touches[0].clientY) - rect.top;
-        if (mode === 'scissors') {
-            setCutPoints(prev => [...prev, {x, y}]); ctx.lineWidth = 2; ctx.strokeStyle = '#ff0000'; ctx.setLineDash([5, 5]); ctx.lineTo(x, y); ctx.stroke(); return;
-        }
-        ctx.strokeStyle = mode === 'eraser' ? '#ffffff' : color; ctx.lineWidth = mode === 'eraser' ? 20 : lineWidth; ctx.setLineDash([]); ctx.lineTo(x, y); ctx.stroke();
-    };
-
-    const endDraw = () => { if (mode === 'scissors' && isDrawing) { setIsDrawing(false); applyFreehandCut(); setCutPoints([]); cuttingSnapshotRef.current = null; return; } setIsDrawing(false); };
-    const clearCanvas = () => { const canvas = canvasRef.current; const ctx = canvas.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height); setTextObjects([]); setAudioData(null); };
-    
-    const addText = () => { 
-        if (!textInput) return; 
-        const newText = { id: Date.now(), text: textInput, x: 125, y: 125, color: color, fontSize: fontSize };
-        setTextObjects([...textObjects, newText]);
-        setTextInput(''); 
-        showNotification("テキストを追加しました。ドラッグして移動できます"); 
-    };
-
-    const handleTextMouseDown = (e, id) => {
-        e.stopPropagation();
-        setDraggingTextId(id);
-    };
-
-    const handleContainerMouseMove = (e) => {
-        if (draggingTextId) {
-            const rect = containerRef.current.getBoundingClientRect();
-            const x = (e.clientX || e.touches[0].clientX) - rect.left;
-            const y = (e.clientY || e.touches[0].clientY) - rect.top;
-            setTextObjects(prev => prev.map(t => t.id === draggingTextId ? { ...t, x, y } : t));
-        }
-    };
-
-    const handleContainerMouseUp = () => {
-        setDraggingTextId(null);
-    };
-
-    const handleImageUpload = (e) => {
-        const file = e.target.files[0]; if (!file) return;
-        handleCompressedUpload(e, (dataUrl) => {
-             const img = new Image();
-             img.onload = () => {
-                 const canvas = canvasRef.current; const ctx = canvas.getContext('2d');
-                 let width = img.width; let height = img.height; const maxSize = 250;
-                 if (width > height) { if (width > maxSize) { height *= maxSize / width; width = maxSize; } } else { if (height > maxSize) { width *= maxSize / height; height = maxSize; } }
-                 const x = (maxSize - width) / 2; const y = (maxSize - height) / 2;
-                 ctx.drawImage(img, x, y, width, height);
-             };
-             img.src = dataUrl;
-        });
-        e.target.value = '';
-    };
-
-    const handleAudioUpload = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            setAudioData(ev.target.result);
-            showNotification("音声を追加しました 🎵");
-        };
-        reader.readAsDataURL(file);
-        e.target.value = '';
-    };
-
-    const startStickerRecording = async () => {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const mediaRecorder = new MediaRecorder(stream);
-            stickerMediaRecorderRef.current = mediaRecorder;
-            const chunks = [];
-            mediaRecorder.ondataavailable = e => chunks.push(e.data);
-            mediaRecorder.onstop = () => {
-                const blob = new Blob(chunks, { type: 'audio/webm' });
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    setAudioData(reader.result);
-                    showNotification("録音しました 🎤");
-                };
-                reader.readAsDataURL(blob);
-                stream.getTracks().forEach(t => t.stop());
-            };
-            mediaRecorder.start();
-            setIsRecordingSticker(true);
-        } catch(e) {
-            showNotification("マイクを使用できません");
-        }
-    };
-
-    const stopStickerRecording = () => {
-        if (stickerMediaRecorderRef.current && isRecordingSticker) {
-            stickerMediaRecorderRef.current.stop();
-            setIsRecordingSticker(false);
-        }
-    };
-
-    const cutShape = (shape) => {
-        const canvas = canvasRef.current; const ctx = canvas.getContext('2d'); const width = canvas.width; const height = canvas.height;
-        const tempCanvas = document.createElement('canvas'); tempCanvas.width = width; tempCanvas.height = height; const tempCtx = tempCanvas.getContext('2d'); tempCtx.drawImage(canvas, 0, 0);
-        ctx.clearRect(0, 0, width, height); ctx.save(); ctx.beginPath();
-        if (shape === 'circle') { ctx.arc(width / 2, height / 2, width / 2, 0, Math.PI * 2); } 
-        else if (shape === 'heart') { const topCurveHeight = height * 0.3; ctx.moveTo(width / 2, height * 0.2); ctx.bezierCurveTo(width / 2, 0, 0, 0, 0, topCurveHeight); ctx.bezierCurveTo(0, (height + topCurveHeight) / 2, width / 2, height * 0.9, width / 2, height); ctx.bezierCurveTo(width / 2, height * 0.9, width, (height + topCurveHeight) / 2, width, topCurveHeight); ctx.bezierCurveTo(width, 0, width / 2, 0, width / 2, height * 0.2); } 
-        else if (shape === 'star') { const cx = width / 2; const cy = height / 2; const outerRadius = width / 2; const innerRadius = width / 4; const spikes = 5; let rot = Math.PI / 2 * 3; let x = cx; let y = cy; const step = Math.PI / spikes; ctx.moveTo(cx, cy - outerRadius); for (let i = 0; i < spikes; i++) { x = cx + Math.cos(rot) * outerRadius; y = cy + Math.sin(rot) * outerRadius; ctx.lineTo(x, y); rot += step; x = cx + Math.cos(rot) * innerRadius; y = cy + Math.sin(rot) * innerRadius; ctx.lineTo(x, y); rot += step; } ctx.lineTo(cx, cy - outerRadius); ctx.closePath(); }
-        ctx.clip(); ctx.drawImage(tempCanvas, 0, 0); ctx.restore(); showNotification(`${shape === 'circle' ? '丸' : shape === 'heart' ? 'ハート' : '星'}型に切り抜きました`);
-    };
-
-    const applyFreehandCut = () => {
-        if (cutPoints.length < 3 || !cuttingSnapshotRef.current) return;
-        const canvas = canvasRef.current; const ctx = canvas.getContext('2d'); const width = canvas.width; const height = canvas.height;
-        ctx.clearRect(0, 0, width, height); ctx.save(); ctx.beginPath(); ctx.moveTo(cutPoints[0].x, cutPoints[0].y); for (let i = 1; i < cutPoints.length; i++) ctx.lineTo(cutPoints[i].x, cutPoints[i].y); ctx.closePath(); ctx.clip();
-        const tempCanvas = document.createElement('canvas'); tempCanvas.width = width; tempCanvas.height = height; const tempCtx = tempCanvas.getContext('2d'); tempCtx.putImageData(cuttingSnapshotRef.current, 0, 0); ctx.drawImage(tempCanvas, 0, 0); ctx.restore(); showNotification("自由に切り抜きました");
-    };
-
-    const saveStickerToPack = () => { 
-        if (createdStickers.length >= 8) { showNotification("1パック最大8個までです"); return; } 
-        const canvas = canvasRef.current; 
-        const ctx = canvas.getContext('2d');
-        
-        ctx.save();
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        textObjects.forEach(t => {
-            ctx.font = `bold ${t.fontSize}px sans-serif`;
-            ctx.fillStyle = t.color;
-            ctx.fillText(t.text, t.x, t.y);
-        });
-        ctx.restore();
-
-        const dataUrl = canvas.toDataURL('image/png', 0.8); 
-        setCreatedStickers([...createdStickers, { image: dataUrl, audio: audioData }]); 
-        clearCanvas(); 
-        showNotification("パックに追加しました"); 
-    };
-
-    const submitPack = async () => {
-        if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
-        if (!packName.trim()) return showNotification("パック名を入力してください"); if (createdStickers.length === 0) return showNotification("スタンプがありません");
-        setIsSubmitting(true);
-        try { await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'sticker_packs'), { authorId: user.uid, authorName: profile?.name || user.displayName || 'Creator', name: packName, description: packDescription, stickers: createdStickers, price: 100, status: 'pending', purchasedBy: [], createdAt: serverTimestamp() }); showNotification("申請しました！承認されると報酬がもらえます"); onClose(); } catch (e) { console.error(e); showNotification("エラーが発生しました"); } finally { setIsSubmitting(false); }
-    };
-
-    return (
-        <div className="flex flex-col h-full bg-white">
-            <div className="p-4 border-b flex items-center justify-between"><button onClick={onClose}><ChevronLeft className="w-6 h-6"/></button><h2 className="font-bold">スタンプ作成スタジオ</h2><div className="w-6"></div></div>
-            <div className="flex-1 overflow-y-auto p-4 flex flex-col items-center gap-4">
-                <div className="w-full max-w-xs space-y-2"><div><label className="text-xs font-bold text-gray-500 mb-1">パック名</label><input className="w-full border p-2 rounded-xl" placeholder="例: 面白うさぎセット" value={packName} onChange={e=>setPackName(e.target.value)} /></div><div><label className="text-xs font-bold text-gray-500 mb-1">説明文</label><input className="w-full border p-2 rounded-xl" placeholder="どんなスタンプですか？" value={packDescription} onChange={e=>setPackDescription(e.target.value)} /></div></div>
-                <div 
-                    ref={containerRef}
-                    className="relative" 
-                    style={{ width: '250px', height: '250px' }}
-                    onMouseMove={handleContainerMouseMove}
-                    onMouseUp={handleContainerMouseUp}
-                    onTouchMove={handleContainerMouseMove}
-                    onTouchEnd={handleContainerMouseUp}
-                >
-                    <canvas ref={canvasRef} className={`border-2 border-dashed ${mode === 'scissors' ? 'border-red-400 bg-red-50' : 'border-gray-300 bg-white'} rounded-xl shadow-inner touch-none`} onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw} onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} style={{ width: '100%', height: '100%' }}/>
-                    {textObjects.map(t => (
-                        <div 
-                            key={t.id}
-                            style={{ 
-                                position: 'absolute', 
-                                left: t.x, 
-                                top: t.y, 
-                                transform: 'translate(-50%, -50%)', 
-                                color: t.color, 
-                                fontSize: `${t.fontSize}px`, 
-                                fontWeight: 'bold', 
-                                cursor: 'move',
-                                userSelect: 'none',
-                                pointerEvents: 'auto'
-                            }}
-                            onMouseDown={(e) => handleTextMouseDown(e, t.id)}
-                            onTouchStart={(e) => handleTextMouseDown(e, t.id)}
-                        >
-                            {t.text}
-                        </div>
-                    ))}
-                    <label className="absolute top-2 right-2 bg-gray-100 p-2 rounded-full cursor-pointer hover:bg-gray-200" title="画像を読み込む"><Upload className="w-4 h-4 text-gray-600"/><input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} /></label>{mode === 'scissors' && <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-red-500 font-bold opacity-30 pointer-events-none text-xl">切り抜きモード</div>}
-                    {audioData && <div className="absolute bottom-2 left-2 bg-green-100 text-green-600 p-1 rounded-full"><Music className="w-4 h-4"/></div>}
-                </div>
-                <div className="flex gap-2 items-center w-full max-w-xs justify-center flex-wrap"><button onClick={() => setMode('pen')} className={`p-3 rounded-full ${mode === 'pen' ? 'bg-black text-white' : 'bg-gray-100'}`}><PenTool className="w-5 h-5"/></button><button onClick={() => setMode('eraser')} className={`p-3 rounded-full ${mode === 'eraser' ? 'bg-black text-white' : 'bg-gray-100'}`}><Eraser className="w-5 h-5"/></button><button onClick={() => setMode('scissors')} className={`p-3 rounded-full ${mode === 'scissors' ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100'}`} title="フリーハンド切り抜き"><Scissors className="w-5 h-5"/></button><div className="w-px h-8 bg-gray-300 mx-2"></div><button onClick={() => cutShape('circle')} className="p-3 rounded-full bg-blue-100 text-blue-600" title="丸く切り抜く"><Disc className="w-5 h-5"/></button><button onClick={() => cutShape('heart')} className="p-3 rounded-full bg-pink-100 text-pink-600" title="ハート型に切り抜く"><Heart className="w-5 h-5"/></button><button onClick={() => cutShape('star')} className="p-3 rounded-full bg-yellow-100 text-yellow-600" title="星型に切り抜く"><Star className="w-5 h-5"/></button></div>
-                <div className="flex flex-col gap-2 w-full max-w-xs">
-                    <div className="flex gap-4 items-center justify-center">
-                        <div className="flex flex-col items-center">
-                            <span className="text-[10px] text-gray-400">太さ</span>
-                            <input type="range" min="1" max="20" value={lineWidth} onChange={e => setLineWidth(e.target.value)} className="w-20" />
-                        </div>
-                        <input type="color" value={color} onChange={e => setColor(e.target.value)} className="w-10 h-10 rounded-full overflow-hidden border-2" />
-                        <div className="flex flex-col items-center">
-                             <span className="text-[10px] text-gray-400">文字サイズ</span>
-                             <input type="range" min="12" max="60" value={fontSize} onChange={e => setFontSize(e.target.value)} className="w-20" />
-                        </div>
-                    </div>
-                    <div className="flex gap-2 items-center justify-center bg-gray-50 p-2 rounded-xl">
-                        <label className="p-2 bg-white rounded-lg shadow-sm cursor-pointer flex items-center gap-1 text-xs font-bold"><Upload className="w-3 h-3"/> 音声読込<input type="file" className="hidden" accept="audio/*" onChange={handleAudioUpload} /></label>
-                        {!isRecordingSticker ? (
-                             <button onClick={startStickerRecording} className="p-2 bg-red-100 text-red-500 rounded-lg shadow-sm flex items-center gap-1 text-xs font-bold"><Mic className="w-3 h-3"/> 録音</button>
-                        ) : (
-                             <button onClick={stopStickerRecording} className="p-2 bg-red-500 text-white rounded-lg shadow-sm flex items-center gap-1 text-xs font-bold animate-pulse"><StopCircle className="w-3 h-3"/> 停止</button>
-                        )}
-                        {audioData && <button onClick={() => setAudioData(null)} className="p-2 bg-gray-200 rounded-lg text-xs font-bold">音声削除</button>}
-                    </div>
-                </div>
-                <div className="flex gap-2 w-full max-w-xs"><input className="flex-1 border p-2 rounded-lg text-sm" placeholder="文字入れ..." value={textInput} onChange={e=>setTextInput(e.target.value)} /><button onClick={addText} className="bg-gray-200 p-2 rounded-lg text-xs font-bold">追加</button><button onClick={clearCanvas} className="bg-red-100 text-red-500 p-2 rounded-lg text-xs font-bold">全クリア</button></div>
-                <button onClick={saveStickerToPack} className="w-full max-w-xs py-3 bg-blue-500 text-white font-bold rounded-2xl shadow-lg">このスタンプをパックに追加 ({createdStickers.length}/8)</button>
-                {createdStickers.length > 0 && (<div className="w-full max-w-xs"><div className="text-xs font-bold text-gray-400 mb-2">作成済みリスト</div><div className="flex gap-2 overflow-x-auto pb-2">{createdStickers.map((s, i) => (<div key={i} className="relative"><img src={typeof s === 'string' ? s : s.image} className="w-16 h-16 border rounded bg-gray-50 object-contain" />{(typeof s !== 'string' && s.audio) && <div className="absolute bottom-0 right-0 bg-green-500 w-3 h-3 rounded-full border border-white"></div>}</div>))}</div></div>)}
-                <div className="w-full h-10"></div>
-            </div>
-            <div className="p-4 border-t bg-white"><button onClick={submitPack} disabled={createdStickers.length === 0 || isSubmitting} className="w-full py-4 bg-green-500 text-white font-bold rounded-2xl shadow-xl disabled:bg-gray-300">{isSubmitting ? <Loader2 className="w-6 h-6 animate-spin mx-auto"/> : '販売申請する (報酬は承認後)'}</button></div>
-        </div>
     );
 };
 
@@ -1243,7 +771,6 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     const [text, setText] = useState('');
     const [plusMenuOpen, setPlusMenuOpen] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
-    const [uploadProgress, setUploadProgress] = useState(0); 
     const [contactModalOpen, setContactModalOpen] = useState(false);
     const [cardModalOpen, setCardModalOpen] = useState(false);
     const [addMemberModalOpen, setAddMemberModalOpen] = useState(false);
@@ -1255,8 +782,6 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     const [recordingTime, setRecordingTime] = useState(0);
     const [replyTo, setReplyTo] = useState(null); 
     const mediaRecorderRef = useRef(null);
-    const audioChunksRef = useRef([]);
-    const audioStreamRef = useRef(null);
     const recordingIntervalRef = useRef(null);
     const [editingMsgId, setEditingMsgId] = useState(null);
     const [editingText, setEditingText] = useState('');
@@ -1269,8 +794,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     const [myStickerPacks, setMyStickerPacks] = useState([]);
     const [selectedPackId, setSelectedPackId] = useState(null);
     const [buyStickerModalPackId, setBuyStickerModalPackId] = useState(null);
-    const [viewProfile, setViewProfile] = useState(null);
-    const [coinModalTarget, setCoinModalTarget] = useState(null);
+    const [coinModalOpen, setCoinModalOpen] = useState(false);
 
     const chatData = chats.find(c => c.id === activeChatId);
     if (!chatData) return <div className="h-full flex items-center justify-center bg-white"><Loader2 className="w-8 h-8 animate-spin text-gray-400"/></div>;
@@ -1292,11 +816,9 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'sticker_packs'), where('purchasedBy', 'array-contains', user.uid));
         const unsub = onSnapshot(q, (snap) => {
             const packs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            // Also fetch own packs
             const q2 = query(collection(db, 'artifacts', appId, 'public', 'data', 'sticker_packs'), where('authorId', '==', user.uid));
             getDocs(q2).then(snap2 => {
                 const ownPacks = snap2.docs.map(d => ({ id: d.id, ...d.data() }));
-                // Merge and dedup
                 const all = [...packs, ...ownPacks];
                 const unique = Array.from(new Map(all.map(item => [item.id, item])).values());
                 setMyStickerPacks(unique);
@@ -1312,618 +834,605 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     const playNotificationSound = () => { try { const audioCtx = new (window.AudioContext || window.webkitAudioContext)(); const osc1 = audioCtx.createOscillator(); const gain1 = audioCtx.createGain(); osc1.type = 'sine'; osc1.frequency.setValueAtTime(880, audioCtx.currentTime); gain1.gain.setValueAtTime(0.1, audioCtx.currentTime); gain1.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1); osc1.connect(gain1); gain1.connect(audioCtx.destination); osc1.start(); osc1.stop(audioCtx.currentTime + 0.1); } catch (e) {} };
     useEffect(() => { if (!activeChatId || !messages.length) return; messages.filter(m => m.senderId !== user.uid && !m.readBy?.includes(user.uid)).forEach(async (m) => { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', m.id), { readBy: arrayUnion(user.uid) }); }); }, [messages.length]);
     useEffect(() => { if (messages.length > 0) { const lastMsg = messages[messages.length - 1]; if (isFirstLoad.current || lastMsg?.id !== lastMessageIdRef.current) { scrollRef.current?.scrollIntoView({ behavior: 'auto' }); lastMessageIdRef.current = lastMsg?.id; } isFirstLoad.current = false; } }, [messages]);
-    useEffect(() => { if (!chatData) return; const loadBackground = async () => { if (chatData.hasBackgroundChunks) { try { const chunksSnap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'background_chunks'), orderBy('index', 'asc'))); let data = ""; chunksSnap.forEach(d => data += d.data().data); setBackgroundSrc(data); } catch (e) { console.error("Failed to load background chunks", e); } } else if (chatData.backgroundImage) { setBackgroundSrc(chatData.backgroundImage); } else { setBackgroundSrc(null); } }; loadBackground(); }, [chatData?.id, chatData?.updatedAt, chatData?.hasBackgroundChunks, chatData?.backgroundImage, activeChatId]);
+    useEffect(() => { 
+      if (!chatData) return; 
+      if (chatData.background) { setBackgroundSrc(chatData.background); } else { setBackgroundSrc(null); }
+    }, [chatData]);
 
-    const startRecording = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioStreamRef.current = stream;
-        mediaRecorderRef.current = new MediaRecorder(stream);
-        audioChunksRef.current = [];
-        mediaRecorderRef.current.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
-        mediaRecorderRef.current.onstop = () => {
-          if (audioChunksRef.current.length === 0) return;
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          const audioFile = new File([audioBlob], "voice.webm", { type: 'audio/webm', lastModified: Date.now() });
-          sendMessage("", 'audio', {}, audioFile);
-          if (audioStreamRef.current) { audioStreamRef.current.getTracks().forEach(t => t.stop()); audioStreamRef.current = null; }
-        };
-        mediaRecorderRef.current.start();
-        setIsRecording(true);
-        setRecordingTime(0);
-        recordingIntervalRef.current = setInterval(() => { setRecordingTime(prev => prev + 1); }, 1000);
-      } catch (err) { console.error(err); showNotification("マイクの利用を許可してください"); }
-    };
-
-    const stopRecording = () => { 
-      if (mediaRecorderRef.current && isRecording) { mediaRecorderRef.current.stop(); setIsRecording(false); clearInterval(recordingIntervalRef.current); } 
-    };
-
-    const cancelRecording = () => {
-        if (mediaRecorderRef.current && isRecording) {
-            mediaRecorderRef.current.onstop = () => { if (audioStreamRef.current) { audioStreamRef.current.getTracks().forEach(t => t.stop()); audioStreamRef.current = null; } };
-            mediaRecorderRef.current.stop();
-            setIsRecording(false);
-            clearInterval(recordingIntervalRef.current);
-            audioChunksRef.current = []; 
-            showNotification("録音をキャンセルしました");
+    // チャンク分割アップロードロジック
+    const saveFileInChunks = async (file, chatId, msgId) => {
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        const base64 = await new Promise(r => {
+            const reader = new FileReader();
+            reader.onload = e => r(e.target.result.split(',')[1]); 
+            reader.readAsDataURL(file);
+        });
+        
+        const batch = writeBatch(db);
+        for (let i = 0; i < totalChunks; i++) {
+            const chunkData = base64.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+            const chunkRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'chats', chatId, 'messages', msgId, 'chunks'), `${i}`);
+            batch.set(chunkRef, { index: i, data: chunkData });
         }
+        await batch.commit();
+        return totalChunks;
     };
 
     const sendMessage = async (content, type = 'text', additionalData = {}, file = null) => {
-      if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
-      if ((!content && !file && type === 'text') || isUploading) return;
-      setIsUploading(true); setUploadProgress(0);
-      const currentReply = replyTo; setReplyTo(null);
-      setStickerMenuOpen(false); 
-      
-      try {
-        const msgCol = collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages');
-        const newMsgRef = doc(msgCol);
-        let localBlobUrl = null; let storedContent = content; let previewData = null;
-        const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: allUsers.find(u => u.uid === currentReply.senderId)?.name || 'Unknown', type: currentReply.type } } : {};
-        const fileData = file ? { fileName: file.name, fileSize: file.size, mimeType: file.type } : {};
-
-        if (file && ['image', 'video', 'audio', 'file'].includes(type)) {
-            localBlobUrl = URL.createObjectURL(file); storedContent = localBlobUrl;
-            if (['image', 'video'].includes(type)) { previewData = await generateThumbnail(file); }
-            await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, preview: previewData, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, isUploading: true, createdAt: serverTimestamp(), readBy: [user.uid] });
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId), { lastMessage: { content: type === 'text' ? content : `[${type}]`, senderId: user.uid }, updatedAt: serverTimestamp() });
-            setText(''); setPlusMenuOpen(false); setContactModalOpen(false);
-            setTimeout(() => { scrollRef.current?.scrollIntoView({ behavior: 'auto' }); }, 100);
-        }
-
-        let hasChunks = false, chunkCount = 0;
-        if (file && file.size > CHUNK_SIZE) {
-          hasChunks = true; chunkCount = Math.ceil(file.size / CHUNK_SIZE);
-          const CONCURRENCY = 100; // Increased concurrency
-          const executing = new Set();
-          let completed = 0;
-
-          for (let i = 0; i < chunkCount; i++) {
-            const start = i * CHUNK_SIZE; const end = Math.min(start + CHUNK_SIZE, file.size); const blobSlice = file.slice(start, end);
-            const p = new Promise((resolve, reject) => {
-                const reader = new FileReader(); 
-                reader.onload = async (e) => { 
-                    try {
-                        const base64Data = e.target.result.split(',')[1]; 
-                        await setDoc(doc(msgCol, newMsgRef.id, 'chunks', `${i}`), { data: base64Data, index: i }); 
-                        completed++;
-                        setUploadProgress(Math.round((completed / chunkCount) * 100));
-                        resolve();
-                    } catch(err) { reject(err); }
-                };
-                reader.onerror = reject;
-                reader.readAsDataURL(blobSlice);
-            });
-            const pWrapper = p.then(() => executing.delete(pWrapper));
-            executing.add(pWrapper);
-            if (executing.size >= CONCURRENCY) { await Promise.race(executing); }
-          }
-          await Promise.all(executing);
-          await updateDoc(newMsgRef, { hasChunks: true, chunkCount: chunkCount, isUploading: false });
-        } else if (!hasChunks) {
-             if (localBlobUrl) {
-                 const reader = new FileReader(); reader.readAsDataURL(file);
-                 await new Promise(resolve => { reader.onload = async (e) => { await updateDoc(newMsgRef, { content: e.target.result, isUploading: false }); resolve(); } });
-             } else {
-                 if (typeof content === 'object' && content !== null && type === 'sticker') { // Handle sticker object with audio
-                     const stickerContent = content.image || content;
-                     const stickerAudio = content.audio || null;
-                     await setDoc(newMsgRef, { senderId: user.uid, content: stickerContent, audio: stickerAudio, type, ...additionalData, ...replyData, ...fileData, hasChunks, chunkCount, createdAt: serverTimestamp(), readBy: [user.uid] });
-                 } else {
-                     await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, ...additionalData, ...replyData, ...fileData, hasChunks, chunkCount, createdAt: serverTimestamp(), readBy: [user.uid] });
-                 }
-                 await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId), { lastMessage: { content: type === 'text' ? content : `[${type}]`, senderId: user.uid }, updatedAt: serverTimestamp() });
-                 setText(''); setPlusMenuOpen(false); setContactModalOpen(false);
-                 setTimeout(() => { scrollRef.current?.scrollIntoView({ behavior: 'auto' }); }, 100);
-             }
-        }
-      } catch (e) { console.error(e); showNotification("送信に失敗しました"); } finally { setIsUploading(false); setUploadProgress(0); }
-    };
-
-    const handleDeleteMessage = useCallback(async (msgId) => { try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', msgId)); const c = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', msgId, 'chunks')); for (const d of c.docs) await deleteDoc(d.ref); showNotification("メッセージの送信を取り消しました"); } catch (e) { showNotification("送信取消に失敗しました"); } }, [db, appId, activeChatId, showNotification]);
-    const handleEditMessage = useCallback((id, content) => { setEditingMsgId(id); setEditingText(content); }, []);
-    const handlePreviewMedia = useCallback((src, type) => { setPreviewMedia({ src, type }); }, []);
-    const handleReaction = async (messageId, emoji) => { try { const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', messageId); const msg = messages.find(m => m.id === messageId); const currentReactions = msg.reactions?.[emoji] || []; if (currentReactions.includes(user.uid)) { await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayRemove(user.uid) }); } else { await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayUnion(user.uid) }); } } catch (e) { console.error("Reaction error", e); } };
-    const submitEditMessage = async () => { if (!editingText.trim() || !editingMsgId) return; try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', editingMsgId), { content: editingText, isEdited: true, updatedAt: serverTimestamp() }); setEditingMsgId(null); } catch (e) { showNotification("編集に失敗しました"); } };
-    const handleLeaveGroup = async () => { if (!activeChatId) return; try { await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages'), { senderId: user.uid, content: `${profile.name}が退会しました。`, type: 'text', createdAt: serverTimestamp(), readBy: [user.uid] }); await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId), { participants: arrayRemove(user.uid) }); showNotification("グループから退会しました"); setLeaveModalOpen(false); setView('home'); setActiveChatId(null); } catch (e) { showNotification("退会に失敗しました"); } };
-    const handleBackgroundUpload = async (e) => {
-      const file = e.target.files[0]; if (!file) return;
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const result = event.target.result;
-        try {
-          const batch = writeBatch(db); const chatRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId);
-          const oldChunksSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'background_chunks')); oldChunksSnap.forEach(d => batch.delete(d.ref)); await batch.commit();
-          const newBatch = writeBatch(db); let hasChunks = false; let chunkCount = 0;
-          if (result.length > CHUNK_SIZE) {
-             hasChunks = true; chunkCount = Math.ceil(result.length / CHUNK_SIZE);
-             for (let i = 0; i < chunkCount; i++) { const chunkRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'background_chunks', `${i}`); newBatch.set(chunkRef, { data: result.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE), index: i }); }
-             newBatch.update(chatRef, { backgroundImage: deleteField(), hasBackgroundChunks: true, backgroundChunkCount: chunkCount, updatedAt: serverTimestamp() });
-          } else { newBatch.update(chatRef, { backgroundImage: result, hasBackgroundChunks: false, backgroundChunkCount: 0, updatedAt: serverTimestamp() }); }
-          await newBatch.commit(); showNotification("背景を変更しました"); setBackgroundMenuOpen(false);
-        } catch(e) { console.error(e); showNotification("背景の変更に失敗しました"); }
-      }; reader.readAsDataURL(file);
-    };
-    const resetBackground = async () => { try { const batch = writeBatch(db); const chatRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId); const chunksSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'background_chunks')); chunksSnap.forEach(d => batch.delete(d.ref)); batch.update(chatRef, { backgroundImage: deleteField(), hasBackgroundChunks: deleteField(), backgroundChunkCount: deleteField(), updatedAt: serverTimestamp() }); await batch.commit(); showNotification("背景をリセットしました"); setBackgroundMenuOpen(false); } catch(e) { showNotification("リセットに失敗しました"); } };
-    
-    // WebRTC Start Call (from App 1)
-    const handleVideoCallButton = (isVideo) => {
-       startVideoCall(activeChatId, isVideo);
-    };
-
-    const sendBirthdayCard = async ({ color, message }) => {
-      try {
-        if (!isGroup && partnerId) {
-            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'birthday_cards'), {
-                fromUserId: user.uid,
-                fromName: profile.name,
-                toUserId: partnerId,
-                message: message,
-                color: color,
-                createdAt: serverTimestamp()
-            });
-        }
-        await sendMessage(`[バースデーカード] 🎂\n\n${message}`, 'text');
-        showNotification("カードを送信しました");
-        setCardModalOpen(false);
-      } catch (e) {
-        console.error(e);
-        showNotification("送信に失敗しました");
-      }
-    };
-
-    const onStickerClick = (packId) => {
-        setBuyStickerModalPackId(packId);
-    };
-
-    return (
-      <div className="flex flex-col h-full relative" style={{ backgroundColor: backgroundSrc ? 'transparent' : '#8fb2c9', backgroundImage: backgroundSrc ? `url(${backgroundSrc})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center' }}>
-        <div className="p-3 bg-white/95 backdrop-blur border-b flex items-center gap-3 sticky top-0 z-10 shadow-sm">
-          <ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} />
-          <div className="relative"><img key={icon} src={icon} className="w-10 h-10 rounded-xl object-cover border" />{!isGroup && partnerData && isTodayBirthday(partnerData.birthday) && <span className="absolute -top-1 -right-1 text-xs">🎂</span>}</div>
-          <div className="font-bold text-sm flex-1 truncate">{title} {isGroup ? `(${chatData.participants.length})` : ''}</div>
-          <div className="flex gap-4 mr-2 items-center">
-            <div className="relative"><button onClick={() => setBackgroundMenuOpen(!backgroundMenuOpen)} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="背景を変更"><Palette className="w-6 h-6 text-gray-600" /></button>{backgroundMenuOpen && (<div className="absolute top-full right-0 mt-2 bg-white rounded-xl shadow-xl border overflow-hidden w-40 z-20"><label className="flex items-center gap-2 px-4 py-3 hover:bg-gray-50 cursor-pointer text-sm font-bold text-gray-700"><ImageIcon className="w-4 h-4" /><span>画像を選択</span><input type="file" className="hidden" accept="image/*" onChange={handleBackgroundUpload} /></label><button onClick={resetBackground} className="w-full flex items-center gap-2 px-4 py-3 hover:bg-red-50 text-sm font-bold text-red-500 border-t"><RefreshCcw className="w-4 h-4" /><span>リセット</span></button></div>)}</div>
-            {isGroup && (<>
-                <button onClick={() => setGroupEditModalOpen(true)} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="グループ設定"><Settings className="w-6 h-6 text-gray-600" /></button>
-                <button onClick={() => setAddMemberModalOpen(true)} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="メンバーを追加"><UserPlus className="w-6 h-6 text-gray-600" /></button>
-                <button onClick={() => setLeaveModalOpen(true)} className="hover:bg-red-50 p-1 rounded-full transition-colors" title="グループを退会"><LogOut className="w-6 h-6 text-red-500" /></button>
-            </>)}
-            {/* Call Buttons */}
-            <button onClick={() => handleVideoCallButton(true)} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="ビデオ通話"><Video className="w-6 h-6 text-gray-600" /></button>
-            <button onClick={() => handleVideoCallButton(false)} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="音声通話"><Phone className="w-6 h-6 text-gray-600" /></button>
-            <button onClick={() => toggleMuteChat(activeChatId)}>{mutedChats.includes(activeChatId) ? <BellOff className="w-6 h-6 text-gray-400" /> : <Bell className="w-6 h-6 text-gray-600" />}</button>
-          </div>
-        </div>
-        {!isGroup && partnerId && isTodayBirthday(allUsers.find(u=>u.uid === partnerId)?.birthday) && (<div className="bg-pink-100 p-2 flex items-center justify-between px-4"><div className="flex items-center gap-2"><Cake className="w-5 h-5 text-pink-500 animate-bounce" /><span className="text-xs font-bold text-pink-700">今日は{title}さんの誕生日です！</span></div><button onClick={() => setCardModalOpen(true)} className="bg-pink-500 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">カードを書く</button></div>)}
-        <div className={`flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide ${backgroundSrc ? 'bg-white/40 backdrop-blur-sm' : ''}`}>
-          {messages.length >= messageLimit && (<div className="flex justify-center py-2"><button onClick={() => setMessageLimit(prev => prev + 50)} className="bg-white/50 backdrop-blur-md px-4 py-1 rounded-full text-xs font-bold text-gray-700 shadow-sm flex items-center gap-1 hover:bg-white/70"><ArrowUpCircle className="w-4 h-4" /> 以前のメッセージを読み込む</button></div>)}
-          {messages.map(m => { const sender = allUsers.find(u => u.uid === m.senderId); return (<MessageItem key={m.id} m={m} user={user} sender={sender} isGroup={isGroup} db={db} appId={appId} chatId={activeChatId} addFriendById={addFriendById} onEdit={handleEditMessage} onDelete={handleDeleteMessage} onPreview={handlePreviewMedia} onReply={setReplyTo} onReaction={handleReaction} allUsers={allUsers} onStickerClick={onStickerClick} onShowProfile={setViewProfile} />); })}
-          <div ref={scrollRef} className="h-2 w-full" />
-        </div>
-        {previewMedia && (<div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center p-4" onClick={() => setPreviewMedia(null)}><button className="absolute top-6 right-6 text-white p-2 rounded-full bg-white/20"><X className="w-6 h-6"/></button>{previewMedia.type === 'video' ? <video src={previewMedia.src} controls autoPlay className="max-w-full max-h-[85vh] rounded shadow-2xl" onClick={e=>e.stopPropagation()}/> : <img src={previewMedia.src} className="max-w-full max-h-[85vh] object-contain rounded shadow-2xl" onClick={e=>e.stopPropagation()}/>}</div>)}
-        {editingMsgId && (<div className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-2xl p-4"><h3 className="font-bold mb-2">メッセージを編集</h3><textarea className="w-full bg-gray-50 p-2 rounded-xl mb-4 border focus:outline-none" value={editingText} onChange={e => setEditingText(e.target.value)} rows={3}/><div className="flex gap-2"><button onClick={() => setEditingMsgId(null)} className="flex-1 py-2 bg-gray-100 rounded-xl font-bold text-gray-600">キャンセル</button><button onClick={submitEditMessage} className="flex-1 py-2 bg-green-500 rounded-xl font-bold text-white">更新</button></div></div></div>)}
-        {addMemberModalOpen && <GroupAddMemberModal onClose={() => setAddMemberModalOpen(false)} currentMembers={chatData?.participants || []} chatId={activeChatId} allUsers={allUsers} profile={profile} user={user} showNotification={showNotification} />}
-        {groupEditModalOpen && <GroupEditModal onClose={() => setGroupEditModalOpen(false)} chatId={activeChatId} currentName={chatData.name} currentIcon={chatData.icon} currentMembers={chatData.participants} allUsers={allUsers} showNotification={showNotification} user={user} profile={profile} />}
-        {leaveModalOpen && <LeaveGroupConfirmModal onClose={() => setLeaveModalOpen(false)} onLeave={handleLeaveGroup} />}
-        {cardModalOpen && <BirthdayCardModal onClose={() => setCardModalOpen(false)} onSend={sendBirthdayCard} toName={title} />}
-        {contactModalOpen && <ContactSelectModal onClose={() => setContactModalOpen(false)} onSend={(c) => sendMessage("", "contact", { contactId: c.uid, contactName: c.name, contactAvatar: c.avatar })} friends={allUsers.filter(u => (profile?.friends || []).includes(u.uid))}/>}
-        {buyStickerModalPackId && <StickerBuyModal onClose={() => setBuyStickerModalPackId(null)} packId={buyStickerModalPackId} onGoToStore={(id) => { setView('sticker-store'); setBuyStickerModalPackId(null); }} />}
-        
-        {plusMenuOpen && (<div className="absolute bottom-16 left-4 right-4 bg-white rounded-3xl p-4 shadow-2xl grid grid-cols-4 gap-4 animate-in slide-in-from-bottom-4 z-20"><label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-green-50 rounded-2xl"><ImageIcon className="w-6 h-6 text-green-500" /></div><span className="text-[10px] font-bold">画像</span><input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label><label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-blue-50 rounded-2xl"><Play className="w-6 h-6 text-blue-500" /></div><span className="text-[10px] font-bold">動画</span><input type="file" className="hidden" accept="video/*" onChange={(e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label><label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-gray-100 rounded-2xl"><Paperclip className="w-6 h-6 text-gray-600" /></div><span className="text-[10px] font-bold">ファイル</span><input type="file" className="hidden" onChange={(e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label><div className="flex flex-col items-center gap-2 cursor-pointer" onClick={() => setContactModalOpen(true)}><div className="p-3 bg-yellow-50 rounded-2xl"><Contact className="w-6 h-6 text-yellow-500" /></div><span className="text-[10px] font-bold">連絡先</span></div><div className="flex flex-col items-center gap-2 cursor-pointer" onClick={() => setCardModalOpen(true)}><div className="p-3 bg-pink-50 rounded-2xl"><Gift className="w-6 h-6 text-pink-500" /></div><span className="text-[10px] font-bold">カード</span></div></div>)}
-        
-        <div className="p-3 bg-white border-t flex flex-col gap-2 relative z-10">
-          {stickerMenuOpen && myStickerPacks.length > 0 && (
-            <div className="absolute bottom-full left-0 right-0 bg-gray-50 border-t h-72 flex flex-col shadow-2xl rounded-t-3xl overflow-hidden animate-in slide-in-from-bottom-2 z-20">
-                <div className="flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-4 content-start">
-                     {myStickerPacks.find(p => p.id === selectedPackId)?.stickers.map((s, i) => (
-                         <div key={i} className="relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm" onClick={() => sendMessage(s, 'sticker', { packId: selectedPackId })}>
-                            <img src={typeof s === 'string' ? s : s.image} className="w-full aspect-square object-contain" />
-                            {(typeof s !== 'string' && s.audio) && <div className="absolute bottom-0 right-0 bg-black/20 text-white rounded-full p-1"><Volume2 className="w-3 h-3"/></div>}
-                         </div>
-                     ))}
-                </div>
-                <div className="bg-white border-t flex overflow-x-auto p-2 gap-2 scrollbar-hide shrink-0">
-                    {myStickerPacks.map(pack => (
-                        <div key={pack.id} onClick={() => setSelectedPackId(pack.id)} className={`flex-shrink-0 cursor-pointer p-2 rounded-xl transition-colors ${selectedPackId === pack.id ? 'bg-gray-200' : 'hover:bg-gray-100'}`}>
-                             <img src={typeof pack.stickers[0] === 'string' ? pack.stickers[0] : pack.stickers[0].image} className="w-8 h-8 object-contain" />
-                        </div>
-                    ))}
-                </div>
-            </div>
-          )}
-
-          {replyTo && (
-            <div className="flex items-center justify-between bg-gray-100 p-2 rounded-xl text-xs mb-1 border-l-4 border-green-500">
-              <div className="flex flex-col max-w-[90%]">
-                <span className="font-bold text-green-600 mb-0.5">{allUsers.find(u => u.uid === replyTo.senderId)?.name || 'Unknown'} への返信</span>
-                <div className="truncate text-gray-600 flex items-center gap-1">
-                  {replyTo.type === 'image' && <ImageIcon className="w-3 h-3" />}
-                  {replyTo.type === 'video' && <Video className="w-3 h-3" />}
-                  {['image', 'video'].includes(replyTo.type) 
-                    ? (replyTo.type === 'image' ? '[画像]' : '[動画]') 
-                    : (replyTo.content || '[メッセージ]')}
-                </div>
-              </div>
-              <button onClick={() => setReplyTo(null)} className="p-1 hover:bg-gray-200 rounded-full"><X className="w-4 h-4 text-gray-500"/></button>
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <button onClick={() => setPlusMenuOpen(!plusMenuOpen)} className={`p-2 rounded-full ${plusMenuOpen ? 'bg-gray-100 rotate-45' : ''}`}><Plus className="w-5 h-5 text-gray-400" /></button>
-            <div className="flex-1 flex gap-2 relative">
-               {!isRecording ? (<div className="flex-1 flex gap-2"><input className="flex-1 bg-gray-100 rounded-2xl px-4 py-2 text-sm focus:outline-none" placeholder="メッセージを入力" value={text} onChange={e => setText(e.target.value)} onKeyPress={e => e.key === 'Enter' && sendMessage(text)} /><button onClick={() => setStickerMenuOpen(!stickerMenuOpen)} className={`p-2 rounded-full hover:bg-gray-100 ${stickerMenuOpen ? 'text-green-500 bg-green-50' : 'text-gray-400'}`}><Smile className="w-5 h-5"/></button></div>) : (<div className="flex-1 bg-red-50 rounded-2xl px-4 py-2 flex items-center justify-between animate-pulse"><div className="flex items-center gap-2 text-red-500 font-bold text-xs"><div className="w-2 h-2 rounded-full bg-red-500 animate-ping"></div>録音中... {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}</div></div>)}
-               {!text && !isUploading && (<>{!isRecording ? (<button onClick={startRecording} className="p-2 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200"><Mic className="w-5 h-5" /></button>) : (<div className="flex gap-2"><button onClick={cancelRecording} className="p-2 rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300" title="キャンセル"><Trash2 className="w-5 h-5" /></button><button onClick={stopRecording} className="p-2 rounded-full bg-red-500 text-white hover:bg-red-600 animate-bounce" title="停止して送信"><StopCircle className="w-5 h-5 fill-current" /></button></div>)}</>)}
-            </div>
-            {(text || isUploading) && <button onClick={() => sendMessage(text)} disabled={!text && !isUploading} className={`p-2 rounded-full ${text ? 'text-green-500' : 'text-gray-300'}`}>{isUploading ? <div className="relative"><Loader2 className="w-6 h-6 animate-spin text-green-500" />{uploadProgress > 0 && <div className="absolute top-full left-1/2 -translate-x-1/2 text-[8px] font-bold mt-1">{uploadProgress}%</div>}</div> : <Send className="w-6 h-6" />}</button>}
-          </div>
-        </div>
-        {viewProfile && <FriendProfileModal friend={viewProfile} onClose={() => setViewProfile(null)} onStartChat={(uid) => { setViewProfile(null); }} onTransfer={() => { setCoinModalTarget(viewProfile); setViewProfile(null); }} />}
-        {coinModalTarget && <CoinTransferModal onClose={() => setCoinModalTarget(null)} myWallet={profile.wallet} myUid={user.uid} targetUid={coinModalTarget.uid} targetName={coinModalTarget.name} showNotification={showNotification} />}
-      </div>
-    );
-};
-
-const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard }) => {
-    const [edit, setEdit] = useState(profile || {});
-    useEffect(() => { if (profile) setEdit(prev => (!prev || Object.keys(prev).length === 0) ? { ...profile } : { ...profile, name: prev.name, id: prev.id, status: prev.status, birthday: prev.birthday, avatar: prev.avatar, cover: prev.cover }); }, [profile]);
-    const handleSave = () => { updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), edit); showNotification("保存しました ✅"); };
-    return (
-      <div className="flex flex-col h-full bg-white">
-        <div className="p-4 border-b flex items-center gap-4 sticky top-0 bg-white shrink-0"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><span className="font-bold">設定</span></div>
-        <div className="flex-1 overflow-y-auto pb-8">
-          <div className="w-full h-48 relative bg-gray-200"><img src={edit.cover} className="w-full h-full object-cover" /><label className="absolute inset-0 flex items-center justify-center bg-black/20 text-white font-bold cursor-pointer opacity-0 hover:opacity-100 transition-opacity">背景変更<input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, d => setEdit({...edit, cover: d}))} /></label></div>
-          <div className="px-8 -mt-12 flex flex-col items-center gap-6">
-            <div className="relative"><img src={edit.avatar} className="w-24 h-24 rounded-3xl border-4 border-white object-cover" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, d => setEdit({...edit, avatar: d}))} /></label></div>
-            <div className="w-full space-y-4">
-              <div><label className="text-xs font-bold text-gray-400">名前</label><input className="w-full border-b py-2 outline-none" value={edit.name || ''} onChange={e => setEdit({...edit, name: e.target.value})} /></div>
-              <div><label className="text-xs font-bold text-gray-400">ID</label><div className="flex items-center gap-2 border-b py-2"><span className="flex-1 font-mono text-gray-600">{edit.id}</span><button onClick={() => copyToClipboard(edit.id)} className="p-1 hover:bg-gray-100 rounded-full"><Copy className="w-4 h-4 text-gray-500" /></button></div></div>
-              <div><label className="text-xs font-bold text-gray-400">誕生日</label><input type="date" className="w-full border-b py-2 outline-none bg-transparent" value={edit.birthday || ''} onChange={e => setEdit({...edit, birthday: e.target.value})} /></div>
-              <div><label className="text-xs font-bold text-gray-400">ひとこと</label><input className="w-full border-b py-2 outline-none" value={edit.status || ''} onChange={e => setEdit({...edit, status: e.target.value})} /></div>
-              <button onClick={handleSave} className="w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg">保存</button>
-              <button onClick={() => signOut(auth)} className="w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4">ログアウト</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-};
-
-const QRScannerView = ({ user, setView, addFriendById }) => {
-    const videoRef = useRef(null);
-    const canvasRef = useRef(null);
-    const [scanning, setScanning] = useState(false);
-    
-    // ERROR FIX: Removed `s` variable usage that caused ReferenceError.
-    // Logic updated to use videoRef directly for stream access.
-    
-    const startScanner = async () => { 
-        setScanning(true); 
-        try { 
-            const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }); 
-            if (videoRef.current) { 
-                videoRef.current.srcObject = mediaStream; 
-                videoRef.current.setAttribute("playsinline", true);
-                videoRef.current.play(); 
-                requestAnimationFrame(tick); 
-            } 
-        } catch (err) { 
-            setScanning(false); 
-        } 
-    };
-
-    useEffect(() => {
-        return () => {
-            if (videoRef.current && videoRef.current.srcObject) {
-                videoRef.current.srcObject.getTracks().forEach(t => t.stop());
-            }
-        };
-    }, []);
-
-    const tick = () => { 
-        if (videoRef.current?.readyState === videoRef.current?.HAVE_ENOUGH_DATA) { 
-            const c = canvasRef.current;
-            const ctx = c.getContext("2d"); 
-            c.height = videoRef.current.videoHeight; 
-            c.width = videoRef.current.videoWidth; 
-            ctx.drawImage(videoRef.current, 0, 0, c.width, c.height); 
-            
-            if (window.jsQR) {
-                const code = window.jsQR(ctx.getImageData(0,0,c.width,c.height).data, c.width, c.height); 
-                if (code) { 
-                    if (videoRef.current.srcObject) {
-                        videoRef.current.srcObject.getTracks().forEach(t => t.stop());
-                    }
-                    setScanning(false); 
-                    addFriendById(code.data); 
-                    return; 
-                } 
-            }
-        } 
-        requestAnimationFrame(tick); 
-    };
-
-    return (<div className="flex flex-col h-full bg-white"><div className="p-4 border-b flex items-center gap-4"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><span className="font-bold">QR</span></div><div className="flex-1 flex flex-col items-center justify-center p-8 gap-8">{scanning ? <div className="relative w-64 h-64 border-4 border-green-500 rounded-3xl overflow-hidden"><video ref={videoRef} className="w-full h-full object-cover" /><canvas ref={canvasRef} className="hidden" /></div> : <div className="bg-white p-6 rounded-[40px] shadow-xl border"><img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user?.uid}`} className="w-48 h-48" /></div>}<div className="grid grid-cols-2 gap-4 w-full"><button onClick={startScanner} className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border"><Maximize className="w-6 h-6 text-green-500" /><span>スキャン</span></button><label className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border cursor-pointer"><Upload className="w-6 h-6 text-blue-500" /><span>読込</span><input type="file" className="hidden" accept="image/*" onChange={e => { const r = new FileReader(); r.onload = (ev) => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'), ctx = c.getContext('2d'); c.width = img.width; c.height = img.height; ctx.drawImage(img,0,0); const code = window.jsQR(ctx.getImageData(0,0,c.width,c.height).data, c.width, c.height); if (code) addFriendById(code.data); }; img.src = ev.target.result; }; r.readAsDataURL(e.target.files[0]); }} /></label></div></div></div>);
-};
-
-const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }) => {
-    const [tab, setTab] = useState('chats');
-    const [selectedFriend, setSelectedFriend] = useState(null);
-    const [coinModalTarget, setCoinModalTarget] = useState(null);
-    const friendsList = useMemo(() => allUsers.filter(u => (profile?.friends || []).includes(u.uid)), [allUsers, profile]);
-    return (
-      <div className="flex flex-col h-full bg-white">
-        <div className="p-4 border-b flex justify-between items-center bg-white shrink-0"><h1 className="text-xl font-bold">ホーム</h1><div className="flex gap-4 items-center"><Store className="w-6 h-6 cursor-pointer text-orange-500" onClick={() => setView('sticker-store')} /><Gift className="w-6 h-6 cursor-pointer text-pink-500" onClick={() => setView('birthday-cards')} /><Users className="w-6 h-6 cursor-pointer" onClick={() => setView('group-create')} /><Search className="w-6 h-6 cursor-pointer" onClick={() => setSearchModalOpen(true)} /><UserPlus className="w-6 h-6 cursor-pointer" onClick={() => setView('qr')} /><Settings className="w-6 h-6 cursor-pointer" onClick={() => setView('profile')} /></div></div>
-        <div className="flex border-b"><button className={`flex-1 py-3 text-sm font-bold ${tab === 'friends' ? 'border-b-2 border-black' : 'text-gray-400'}`} onClick={() => setTab('friends')}>友だち</button><button className={`flex-1 py-3 text-sm font-bold ${tab === 'chats' ? 'border-b-2 border-black' : 'text-gray-400'}`} onClick={() => setTab('chats')}>トーク</button></div>
-        <div className="flex-1 overflow-y-auto scrollbar-hide">
-          <div className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer border-b" onClick={() => setView('profile')}><div className="relative"><img key={profile?.avatar} src={profile?.avatar} className="w-16 h-16 rounded-2xl object-cover border" />{isTodayBirthday(profile?.birthday) && <span className="absolute -top-1 -right-1 text-base">🎂</span>}</div><div className="flex-1"><div className="font-bold text-lg">{profile?.name}</div><div className="text-xs text-gray-400 font-mono">ID: {profile?.id}</div></div></div>
-          {tab === 'friends' && friendsList.map(friend => (<div key={friend.uid} className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedFriend(friend)}><div className="relative"><img key={friend.avatar} src={friend.avatar} className="w-12 h-12 rounded-xl object-cover border" />{isTodayBirthday(friend.birthday) && <span className="absolute -top-1 -right-1 text-xs">🎂</span>}</div><div className="flex-1"><div className="font-bold text-sm">{friend.name}</div><div className="text-xs text-gray-400 truncate">{friend.status}</div></div></div>))}
-          {tab === 'chats' && chats.sort((a,b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)).map(chat => {
-            let name = chat.name, icon = chat.icon, partnerData = null; if (!chat.isGroup) { partnerData = allUsers.find(u => u.uid === chat.participants.find(p => p !== user.uid)); if (partnerData) { name = partnerData.name; icon = partnerData.avatar; } }
-            return (<div key={chat.id} className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer" onClick={() => { setActiveChatId(chat.id); setView('chatroom'); }}><div className="relative"><img key={icon} src={icon} className="w-12 h-12 rounded-xl object-cover border" />{!chat.isGroup && partnerData && isTodayBirthday(partnerData.birthday) && <span className="absolute -top-1 -right-1 text-xs">🎂</span>}</div><div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{name} {chat.isGroup ? `(${chat.participants.length})` : ''}</div><div className="text-xs text-gray-400 truncate">{chat.lastMessage?.content}</div></div><div className="text-[10px] text-gray-300 self-start mt-1">{formatTime(chat.updatedAt)}</div></div>);
-          })}
-        </div>
-        {selectedFriend && <FriendProfileModal friend={selectedFriend} onClose={() => setSelectedFriend(null)} onStartChat={startChatWithUser} onTransfer={() => { setCoinModalTarget(selectedFriend); setSelectedFriend(null); }} />}
-        {coinModalTarget && <CoinTransferModal onClose={() => setCoinModalTarget(null)} myWallet={profile.wallet} myUid={user.uid} targetUid={coinModalTarget.uid} targetName={coinModalTarget.name} showNotification={showNotification} />}
-      </div>
-    );
-};
-
-const VoomView = ({ user, allUsers, profile, posts, showNotification, db, appId }) => { 
-    const [content, setContent] = useState(''), [media, setMedia] = useState(null), [mediaType, setMediaType] = useState('image'), [isUploading, setIsUploading] = useState(false);
-    const postMessage = async () => { 
         if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
-        if ((!content && !media) || isUploading) return; 
-        setIsUploading(true); 
-        try { 
-            let hasChunks = false, chunkCount = 0, storedMedia = media; 
-            if (media && media.length > CHUNK_SIZE) { hasChunks = true; chunkCount = Math.ceil(media.length / CHUNK_SIZE); storedMedia = null; } 
-            const newPostRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'posts')); 
+        if (!content && !file && type === 'text') return;
+        setIsUploading(true);
+        try {
+            const messageData = { senderId: user.uid, content: content || '', type, createdAt: serverTimestamp(), readBy: [user.uid], ...additionalData };
+            if (replyTo) { messageData.replyTo = { id: replyTo.id, content: replyTo.content, senderName: allUsers.find(u => u.uid === replyTo.senderId)?.name, type: replyTo.type }; setReplyTo(null); }
             
-            if (hasChunks) { 
-                const CONCURRENCY = 100;
-                const executing = new Set();
-                for (let i = 0; i < chunkCount; i++) { 
-                    const start = i * CHUNK_SIZE; const end = Math.min(start + CHUNK_SIZE, media.length); const chunkData = media.slice(start, end); 
-                    const p = setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'posts', newPostRef.id, 'chunks', `${i}`), { data: chunkData, index: i }); 
-                    const pWrapper = p.then(() => executing.delete(pWrapper));
-                    executing.add(pWrapper);
-                    if (executing.size >= CONCURRENCY) { await Promise.race(executing); }
-                } 
-                await Promise.all(executing);
+            // メッセージドキュメントを先に作成
+            const msgRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages'), messageData);
+
+            if (file) {
+                 // 大きなファイルの場合はチャンク分割
+                 if (file.size > 1024 * 1024) {
+                      const chunkCount = await saveFileInChunks(file, activeChatId, msgRef.id);
+                      await updateDoc(msgRef, { hasChunks: true, chunkCount, content: '' }); // contentは空にしておく
+                 } else {
+                     // 小さいファイルはそのままcontentに入れる（念のため再度読み込み）
+                     const reader = new FileReader();
+                     reader.onload = async (e) => {
+                         await updateDoc(msgRef, { content: e.target.result });
+                     };
+                     reader.readAsDataURL(file);
+                 }
             }
             
-            let mimeType = null; if (media && media.startsWith('data:')) { mimeType = media.split(';')[0].split(':')[1]; }
-            await setDoc(newPostRef, { userId: user.uid, content, media: storedMedia, mediaType, mimeType, hasChunks, chunkCount, likes: [], comments: [], createdAt: serverTimestamp() }); 
-            setContent(''); setMedia(null); showNotification("投稿しました"); 
-        } finally { setIsUploading(false); } 
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId), { lastMessage: { content: type === 'text' ? content : type === 'sticker' ? 'スタンプ' : type === 'image' ? '画像' : 'メッセージ', senderId: user.uid, type }, updatedAt: serverTimestamp() });
+            setText(''); setPlusMenuOpen(false); setStickerMenuOpen(false);
+        } catch (e) { console.error(e); showNotification("送信に失敗しました"); } finally { setIsUploading(false); }
     };
-    const handleVoomFileUpload = (e) => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev) => { setMedia(ev.target.result); setMediaType(file.type.startsWith('video') ? 'video' : 'image'); }; reader.readAsDataURL(file); };
-    return (<div className="flex flex-col h-full bg-gray-50"><div className="bg-white p-4 border-b shrink-0"><h1 className="text-xl font-bold">VOOM</h1></div><div className="flex-1 overflow-y-auto scrollbar-hide pb-20"><div className="bg-white p-4 mb-2"><textarea className="w-full text-sm outline-none resize-none min-h-[60px]" placeholder="何をしていますか？" value={content} onChange={e => setContent(e.target.value)} />{media && <div className="relative mt-2">{mediaType === 'video' ? <video src={media} className="w-full rounded-xl bg-black" controls /> : <img src={media} className="max-h-60 rounded-xl" />}<button onClick={() => setMedia(null)} className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1"><X className="w-3 h-3"/></button></div>}<div className="flex justify-between items-center pt-2 border-t mt-2"><label className="cursor-pointer p-2 flex items-center gap-2"><ImageIcon className="w-5 h-5 text-gray-400" /><input type="file" className="hidden" accept="image/*,video/*" onChange={handleVoomFileUpload} /></label><button onClick={postMessage} disabled={isUploading} className={`text-xs font-bold px-4 py-2 rounded-full ${content || media ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-400'}`}>投稿</button></div></div>{posts.map(p => <PostItem key={p.id} post={p} user={user} allUsers={allUsers} db={db} appId={appId} profile={profile} />)}</div></div>);
+
+    const handleBackgroundUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        handleCompressedUpload(e, async (dataUrl) => {
+            try {
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId), { background: dataUrl, hasBackground: true });
+                showNotification("背景を設定しました");
+            } catch(e) { showNotification("設定に失敗しました"); }
+        });
+    };
+
+    const startRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mediaRecorder = new MediaRecorder(stream);
+            mediaRecorderRef.current = mediaRecorder;
+            const chunks = [];
+            mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'audio/webm' });
+                // 音声ファイルは小さいので直接アップロード
+                const reader = new FileReader();
+                reader.onload = (e) => sendMessage(e.target.result, 'audio', {}, null);
+                reader.readAsDataURL(blob);
+            };
+            mediaRecorder.start();
+            setIsRecording(true);
+            setRecordingTime(0);
+            recordingIntervalRef.current = setInterval(() => setRecordingTime(prev => prev + 1), 1000);
+        } catch (e) { showNotification("マイクへのアクセスが拒否されました"); }
+    };
+
+    const stopRecording = () => {
+        if (mediaRecorderRef.current && isRecording) {
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
+            clearInterval(recordingIntervalRef.current);
+        }
+    };
+
+    const formatDuration = (sec) => {
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        return `${m}:${s < 10 ? '0' : ''}${s}`;
+    };
+
+    return (
+        <div className="flex flex-col h-full bg-[#8fb2c9] relative" style={backgroundSrc ? { backgroundImage: `url(${backgroundSrc})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}>
+             <div className="p-3 bg-white/95 backdrop-blur border-b flex items-center gap-3 sticky top-0 z-10 shadow-sm">
+                <ChevronLeft className="cursor-pointer w-6 h-6 text-gray-600" onClick={() => setView('home')} />
+                <img src={icon} className="w-10 h-10 rounded-2xl object-cover border" />
+                <div className="flex-1 min-w-0">
+                    <div className="font-bold text-sm truncate flex items-center gap-1">{title} {mutedChats.includes(activeChatId) && <BellOff className="w-3 h-3 text-gray-400"/>}</div>
+                    {isGroup && <div className="text-[10px] text-gray-500">{chatData.participants.length}人のメンバー</div>}
+                </div>
+                <div className="flex gap-4 items-center">
+                    <button onClick={() => startVideoCall(activeChatId, true)} title="ビデオ通話"><Video className="w-6 h-6 text-gray-600" /></button>
+                    <button onClick={() => startVideoCall(activeChatId, false)} title="音声通話"><Phone className="w-6 h-6 text-gray-600" /></button>
+                    {!isGroup && (
+                        <button onClick={() => setCoinModalOpen(true)} title="コイン送金"><Coins className="w-6 h-6 text-yellow-500" /></button>
+                    )}
+                    {isGroup ? (
+                        <button onClick={() => setAddMemberModalOpen(true)}><UserPlus className="w-6 h-6 text-gray-600" /></button>
+                    ) : (
+                        <button onClick={() => setCardModalOpen(true)}><Gift className="w-6 h-6 text-pink-500" /></button>
+                    )}
+                    <button onClick={() => setBackgroundMenuOpen(!backgroundMenuOpen)}><Settings className="w-6 h-6 text-gray-600" /></button>
+                </div>
+            </div>
+            
+            {backgroundMenuOpen && (
+                <div className="absolute top-16 right-4 z-20 bg-white rounded-xl shadow-xl p-2 w-48 border">
+                    <label className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg cursor-pointer">
+                        <ImageIcon className="w-4 h-4"/> <span className="text-sm">背景画像を変更</span>
+                        <input type="file" className="hidden" accept="image/*" onChange={handleBackgroundUpload} />
+                    </label>
+                    <button onClick={() => { toggleMuteChat(activeChatId); setBackgroundMenuOpen(false); }} className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg text-left">
+                        {mutedChats.includes(activeChatId) ? <Bell className="w-4 h-4"/> : <BellOff className="w-4 h-4"/>} 
+                        <span className="text-sm">{mutedChats.includes(activeChatId) ? "通知をオン" : "通知をオフ"}</span>
+                    </button>
+                    {isGroup && (
+                        <>
+                            <button onClick={() => { setGroupEditModalOpen(true); setBackgroundMenuOpen(false); }} className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg text-left border-t"><Edit2 className="w-4 h-4"/> <span className="text-sm">グループ編集</span></button>
+                            <button onClick={() => { setLeaveModalOpen(true); setBackgroundMenuOpen(false); }} className="w-full flex items-center gap-3 p-3 hover:bg-red-50 rounded-lg text-left text-red-500"><LogOut className="w-4 h-4"/> <span className="text-sm">退会する</span></button>
+                        </>
+                    )}
+                </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide bg-black/5">
+                {messages.length === 0 && <div className="text-center py-10 text-gray-500 text-sm bg-white/50 rounded-xl mx-10 mt-10 backdrop-blur-sm">メッセージを送って会話を始めよう！</div>}
+                {messages.length >= messageLimit && <div className="text-center py-2"><button onClick={() => setMessageLimit(prev => prev + 50)} className="bg-white/80 px-4 py-1 rounded-full text-xs font-bold shadow-sm">過去のメッセージを読み込む</button></div>}
+                {messages.map(m => (
+                    <MessageItem 
+                        key={m.id} 
+                        m={m} 
+                        user={user} 
+                        sender={allUsers.find(u => u.uid === m.senderId)} 
+                        isGroup={isGroup} 
+                        db={db} 
+                        appId={appId} 
+                        chatId={activeChatId} 
+                        addFriendById={addFriendById} 
+                        onEdit={(id, txt) => { setEditingMsgId(id); setEditingText(txt); }} 
+                        onDelete={async (id) => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', id)); }} 
+                        onPreview={(src, type) => setPreviewMedia({src, type})} 
+                        onReply={setReplyTo} 
+                        onReaction={async (mid, emoji) => { const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', mid); const msgSnap = await getDoc(msgRef); if(msgSnap.exists()) { const reactions = msgSnap.data().reactions || {}; const current = reactions[emoji] || []; if(current.includes(user.uid)) { reactions[emoji] = current.filter(id => id !== user.uid); } else { reactions[emoji] = [...current, user.uid]; } await updateDoc(msgRef, { reactions }); } }}
+                        allUsers={allUsers}
+                        onStickerClick={(packId) => setBuyStickerModalPackId(packId)}
+                        onShowProfile={(u) => showNotification(`${u.name}のプロフィール`)}
+                    />
+                ))}
+                <div ref={scrollRef} />
+            </div>
+
+            <div className="p-3 bg-white border-t flex flex-col gap-2 relative z-10 pb-6">
+                {replyTo && (<div className="flex items-center justify-between bg-gray-100 p-2 rounded-xl text-xs mb-1 border-l-4 border-blue-500 pl-3"><div><div className="font-bold text-gray-500 mb-0.5">Replying to {replyTo.senderName}</div><div className="truncate opacity-70">{replyTo.content || 'メディア'}</div></div><X className="w-4 h-4 cursor-pointer text-gray-400" onClick={() => setReplyTo(null)} /></div>)}
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setPlusMenuOpen(!plusMenuOpen)} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><Plus className={`w-6 h-6 ${plusMenuOpen ? 'rotate-45 text-red-500' : 'text-gray-400'} transition-transform`} /></button>
+                    {!isRecording ? (
+                        <>
+                            <div className="relative flex-1">
+                                <input className="w-full bg-gray-100 rounded-2xl pl-4 pr-10 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-100 transition-all" placeholder="メッセージを入力..." value={text} onChange={e => setText(e.target.value)} onKeyPress={e => e.key === 'Enter' && sendMessage(text)} />
+                                <button onClick={() => setStickerMenuOpen(!stickerMenuOpen)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-yellow-500"><Smile className="w-5 h-5"/></button>
+                            </div>
+                            {text ? (<button onClick={() => sendMessage(text)} disabled={isUploading} className="p-3 bg-green-500 text-white rounded-full hover:bg-green-600 shadow-lg transition-transform active:scale-95 disabled:bg-gray-300"><Send className="w-5 h-5" /></button>) : (<button onClick={startRecording} className="p-3 bg-gray-100 text-gray-500 rounded-full hover:bg-red-50 hover:text-red-500 transition-colors"><Mic className="w-5 h-5" /></button>)}
+                        </>
+                    ) : (
+                        <div className="flex-1 flex items-center justify-between bg-red-50 rounded-2xl px-4 py-2 border border-red-100 animate-pulse"><div className="flex items-center gap-2 text-red-500 font-bold"><div className="w-2 h-2 bg-red-500 rounded-full animate-ping"></div> 録音中 {formatDuration(recordingTime)}</div><button onClick={stopRecording} className="text-red-500 hover:scale-110 transition-transform"><StopCircle className="w-6 h-6 fill-current"/></button></div>
+                    )}
+                </div>
+                {plusMenuOpen && (
+                    <div className="absolute bottom-20 left-4 bg-white rounded-2xl p-4 shadow-2xl grid grid-cols-4 gap-4 z-20 w-72 animate-in slide-in-from-bottom-2">
+                        <label className="flex flex-col items-center gap-2 cursor-pointer group"><div className="w-12 h-12 bg-green-50 rounded-2xl flex items-center justify-center group-hover:bg-green-100 transition-colors"><ImageIcon className="w-6 h-6 text-green-600" /></div><span className="text-[10px] font-bold text-gray-500">画像</span><input type="file" className="hidden" accept="image/*" onChange={e => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label>
+                        <button onClick={() => setContactModalOpen(true)} className="flex flex-col items-center gap-2 cursor-pointer group"><div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center group-hover:bg-blue-100 transition-colors"><Contact className="w-6 h-6 text-blue-600" /></div><span className="text-[10px] font-bold text-gray-500">連絡先</span></button>
+                        <label className="flex flex-col items-center gap-2 cursor-pointer group"><div className="w-12 h-12 bg-purple-50 rounded-2xl flex items-center justify-center group-hover:bg-purple-100 transition-colors"><Video className="w-6 h-6 text-purple-600" /></div><span className="text-[10px] font-bold text-gray-500">動画</span><input type="file" className="hidden" accept="video/*" onChange={e => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label>
+                        <label className="flex flex-col items-center gap-2 cursor-pointer group"><div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center group-hover:bg-orange-100 transition-colors"><FileText className="w-6 h-6 text-orange-600" /></div><span className="text-[10px] font-bold text-gray-500">ファイル</span><input type="file" className="hidden" onChange={e => handleFileUpload(e, (d, t, f) => sendMessage(d, t, { fileName: f.name, fileSize: f.size }, f))} /></label>
+                    </div>
+                )}
+                {stickerMenuOpen && (
+                    <div className="absolute bottom-20 right-4 w-72 h-64 bg-white rounded-2xl shadow-2xl z-20 flex flex-col overflow-hidden animate-in slide-in-from-bottom-2 border">
+                        <div className="flex overflow-x-auto bg-gray-50 p-1 border-b scrollbar-hide">
+                            {myStickerPacks.map(pack => (
+                                <button key={pack.id} onClick={() => setSelectedPackId(pack.id)} className={`p-2 rounded-lg shrink-0 ${selectedPackId === pack.id ? 'bg-white shadow' : 'opacity-50'}`}>
+                                    <img src={typeof pack.stickers[0] === 'string' ? pack.stickers[0] : pack.stickers[0].image} className="w-6 h-6 object-contain" />
+                                </button>
+                            ))}
+                            <button onClick={() => setView('sticker-store')} className="p-2 text-gray-400 hover:text-blue-500"><Store className="w-6 h-6"/></button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-2 grid grid-cols-4 gap-2">
+                             {myStickerPacks.find(p => p.id === selectedPackId)?.stickers.map((s, i) => (
+                                 <div key={i} onClick={() => sendMessage(typeof s === 'string' ? s : s.image, 'sticker', { packId: selectedPackId, audio: typeof s !== 'string' ? s.audio : null })} className="cursor-pointer hover:bg-gray-50 rounded-lg p-1 relative">
+                                     <img src={typeof s === 'string' ? s : s.image} className="w-full h-full object-contain" />
+                                     {typeof s !== 'string' && s.audio && <Volume2 className="w-3 h-3 absolute bottom-0 right-0 text-gray-400"/>}
+                                 </div>
+                             ))}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Sub Modals */}
+            {contactModalOpen && <ContactSelectModal friends={allUsers.filter(u => profile.friends?.includes(u.uid))} onClose={() => setContactModalOpen(false)} onSend={(f) => { sendMessage("", "contact", { contactId: f.uid, contactName: f.name, contactAvatar: f.avatar }); setContactModalOpen(false); }} />}
+            {cardModalOpen && <BirthdayCardModal toName={partnerData?.name || "友だち"} onClose={() => setCardModalOpen(false)} onSend={async (data) => { await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'birthday_cards'), { ...data, fromId: user.uid, fromName: profile.name, toUserId: partnerId, createdAt: serverTimestamp() }); sendMessage("バースデーカードを送りました 🎂", "text"); setCardModalOpen(false); }} />}
+            {coinModalOpen && <CoinTransferModal onClose={() => setCoinModalOpen(false)} myWallet={profile.wallet} myUid={user.uid} targetUid={partnerId} targetName={partnerData?.name || "相手"} showNotification={showNotification} />}
+            {addMemberModalOpen && <GroupAddMemberModal onClose={() => setAddMemberModalOpen(false)} currentMembers={chatData.participants} chatId={activeChatId} allUsers={allUsers} profile={profile} user={user} showNotification={showNotification} />}
+            {leaveModalOpen && <LeaveGroupConfirmModal onClose={() => setLeaveModalOpen(false)} onLeave={async () => { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId), { participants: arrayRemove(user.uid) }); await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages'), { senderId: user.uid, content: `${profile.name}が退会しました。`, type: 'text', createdAt: serverTimestamp(), readBy: [user.uid] }); setView('home'); }} />}
+            {groupEditModalOpen && <GroupEditModal onClose={() => setGroupEditModalOpen(false)} chatId={activeChatId} currentName={chatData.name} currentIcon={chatData.icon} currentMembers={chatData.participants} allUsers={allUsers} user={user} profile={profile} showNotification={showNotification} />}
+            {buyStickerModalPackId && <StickerBuyModal packId={buyStickerModalPackId} onClose={() => setBuyStickerModalPackId(null)} onGoToStore={(pid) => { setView('sticker-store'); }} />}
+        </div>
+    );
 };
+
+const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification, setCoinModalTarget }) => {
+  const [tab, setTab] = useState("chats"), [selectedFriend, setSelectedFriend] = useState(null), [coinModalTargetLocal, setCoinModalTargetLocal] = useState(null);
+  const friends = useMemo(() => allUsers.filter(u => profile?.friends?.includes(u.uid)), [allUsers, profile]);
+  const [posts, setPosts] = useState([]);
+
+  useEffect(() => {
+    if (tab === 'timeline') {
+        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'posts'), orderBy('createdAt', 'desc'), limit(20));
+        return onSnapshot(q, (snap) => setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    }
+  }, [tab]);
+
+  return (
+    <div className="flex flex-col h-full bg-white border-x border-gray-200 max-w-md mx-auto">
+      <div className="p-4 border-b flex justify-between items-center bg-white shrink-0 sticky top-0 z-10">
+        <h1 className="text-xl font-bold">ホーム</h1>
+        <div className="flex gap-4 items-center">
+          <div className="bg-yellow-100 px-3 py-1 rounded-full flex items-center gap-1"><Coins className="w-4 h-4 text-yellow-600" /><span className="text-sm font-bold">{profile?.wallet || 0}</span></div>
+          <Search className="w-6 h-6 cursor-pointer" onClick={() => setSearchModalOpen(true)} />
+          <div className="relative group cursor-pointer" onClick={() => setView('card-box')}>
+             <Gift className="w-6 h-6 text-pink-500" />
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center justify-around border-b bg-gray-50">
+        {['chats', 'friends', 'timeline'].map(t => (
+            <button key={t} onClick={() => setTab(t)} className={`flex-1 py-3 text-sm font-bold relative ${tab === t ? 'text-green-600' : 'text-gray-400'}`}>
+                {t === 'chats' && <MessageCircle className="w-5 h-5 mx-auto mb-1"/>}
+                {t === 'friends' && <Users className="w-5 h-5 mx-auto mb-1"/>}
+                {t === 'timeline' && <LayoutGrid className="w-5 h-5 mx-auto mb-1"/>}
+                <span className="capitalize">{t === 'chats' ? 'トーク' : t === 'friends' ? '友だち' : 'タイムライン'}</span>
+                {tab === t && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-green-500"></div>}
+            </button>
+        ))}
+      </div>
+      
+      <div className="flex-1 overflow-y-auto scrollbar-hide">
+         {tab === 'chats' && (
+            <div className="divide-y">
+                {chats.length === 0 && <div className="text-center py-10 text-gray-400 text-sm">チャットはまだありません</div>}
+                {chats.map(chat => {
+                    const isGroup = chat.isGroup;
+                    let title = chat.name;
+                    let icon = chat.icon;
+                    if (!isGroup) {
+                        const partnerId = chat.participants.find(p => p !== user.uid) || user.uid;
+                        const partner = allUsers.find(u => u.uid === partnerId);
+                        if (partner) { title = partner.name; icon = partner.avatar; }
+                    }
+                    const lastMsg = chat.lastMessage?.content || "メッセージなし";
+                    const isUnread = chat.lastMessage && chat.lastMessage.senderId !== user.uid && !chat.lastMessage.readBy?.includes(user.uid);
+                    return (
+                        <div key={chat.id} onClick={() => { setActiveChatId(chat.id); setView('chat'); }} className="flex items-center gap-4 p-4 hover:bg-gray-50 cursor-pointer transition-colors">
+                            <img src={icon} className="w-14 h-14 rounded-2xl object-cover border" />
+                            <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-baseline mb-1">
+                                    <h3 className="font-bold text-gray-800 truncate">{title}</h3>
+                                    <span className="text-[10px] text-gray-400">{formatTime(chat.updatedAt)}</span>
+                                </div>
+                                <p className={`text-sm truncate ${isUnread ? 'font-bold text-black' : 'text-gray-500'}`}>{lastMsg}</p>
+                            </div>
+                            {isUnread && <div className="w-3 h-3 bg-green-500 rounded-full"></div>}
+                        </div>
+                    );
+                })}
+            </div>
+         )}
+         {tab === 'friends' && (
+             <div className="p-4 space-y-4">
+                 <button onClick={() => setView('group-create')} className="w-full py-3 border-2 border-dashed border-gray-300 rounded-2xl flex items-center justify-center gap-2 text-gray-500 font-bold hover:bg-gray-50"><Users className="w-5 h-5"/> 新しいグループを作成</button>
+                 {friends.map(f => (
+                     <div key={f.uid} onClick={() => setSelectedFriend(f)} className="flex items-center gap-4 p-3 bg-white border rounded-2xl shadow-sm cursor-pointer hover:scale-[1.02] transition-transform">
+                         <img src={f.avatar} className="w-12 h-12 rounded-xl object-cover" />
+                         <div className="flex-1">
+                             <div className="font-bold">{f.name}</div>
+                             <div className="text-xs text-gray-400 truncate">{f.status || "ステータスなし"}</div>
+                         </div>
+                     </div>
+                 ))}
+             </div>
+         )}
+         {tab === 'timeline' && (
+             <div className="bg-gray-100 min-h-full">
+                 {posts.map(p => <PostItem key={p.id} post={p} user={user} allUsers={allUsers} db={db} appId={appId} profile={profile} />)}
+             </div>
+         )}
+      </div>
+
+      {/* Friends Profile Modal */}
+      {selectedFriend && (
+          <div className="fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in">
+            <div className="bg-white w-full max-w-sm rounded-[40px] overflow-hidden shadow-2xl relative flex flex-col items-center pb-8">
+              <button onClick={() => setSelectedFriend(null)} className="absolute top-4 right-4 z-10 bg-black/20 text-white p-2 rounded-full backdrop-blur-md hover:bg-black/30"><X className="w-6 h-6" /></button>
+              <div className="w-full h-48 bg-gray-200"><img src={selectedFriend.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80"} className="w-full h-full object-cover" /></div>
+              <div className="-mt-16 mb-4 relative"><img src={selectedFriend.avatar} className="w-32 h-32 rounded-[40px] border-[6px] border-white object-cover shadow-lg" /></div>
+              <h2 className="text-2xl font-bold mb-1">{selectedFriend.name}</h2>
+              <p className="text-xs text-gray-400 font-mono mb-4">ID: {selectedFriend.id}</p>
+              <div className="w-full px-8 mb-6"><p className="text-center text-sm text-gray-600 bg-gray-50 py-3 px-4 rounded-2xl">{selectedFriend.status || "ステータスなし"}</p></div>
+              <div className="flex gap-4 w-full px-8">
+                <button onClick={() => { startChatWithUser(selectedFriend.uid); setSelectedFriend(null); }} className="flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2"><MessageCircle className="w-5 h-5" /> トーク</button>
+                <button onClick={() => { setCoinModalTarget(selectedFriend); setSelectedFriend(null); }} className="flex-1 py-3 bg-yellow-500 text-white rounded-2xl font-bold shadow-lg shadow-yellow-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2"><Coins className="w-5 h-5" /> 送金</button>
+              </div>
+            </div>
+          </div>
+      )}
+    </div>
+  );
+};
+
+const AuthView = ({ onLogin, showNotification }) => {
+  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [userId, setUserId] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleGoogleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try { setLoading(true); await signInWithRedirect(auth, provider); }
+    catch (e) { console.error(e); showNotification("Googleログイン失敗"); setLoading(false); }
+  };
+
+  const handleGuestLogin = async () => {
+    setLoading(true);
+    try { await signInAnonymously(auth); showNotification("ゲストログインしました"); }
+    catch (e) { showNotification("ゲストログイン失敗"); } finally { setLoading(false); }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!userId || !password) return showNotification("IDとパスワードを入力してください");
+    const email = `${userId}@voom-persistent.app`;
+    setLoading(true);
+    try {
+      if (isLoginMode) {
+        await signInWithEmailAndPassword(auth, email, password);
+        showNotification("ログインしました");
+      } else {
+        if (!displayName) { showNotification("ニックネームを入力してください"); setLoading(false); return; }
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        await setDoc(doc(db, "artifacts", appId, "public", "data", "users", cred.user.uid), {
+          uid: cred.user.uid, name: displayName || userId, id: userId, status: "よろしくお願いします！",
+          birthday: "", avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cred.user.uid}`,
+          cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
+          friends: [], wallet: 1000, isBanned: false,
+        });
+        showNotification("アカウント作成完了");
+      }
+    } catch (e) { showNotification("エラー: " + e.message); } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50 p-4">
+      <div className="bg-white w-full max-w-sm rounded-[40px] shadow-2xl p-8 border border-white/50 backdrop-blur-sm">
+        <div className="text-center mb-8">
+          <div className="w-20 h-20 bg-indigo-500 rounded-3xl mx-auto flex items-center justify-center mb-4 shadow-lg"><MessageCircle className="w-10 h-10 text-white" /></div>
+          <h1 className="text-2xl font-black text-gray-800">チャットアプリ</h1>
+          <p className="text-sm text-gray-500 mt-2">{isLoginMode ? "ログインして始めましょう" : "アカウントを作成してデータを保存"}</p>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {!isLoginMode && (
+            <div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">表示名</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><User className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" placeholder="山田 太郎" value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div></div>
+          )}
+          <div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">ユーザーID</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><AtSign className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" placeholder="user_id" value={userId} onChange={(e) => setUserId(e.target.value)} /></div></div>
+          <div className="space-y-1"><label className="text-[10px] font-bold text-gray-400 ml-2">パスワード</label><div className="bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border"><KeyRound className="w-4 h-4 text-gray-400" /><input className="bg-transparent w-full outline-none text-sm font-bold" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} /></div></div>
+          <button type="submit" disabled={loading} className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl flex items-center justify-center">{loading ? <Loader2 className="animate-spin" /> : (isLoginMode ? "ログイン" : "登録")}</button>
+        </form>
+        <div className="mt-6 flex flex-col gap-3">
+          <button onClick={handleGoogleLogin} className="w-full bg-white border text-gray-700 font-bold py-3 rounded-2xl shadow-sm flex items-center justify-center gap-2"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/action/google.svg" className="w-4 h-4" />Googleでログイン</button>
+          <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-xs font-bold text-gray-400 hover:text-indigo-500">{isLoginMode ? "アカウントをお持ちでない方はこちら" : "すでにアカウントをお持ちの方はこちら"}</button>
+          <button onClick={handleGuestLogin} className="text-xs font-bold text-gray-400 underline hover:text-gray-600">お試しゲストログイン</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Main App Component ---
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [view, setView] = useState('auth'); // Auto-login removed
+  const [view, setView] = useState('home'); 
   const [activeChatId, setActiveChatId] = useState(null);
-  const [allUsers, setAllUsers] = useState([]);
   const [chats, setChats] = useState([]);
-  const [posts, setPosts] = useState([]);
-  const [notification, setNotification] = useState(null);
+  const [allUsers, setAllUsers] = useState([]);
+  const [mutedChats, setMutedChats] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [outgoingCall, setOutgoingCall] = useState(null);
+  const [activeCallId, setActiveCallId] = useState(null);
+  const [isVideoCall, setIsVideoCall] = useState(true);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [mutedChats, setMutedChats] = useState(() => {
-    const saved = localStorage.getItem('mutedChats');
-    return saved ? JSON.parse(saved) : [];
-  });
-  
-  // Call State
-  const [activeCall, setActiveCall] = useState(null);
-
-  const toggleMuteChat = (chatId) => {
-    setMutedChats(prev => {
-      const next = prev.includes(chatId) ? prev.filter(id => id !== chatId) : [...prev, chatId];
-      localStorage.setItem('mutedChats', JSON.stringify(next));
-      return next;
-    });
-  };
+  const [searchId, setSearchId] = useState('');
+  const [coinModalTarget, setCoinModalTarget] = useState(null);
 
   useEffect(() => {
-    const script = document.createElement('script');
-    script.src = JSQR_URL;
-    document.head.appendChild(script);
-    
-    // Add dummy favicon to prevent 404 error
-    const link = document.createElement('link');
-    link.rel = 'icon';
-    link.href = 'data:image/x-icon;base64,';
-    document.head.appendChild(link);
-    
-    // Auth Initialization - REMOVED AUTOMATIC LOGIN
-    setPersistence(auth, browserLocalPersistence);
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+    return onAuthStateChanged(auth, async (u) => {
+      setUser(u);
       if (u) {
-        setUser(u);
-        const docSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid));
-        if (docSnap.exists()) {
-             setProfile(docSnap.data());
-        } else {
-            const initialProfile = {
-              uid: u.uid, name: u.displayName || `User_${u.uid.slice(0,4)}`, id: `user_${u.uid.slice(0,6)}`,
-              status: "よろしくお願いします！", birthday: "", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
-              cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80", friends: [], wallet: 1000, isBanned: false
-            };
-            await setDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid), initialProfile);
-            setProfile(initialProfile);
-        }
-        setView('home');
-      } else {
-        setUser(null);
-        setProfile(null);
-        setView('auth');
+        const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', u.uid);
+        onSnapshot(userRef, (doc) => {
+          if (doc.exists()) { setProfile(doc.data()); }
+          else { 
+            // Create default profile
+            const newProfile = { uid: u.uid, name: u.displayName || 'ゲスト', id: u.uid.substring(0,8), status: 'よろしくお願いします！', birthday: '', avatar: u.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.uid}`, cover: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80', friends: [], wallet: 1000, isBanned: false };
+            setDoc(userRef, newProfile);
+            setProfile(newProfile);
+          }
+        });
+
+        const chatsQuery = query(collection(db, 'artifacts', appId, 'public', 'data', 'chats'), where('participants', 'array-contains', u.uid), orderBy('updatedAt', 'desc'));
+        onSnapshot(chatsQuery, (snap) => setChats(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+        onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snap) => setAllUsers(snap.docs.map(d => d.data())));
       }
     });
-    return () => unsubscribe();
   }, []);
 
-  const showNotification = (msg) => {
-    setNotification(msg);
-    setTimeout(() => setNotification(null), 3000);
-  };
-
-  const copyToClipboard = (text) => {
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    document.body.appendChild(textArea);
-    textArea.select();
-    document.execCommand('copy');
-    document.body.removeChild(textArea);
-    showNotification("IDをコピーしました");
-  };
-
   useEffect(() => {
-    if (!user) return;
-    const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), (doc) => {
-      if (doc.exists()) setProfile(doc.data());
-    });
-    const unsubUsers = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'users')), (snap) => {
-      setAllUsers(snap.docs.map(d => d.data()));
-    });
-    const unsubChats = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'chats'), where('participants', 'array-contains', user.uid)), (snap) => {
-      const chatList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setChats(chatList);
-      
-      // Incoming Call Logic
-      const incoming = chatList.find(c => c.callStatus?.status === 'ringing' && c.callStatus.callerId !== user.uid);
-      if (incoming) {
-          if (!activeCall || activeCall.chatId !== incoming.id) {
-             setActiveCall({ chatId: incoming.id, callData: incoming.callStatus, isIncoming: true, isVideo: true }); // Default to video true for incoming
-          }
-      } else {
-          // Auto close call screen if call status is removed (ended by other)
-          if (activeCall && activeCall.isIncoming) {
-              const callStillExists = chatList.find(c => c.id === activeCall.chatId && c.callStatus?.status === 'ringing');
-              if (!callStillExists) setActiveCall(null);
-          }
-      }
-    });
-    const unsubPosts = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'posts'), orderBy('createdAt', 'desc'), limit(50)), (snap) => {
-      setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
-    return () => {
-      unsubProfile(); unsubUsers(); unsubChats(); unsubPosts();
-    };
-  }, [user, activeCall]);
+     if(!chats.length || !user) return;
+     const unsubs = chats.map(chat => {
+         return onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'chats', chat.id, 'call_signaling', 'session'), (snap) => {
+             const data = snap.data();
+             if (data && data.type === 'offer' && data.callerId !== user.uid && !activeCallId) {
+                 setIncomingCall({ chatId: chat.id, ...data });
+             } else if (!data && incomingCall && incomingCall.chatId === chat.id) {
+                 setIncomingCall(null);
+             } else if (data && data.type === 'answer' && outgoingCall && outgoingCall.chatId === chat.id) {
+                 setActiveCallId(chat.id);
+                 setOutgoingCall(null);
+             }
+         });
+     });
+     return () => unsubs.forEach(u => u());
+  }, [chats, user, activeCallId, incomingCall, outgoingCall]);
+
+  const showNotification = (msg) => {
+    const id = Date.now();
+    setNotifications(p => [...p, { id, msg }]);
+    setTimeout(() => setNotifications(p => p.filter(n => n.id !== id)), 3000);
+  };
 
   const addFriendById = async (targetId) => {
-    if (!targetId) return;
-    const targetUser = allUsers.find(u => u.id === targetId || u.uid === targetId);
-    if (targetUser && targetUser.uid !== user.uid) {
-      if ((profile.friends || []).includes(targetUser.uid)) {
-        showNotification("既に友だちです。");
-        return;
-      }
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { friends: arrayUnion(targetUser.uid) });
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', targetUser.uid), { friends: arrayUnion(user.uid) });
-      showNotification(`${targetUser.name}を追加しました`);
+      const target = allUsers.find(u => u.id === targetId || u.uid === targetId);
+      if (!target) return showNotification("ユーザーが見つかりません");
+      if (target.uid === user.uid) return showNotification("自分自身は追加できません");
+      if (profile.friends.includes(target.uid)) return showNotification("既に友だちです");
+      
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { friends: arrayUnion(target.uid) });
+      showNotification(`${target.name}を友だちに追加しました`);
       setSearchModalOpen(false);
-    } else {
-      showNotification("ユーザーが見つかりません");
-    }
   };
 
   const startChatWithUser = async (targetUid) => {
-    const existingChat = chats.find(c => 
-      !c.isGroup && c.participants.includes(targetUid) && c.participants.includes(user.uid)
-    );
-    if (existingChat) {
-      setActiveChatId(existingChat.id);
-      setView('chatroom');
-    } else {
-      const targetUser = allUsers.find(u => u.uid === targetUid);
-      const newChat = {
-        name: targetUser ? targetUser.name : "Chat", icon: targetUser ? targetUser.avatar : "",
-        participants: [user.uid, targetUid], isGroup: false, createdBy: user.uid, updatedAt: serverTimestamp(),
-        lastMessage: { content: "チャットを開始しました", senderId: user.uid }
-      };
-      try {
-        const ref = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats'), newChat);
-        setActiveChatId(ref.id);
-        setView('chatroom');
-      } catch (e) {
-        showNotification("エラーが発生しました");
+      const existing = chats.find(c => !c.isGroup && c.participants.includes(targetUid) && c.participants.includes(user.uid));
+      if (existing) {
+          setActiveChatId(existing.id);
+          setView('chat');
+      } else {
+          const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats'), {
+              participants: [user.uid, targetUid],
+              isGroup: false,
+              updatedAt: serverTimestamp(),
+              createdAt: serverTimestamp()
+          });
+          setActiveChatId(docRef.id);
+          setView('chat');
       }
-    }
   };
 
-  const startVideoCall = async (chatId, isVideo = true) => {
-    try {
-        await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { 
-            "callStatus.status": "ringing", 
-            "callStatus.callerId": user.uid, 
-            "callStatus.timestamp": Date.now() 
-        });
-        setActiveCall({ chatId, callData: { callerId: user.uid }, isVideo });
-    } catch(e) {
-        showNotification("発信に失敗しました");
-    }
+  const startVideoCall = async (chatId, video) => {
+      setIsVideoCall(video);
+      setOutgoingCall({ chatId });
+      // VideoCallView logic triggers offer creation on mount for caller
+      setActiveCallId(chatId); 
   };
+
+  const endCall = async () => {
+      if (activeCallId) {
+         const ref = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeCallId, 'call_signaling', 'session');
+         await deleteDoc(ref);
+         // Clean candidates
+         const cRef = collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeCallId, 'call_signaling', 'candidates', 'list');
+         const sn = await getDocs(cRef);
+         const b = writeBatch(db);
+         sn.forEach(d => b.delete(d.ref));
+         await b.commit();
+      }
+      setActiveCallId(null);
+      setIncomingCall(null);
+      setOutgoingCall(null);
+  };
+
+  if (!user) return <AuthView onLogin={setUser} showNotification={showNotification} />;
 
   return (
-    <div className="max-w-md mx-auto h-screen border-x bg-white flex flex-col relative overflow-hidden shadow-2xl">
-      {notification && <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce">{notification}</div>}
-      
-      {!user ? (
-          <AuthView onLogin={setUser} showNotification={showNotification} />
-      ) : (
-          <>
-            {/* Active Call View Overlay */}
-            {activeCall ? (
-                activeCall.isIncoming ? (
-                    <IncomingCallOverlay 
-                        callData={activeCall.callData} 
-                        allUsers={allUsers} 
-                        onDecline={async () => { await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: deleteField() }); setActiveCall(null); }} 
-                        onAccept={() => setActiveCall({ ...activeCall, isIncoming: false })} 
-                    />
-                ) : (
-                    <VideoCallView 
-                        user={user} 
-                        chatId={activeCall.chatId} 
-                        callData={activeCall.callData} 
-                        isVideoEnabled={activeCall.isVideo} 
-                        onEndCall={async () => { await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: deleteField() }); setActiveCall(null); }} 
-                    />
-                )
-            ) : (
-                <div className="flex-1 overflow-hidden relative">
-                    {view === 'home' && <HomeView user={user} profile={profile} allUsers={allUsers} chats={chats} setView={setView} setActiveChatId={setActiveChatId} setSearchModalOpen={setSearchModalOpen} startChatWithUser={startChatWithUser} showNotification={showNotification} />}
-                    {view === 'voom' && <VoomView user={user} allUsers={allUsers} profile={profile} posts={posts} showNotification={showNotification} db={db} appId={appId} />}
-                    {view === 'chatroom' && <ChatRoomView user={user} profile={profile} allUsers={allUsers} chats={chats} activeChatId={activeChatId} setActiveChatId={setActiveChatId} setView={setView} db={db} appId={appId} mutedChats={mutedChats} toggleMuteChat={toggleMuteChat} showNotification={showNotification} addFriendById={addFriendById} startVideoCall={startVideoCall} />}
-                    {view === 'profile' && <ProfileEditView user={user} profile={profile} setView={setView} showNotification={showNotification} copyToClipboard={copyToClipboard} />}
-                    {view === 'qr' && <QRScannerView user={user} setView={setView} addFriendById={addFriendById} />}
-                    {view === 'group-create' && <GroupCreateView user={user} profile={profile} allUsers={allUsers} setView={setView} showNotification={showNotification} />}
-                    {view === 'birthday-cards' && <BirthdayCardBox user={user} setView={setView} />}
-                    {view === 'sticker-create' && <StickerEditor user={user} profile={profile} onClose={() => setView('sticker-store')} showNotification={showNotification} />}
-                    {view === 'sticker-store' && <StickerStoreView user={user} setView={setView} showNotification={showNotification} profile={profile} allUsers={allUsers} />}
+    <div className="h-screen w-full bg-gray-100 flex justify-center overflow-hidden font-sans text-gray-800">
+      <div className="w-full max-w-md bg-white shadow-2xl overflow-hidden relative flex flex-col h-full sm:rounded-[30px] sm:my-4 sm:h-[95vh] border border-gray-200/50">
+        
+        {view === 'home' && <HomeView user={user} profile={profile} allUsers={allUsers} chats={chats} setView={setView} setActiveChatId={setActiveChatId} setSearchModalOpen={setSearchModalOpen} startChatWithUser={startChatWithUser} showNotification={showNotification} setCoinModalTarget={setCoinModalTarget} />}
+        {view === 'chat' && activeChatId && <ChatRoomView user={user} profile={profile} allUsers={allUsers} chats={chats} activeChatId={activeChatId} setActiveChatId={setActiveChatId} setView={setView} db={db} appId={appId} mutedChats={mutedChats} toggleMuteChat={(id) => setMutedChats(p => p.includes(id) ? p.filter(x => x!==id) : [...p, id])} showNotification={showNotification} addFriendById={addFriendById} startVideoCall={startVideoCall} />}
+        {view === 'sticker-create' && <StickerEditor user={user} profile={profile} onClose={() => setView('sticker-store')} showNotification={showNotification} />}
+        {view === 'sticker-store' && <StickerStoreView user={user} setView={setView} showNotification={showNotification} profile={profile} allUsers={allUsers} />}
+        {view === 'group-create' && <GroupCreateView user={user} profile={profile} allUsers={allUsers} setView={setView} showNotification={showNotification} />}
+        {view === 'card-box' && <BirthdayCardBox user={user} setView={setView} />}
+
+        {notifications.map(n => (
+            <div key={n.id} className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/80 text-white px-6 py-3 rounded-full text-sm font-bold shadow-xl z-[9999] animate-in fade-in slide-in-from-top-4 backdrop-blur-sm">
+                {n.msg}
+            </div>
+        ))}
+        
+        {searchModalOpen && (
+            <div className="fixed inset-0 z-[500] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
+                <div className="bg-white w-full max-w-sm rounded-[32px] p-6 shadow-2xl">
+                    <h3 className="font-bold text-lg mb-4">友だち検索</h3>
+                    <input className="w-full bg-gray-100 p-3 rounded-xl mb-4 outline-none focus:ring-2 focus:ring-blue-100 transition-all" placeholder="ユーザーIDを入力" value={searchId} onChange={e => setSearchId(e.target.value)} />
+                    <div className="flex gap-2">
+                        <button onClick={() => setSearchModalOpen(false)} className="flex-1 py-3 bg-gray-100 rounded-xl font-bold text-gray-500 hover:bg-gray-200 transition-colors">閉じる</button>
+                        <button onClick={() => addFriendById(searchId)} className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-bold shadow-lg hover:bg-blue-600 transition-colors">検索して追加</button>
+                    </div>
                 </div>
-            )}
-            
-            {/* Overlay Modals (Global) */}
-            {searchModalOpen && <div className="fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/60"><div className="bg-white w-full max-w-sm rounded-[32px] p-8"><h2 className="text-xl font-bold mb-6">検索</h2><input className="w-full bg-gray-50 rounded-2xl py-4 px-6 mb-6 outline-none" placeholder="IDを入力" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /><div className="flex gap-4"><button className="flex-1 py-4 text-gray-600 font-bold" onClick={() => setSearchModalOpen(false)}>閉じる</button><button className="flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold" onClick={() => addFriendById(searchQuery)}>追加</button></div></div></div>}
-            
-            {/* Bottom Navigation */}
-            {user && !activeCall && ['home', 'voom'].includes(view) && (
-                <div className="h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0">
-                    <div className={`flex flex-col items-center gap-1 cursor-pointer transition-all ${view === 'home' ? 'text-green-500' : 'text-gray-400'}`} onClick={() => setView('home')}><Home className="w-6 h-6" /><span className="text-[10px] font-bold">ホーム</span></div>
-                    <div className={`flex flex-col items-center gap-1 cursor-pointer transition-all ${view === 'voom' ? 'text-green-500' : 'text-gray-400'}`} onClick={() => setView('voom')}><LayoutGrid className="w-6 h-6" /><span className="text-[10px] font-bold">VOOM</span></div>
-                </div>
-            )}
-          </>
-      )}
-      <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
+            </div>
+        )}
+
+        {coinModalTarget && (
+            <CoinTransferModal 
+                onClose={() => setCoinModalTarget(null)} 
+                myWallet={profile?.wallet || 0} 
+                myUid={user.uid} 
+                targetUid={coinModalTarget.uid} 
+                targetName={coinModalTarget.name} 
+                showNotification={showNotification} 
+            />
+        )}
+
+        {incomingCall && !activeCallId && (
+            <IncomingCallOverlay 
+                callData={incomingCall} 
+                allUsers={allUsers} 
+                onDecline={async () => { 
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', incomingCall.chatId, 'call_signaling', 'session')); 
+                    setIncomingCall(null); 
+                }} 
+                onAccept={() => { setActiveCallId(incomingCall.chatId); setIncomingCall(null); }} 
+            />
+        )}
+        
+        {outgoingCall && !activeCallId && (
+             <OutgoingCallOverlay 
+                callData={outgoingCall} 
+                allUsers={allUsers} 
+                onCancel={async () => {
+                     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', outgoingCall.chatId, 'call_signaling', 'session'));
+                     setOutgoingCall(null);
+                     setActiveCallId(null);
+                }}
+             />
+        )}
+
+        {activeCallId && (
+            <VideoCallView 
+                user={user} 
+                chatId={activeCallId} 
+                callData={{ callerId: incomingCall ? incomingCall.callerId : user.uid }}
+                onEndCall={endCall} 
+                isVideoEnabled={isVideoCall} 
+            />
+        )}
+      </div>
     </div>
   );
 }
