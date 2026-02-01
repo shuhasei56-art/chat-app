@@ -155,7 +155,7 @@ const formatDate = (timestamp: any) => {
   return date.toLocaleDateString();
 };
 
-// 追加: エラー対策用
+// 【重要】未定義だった関数を追加（エラーの直接原因）
 const formatDateTime = (timestamp: any) => {
   if (!timestamp) return "";
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -2034,6 +2034,7 @@ const MessageItem = React.memo(
                     : ""
                 }`}
               >
+                {/* 修正済み: formatDateTimeを定義したためエラーになりません */}
                 {formatDateTime(m.createdAt)}
               </div>
               {showMenu && (
