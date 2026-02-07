@@ -625,7 +625,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
         setCallError("\u3053\u306E\u30D6\u30E9\u30A6\u30B6\u306F\u901A\u8A71\uFF08getUserMedia\uFF09\u306B\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u305B\u3093\u3002");
         return;
       }
-      const isCaller = callData?.callerId === user.uid;
+      const isCaller = callData?.acceptedBy ? callData.acceptedBy !== user.uid : callData?.callerId === user.uid;
       const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
       const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
       const pc = new RTCPeerConnection(rtcConfig);
@@ -764,7 +764,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
       cancelled = true;
       stopAll();
     };
-  }, [chatId, user.uid, callData?.callerId, isVideoEnabled, onEndCall, stopAll]);
+  }, [chatId, user.uid, callData?.callerId, callData?.acceptedBy, isVideoEnabled, onEndCall, stopAll]);
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
@@ -4392,7 +4392,7 @@ function App() {
             timestamp: Date.now()
           }
         });
-        setActiveCall({ chatId, callData: { status: "ringing", callerId: user.uid, callType: isVideo ? "video" : "audio" }, isVideo, isGroupCall: false, phase: "inCall" });
+        setActiveCall({ chatId, callData: { status: "ringing", callerId: user.uid, callType: isVideo ? "video" : "audio" }, isVideo, isGroupCall: false, phase: "dialing" });
       } catch (e) {
         console.error(e);
         showNotification("\u767A\u4FE1\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
@@ -4431,8 +4431,10 @@ function App() {
           },
           onAccept: async () => {
             try {
+              const callerId = activeCall?.callData?.callerId || syncedCallData?.callerId;
               const nextCallData = {
                 ...activeCall.callData || {},
+                callerId,
                 status: "accepted",
                 callType: activeCall?.callData?.callType || (activeCall?.isVideo ? "video" : "audio"),
                 acceptedBy: user.uid,
@@ -4443,6 +4445,22 @@ function App() {
             } catch (e) {
               console.error(e);
               showNotification("\u5FDC\u7B54\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+            }
+          }
+        }
+      ) : effectiveCallPhase === "dialing" ? /* @__PURE__ */ jsx(
+        OutgoingCallOverlay,
+        {
+          callData: syncedCallData || activeCall.callData,
+          allUsers,
+          onCancel: async () => {
+            try {
+              await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: deleteField() });
+              await cleanupCallSignaling(activeCall.chatId);
+            } catch (e) {
+              console.error(e);
+            } finally {
+              setActiveCall(null);
             }
           }
         }
