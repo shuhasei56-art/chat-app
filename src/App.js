@@ -45,7 +45,8 @@ import {
   LogOut, RefreshCcw, ArrowUpCircle, Reply, Smile, StopCircle, PhoneCall, Phone, FileText,
   Paperclip, Download, UserMinus, AtSign, Store, PenTool, Eraser, Type, CheckCircle, XCircle,
   Lock, ShoppingBag, Coins, Scissors, Star, Disc, ShieldAlert, Music, Volume2, ShoppingCart,
-  User, KeyRound, MicOff, VideoOff, Wand2, Sparkles, Zap, MoreVertical, EyeOff, Eye, AlertCircle
+  User, KeyRound, MicOff, VideoOff, Wand2, Sparkles, Zap, MoreVertical, EyeOff, Eye, AlertCircle,
+  CalendarDays
 } from 'lucide-react';
 
 // --- 1. Firebase Configuration ---
@@ -1952,11 +1953,12 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
   const [status, setStatus] = useState(profile?.status || "");
   const [avatar, setAvatar] = useState(profile?.avatar || "");
   const [cover, setCover] = useState(profile?.cover || "");
+  const [birthday, setBirthday] = useState(profile?.birthday || "");
 
   const handleSave = async () => {
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), {
-        name, status, avatar, cover, updatedAt: serverTimestamp()
+        name, status, avatar, cover, birthday, updatedAt: serverTimestamp()
       });
       showNotification("プロフィールを更新しました");
       setView('home');
@@ -2005,6 +2007,11 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
            <div>
              <label className="text-xs font-bold text-gray-500">ステータス</label>
              <input className="w-full border-b py-2 text-sm outline-none focus:border-green-500" value={status} onChange={e => setStatus(e.target.value)} />
+           </div>
+
+           <div>
+             <label className="text-xs font-bold text-gray-500 flex items-center gap-1"><CalendarDays className="w-3 h-3"/> 誕生日</label>
+             <input type="date" className="w-full border-b py-2 text-sm outline-none focus:border-green-500 bg-transparent" value={birthday} onChange={e => setBirthday(e.target.value)} />
            </div>
 
            <div onClick={() => copyToClipboard(profile.id)} className="cursor-pointer">
