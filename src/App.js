@@ -2943,7 +2943,7 @@ function App() {
     return () => {
       unsubProfile(); unsubUsers(); unsubChats(); unsubPosts(); unsubEffects();
     };
-  }, [user}, [user, activeCall]);
+  }, [user, activeCall]);
 
   const addFriendById = async (targetId) => {
     if (!targetId) return;
