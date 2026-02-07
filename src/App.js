@@ -95,11 +95,11 @@ const isTodayBirthday = (birthdayString) => {
 };
 
 // Audio Notification Logic
-let audioCtx: AudioContext | null = null;
+let audioCtx = null;
 
 const initAudioContext = () => {
     if (!audioCtx) {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         if(AudioContextClass) audioCtx = new AudioContextClass();
     }
     if (audioCtx && audioCtx.state === 'suspended') {
@@ -138,7 +138,7 @@ const processFileBeforeUpload = (file) => {
       return;
     }
     const reader = new FileReader();
-    reader.onload = (event: any) => {
+    reader.onload = (event) => {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
@@ -173,7 +173,7 @@ const processFileBeforeUpload = (file) => {
   });
 };
 
-const handleFileUpload = async (e: any, callback: any) => {
+const handleFileUpload = async (e, callback) => {
   const files = e.target.files;
   if (!files || files.length === 0) return;
   const originalFile = files[0];
@@ -193,19 +193,19 @@ const handleFileUpload = async (e: any, callback: any) => {
     callback(objectUrl, type, file);
   } else {
     const reader = new FileReader();
-    reader.onload = (event: any) => callback(event.target.result, type, file);
+    reader.onload = (event) => callback(event.target.result, type, file);
     reader.readAsDataURL(file);
   }
 };
 
-const handleCompressedUpload = (e: any, callback: any) => {
+const handleCompressedUpload = (e, callback) => {
   const files = e.target.files;
   if (!files || files.length === 0) return;
   const file = files[0];
 
   if (!file.type.startsWith('image')) return;
   const reader = new FileReader();
-  reader.onload = (event: any) => {
+  reader.onload = (event) => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -228,13 +228,13 @@ const handleCompressedUpload = (e: any, callback: any) => {
   reader.readAsDataURL(file);
 };
 
-const generateThumbnail = (file: File): Promise<string | null> => {
+const generateThumbnail = (file) => {
   return new Promise((resolve) => {
     if (!file) { resolve(null); return; }
     const MAX_SIZE = 320; 
     if (file.type.startsWith('image')) {
         const reader = new FileReader();
-        reader.onload = (e: any) => {
+        reader.onload = (e) => {
             const img = new Image();
             img.onload = () => {
                 const canvas = document.createElement('canvas');
@@ -290,7 +290,7 @@ const generateThumbnail = (file: File): Promise<string | null> => {
 
 // --- 3. Component Definitions (Helper & Views) ---
 
-const AuthView = ({ onLogin, showNotification }: any) => {
+const AuthView = ({ onLogin, showNotification }) => {
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
@@ -313,7 +313,7 @@ const AuthView = ({ onLogin, showNotification }: any) => {
         cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80"
       }, { merge: true });
       
-    } catch (error: any) {
+    } catch (error) {
       console.error("Login Error:", error);
       showNotification("エラーが発生しました: " + error.message);
     }
@@ -325,7 +325,7 @@ const AuthView = ({ onLogin, showNotification }: any) => {
     catch (e) { showNotification("ゲストログイン失敗"); } finally { setLoading(false); }
   };
 
-  const handleSubmit = async (e: any) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!userId || !password) return showNotification("IDとパスワードを入力してください");
     const email = `${userId}@voom-persistent.app`;
@@ -345,7 +345,7 @@ const AuthView = ({ onLogin, showNotification }: any) => {
         });
         showNotification("アカウント作成完了");
       }
-    } catch (e: any) { showNotification("エラー: " + e.message); } finally { setLoading(false); }
+    } catch (e) { showNotification("エラー: " + e.message); } finally { setLoading(false); }
   };
 
   return (
@@ -376,20 +376,20 @@ const AuthView = ({ onLogin, showNotification }: any) => {
   );
 };
 
-const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = true, activeEffect, backgroundUrl }: any) => {
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = true, activeEffect, backgroundUrl }) => {
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
-  const [callError, setCallError] = useState<string | null>(null);
+  const [callError, setCallError] = useState(null);
 
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
 
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const unsubscribersRef = useRef<(() => void)[]>([]);
-  const pendingCandidatesRef = useRef<any[]>([]);
+  const pcRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const unsubscribersRef = useRef([]);
+  const pendingCandidatesRef = useRef([]);
   const startedRef = useRef(false);
 
   const stopAll = useCallback(() => {
@@ -418,7 +418,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
     localStreamRef.current = null;
   }, []);
 
-  const getFilterStyle = (effectName: string) => {
+  const getFilterStyle = (effectName) => {
     switch (effectName) {
       case 'Sepia': return 'sepia(100%)';
       case 'Grayscale': return 'grayscale(100%)';
@@ -434,7 +434,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
     }
   };
 
-  const getMediaErrorMessage = (err: any) => {
+  const getMediaErrorMessage = (err) => {
     const name = err?.name || '';
     if (name === 'NotAllowedError' || name === 'SecurityError') return "カメラ/マイクの利用が許可されていません。ブラウザ設定で許可してください。";
     if (name === 'NotFoundError') return "カメラまたはマイクが見つかりません。（端末にデバイスが無い/無効/接続されていない可能性）";
@@ -443,7 +443,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
     return "カメラ/マイクの取得に失敗しました。";
   };
 
-  const flushPendingCandidates = async (pc: RTCPeerConnection) => {
+  const flushPendingCandidates = async (pc) => {
     const pending = pendingCandidatesRef.current;
     pendingCandidatesRef.current = [];
     for (const c of pending) {
@@ -523,18 +523,18 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
 
         const wantVideo = !!isVideoEnabled && hasVideoInput;
 
-        const baseConstraints: MediaStreamConstraints = {
+        const baseConstraints = {
           audio: hasAudioInput
             ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
             : true,
           video: wantVideo ? { facingMode: "user" } : false,
         };
 
-        let stream: MediaStream | null = null;
+        let stream = null;
 
         try {
           stream = await navigator.mediaDevices.getUserMedia(baseConstraints);
-        } catch (err: any) {
+        } catch (err) {
           // If video was requested, retry with audio only.
           if (wantVideo) {
             try {
@@ -543,7 +543,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
                 video: false,
               });
               setIsVideoOff(true);
-            } catch (err2: any) {
+            } catch (err2) {
               throw err2;
             }
           } else {
@@ -569,7 +569,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
         }
 
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-      } catch (err: any) {
+      } catch (err) {
         console.error("Error accessing media devices.", err);
         setCallError(getMediaErrorMessage(err));
         setTimeout(() => onEndCall?.(), 2500);
@@ -578,7 +578,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
 
       // --- Signaling ---
       const unsubSignaling = onSnapshot(signalingRef, async (snap) => {
-        const data: any = snap.data();
+        const data = snap.data();
         if (!data || !pcRef.current) return;
 
         try {
@@ -602,7 +602,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
       const unsubCandidates = onSnapshot(candidatesCol, (snapshot) => {
         snapshot.docChanges().forEach(async (change) => {
           if (change.type !== "added") return;
-          const data: any = change.doc.data();
+          const data = change.doc.data();
           if (!data || data.senderId === user.uid) return;
 
           try {
@@ -730,25 +730,25 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   );
 };
 
-const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }: any) => {
-  const [sourceImage, setSourceImage] = useState<string | null>(null);
-  const [generatedEffects, setGeneratedEffects] = useState<any[]>([]);
+const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) => {
+  const [sourceImage, setSourceImage] = useState(null);
+  const [generatedEffects, setGeneratedEffects] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef(null);
 
-  const handleImageUpload = (e: any) => {
+  const handleImageUpload = (e) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const file = files[0];
     const reader = new FileReader();
-    reader.onload = (event: any) => {
+    reader.onload = (event) => {
       setSourceImage(event.target.result);
       generateEffects(event.target.result);
     };
     reader.readAsDataURL(file);
   };
 
-  const generateEffects = async (imgSrc: string) => {
+  const generateEffects = async (imgSrc) => {
     setIsProcessing(true);
     setGeneratedEffects([]);
     
@@ -767,7 +767,7 @@ const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }: 
         { name: 'Bright', filter: 'brightness(150%)' }
       ];
 
-      const results: any[] = [];
+      const results = [];
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
@@ -794,7 +794,7 @@ const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }: 
     img.src = imgSrc;
   };
 
-  const saveEffect = async (effect: any) => {
+  const saveEffect = async (effect) => {
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'users', user.uid, 'effects'), {
         name: effect.name,
@@ -854,7 +854,7 @@ const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }: 
   );
 };
 
-const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, showNotification }: any) => {
+const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, showNotification }) => {
   const [amount, setAmount] = useState("");
   const [sending, setSending] = useState(false);
   const handleSend = async () => {
@@ -895,16 +895,16 @@ const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, sh
   );
 };
 
-const ContactSelectModal = ({ onClose, onSend, friends }: any) => (
+const ContactSelectModal = ({ onClose, onSend, friends }) => (
   <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
     <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl flex flex-col max-h-[70vh]">
       <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">連絡先を選択</h3><button onClick={onClose}><X className="w-6 h-6"/></button></div>
-      <div className="flex-1 overflow-y-auto space-y-2 pr-2">{friends.length === 0 ? <div className="text-center py-10 text-gray-400 text-sm">友だちがいません</div> : friends.map((f: any) => <div key={f.uid} onClick={() => onSend(f)} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-2xl cursor-pointer border border-transparent hover:border-gray-100 transition-all"><img src={f.avatar} className="w-10 h-10 rounded-xl object-cover border" /><span className="font-bold text-sm flex-1">{f.name}</span><Plus className="w-4 h-4 text-green-500" /></div>)}</div>
+      <div className="flex-1 overflow-y-auto space-y-2 pr-2">{friends.length === 0 ? <div className="text-center py-10 text-gray-400 text-sm">友だちがいません</div> : friends.map((f) => <div key={f.uid} onClick={() => onSend(f)} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-2xl cursor-pointer border border-transparent hover:border-gray-100 transition-all"><img src={f.avatar} className="w-10 h-10 rounded-xl object-cover border" /><span className="font-bold text-sm flex-1">{f.name}</span><Plus className="w-4 h-4 text-green-500" /></div>)}</div>
     </div>
   </div>
 );
 
-const BirthdayCardModal = ({ onClose, onSend, toName }: any) => {
+const BirthdayCardModal = ({ onClose, onSend, toName }) => {
   const [color, setColor] = useState('pink'), [message, setMessage] = useState('');
   const colors = [{ id: 'pink', class: 'bg-pink-100 border-pink-300' }, { id: 'blue', class: 'bg-blue-100 border-blue-300' }, { id: 'yellow', class: 'bg-yellow-100 border-yellow-300' }, { id: 'green', class: 'bg-green-100 border-green-300' }];
   return (
@@ -919,7 +919,7 @@ const BirthdayCardModal = ({ onClose, onSend, toName }: any) => {
   );
 };
 
-const StickerBuyModal = ({ onClose, onGoToStore, packId }: any) => {
+const StickerBuyModal = ({ onClose, onGoToStore, packId }) => {
     return (
         <div className="fixed inset-0 z-[400] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
             <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center">
@@ -937,16 +937,16 @@ const StickerBuyModal = ({ onClose, onGoToStore, packId }: any) => {
     );
 };
 
-const GroupAddMemberModal = ({ onClose, currentMembers, chatId, allUsers, profile, user, showNotification }: any) => {
-    const [selected, setSelected] = useState<string[]>([]);
-    const inviteableFriends = allUsers.filter((u: any) => (profile?.friends || []).includes(u.uid) && !currentMembers.includes(u.uid));
-    const toggle = (uid: string) => setSelected(prev => prev.includes(uid) ? prev.filter(i => i !== uid) : [...prev, uid]);
+const GroupAddMemberModal = ({ onClose, currentMembers, chatId, allUsers, profile, user, showNotification }) => {
+    const [selected, setSelected] = useState([]);
+    const inviteableFriends = allUsers.filter((u) => (profile?.friends || []).includes(u.uid) && !currentMembers.includes(u.uid));
+    const toggle = (uid) => setSelected(prev => prev.includes(uid) ? prev.filter(i => i !== uid) : [...prev, uid]);
     const handleInvite = async () => {
       if (selected.length === 0) return;
       try {
-        const addedNames: string[] = [];
+        const addedNames = [];
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', chatId), { participants: arrayUnion(...selected) });
-        selected.forEach(uid => { const u = allUsers.find((user: any) => user.uid === uid); if (u) addedNames.push(u.name); });
+        selected.forEach(uid => { const u = allUsers.find((user) => user.uid === uid); if (u) addedNames.push(u.name); });
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats', chatId, 'messages'), {
           senderId: user.uid, content: `${profile.name}が${addedNames.join('、')}を招待しました。`, type: 'text', createdAt: serverTimestamp(), readBy: [user.uid]
         });
@@ -957,17 +957,17 @@ const GroupAddMemberModal = ({ onClose, currentMembers, chatId, allUsers, profil
       <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
         <div className="bg-white w-full max-w-sm rounded-3xl flex flex-col max-h-[70vh]">
           <div className="flex justify-between items-center p-4 border-b"><h3 className="font-bold text-lg">メンバーを追加</h3><button onClick={onClose}><X className="w-6 h-6"/></button></div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-2">{inviteableFriends.length === 0 ? <div className="text-center py-10 text-gray-400 text-sm">招待できる友だちがいません</div> : inviteableFriends.map((f: any) => <div key={f.uid} onClick={() => toggle(f.uid)} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-2xl cursor-pointer border border-transparent transition-all"><img src={f.avatar} className="w-10 h-10 rounded-xl object-cover border" /><span className="font-bold text-sm flex-1">{f.name}</span><div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${selected.includes(f.uid) ? 'bg-green-500 border-green-500' : 'border-gray-200'}`}>{selected.includes(f.uid) && <Check className="w-4 h-4 text-white" />}</div></div>)}</div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-2">{inviteableFriends.length === 0 ? <div className="text-center py-10 text-gray-400 text-sm">招待できる友だちがいません</div> : inviteableFriends.map((f) => <div key={f.uid} onClick={() => toggle(f.uid)} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-2xl cursor-pointer border border-transparent transition-all"><img src={f.avatar} className="w-10 h-10 rounded-xl object-cover border" /><span className="font-bold text-sm flex-1">{f.name}</span><div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${selected.includes(f.uid) ? 'bg-green-500 border-green-500' : 'border-gray-200'}`}>{selected.includes(f.uid) && <Check className="w-4 h-4 text-white" />}</div></div>)}</div>
           <div className="p-4 border-t"><button onClick={handleInvite} disabled={selected.length === 0} className={`w-full py-3 rounded-2xl font-bold shadow-lg text-white transition-all ${selected.length > 0 ? 'bg-green-500' : 'bg-gray-300'}`}>招待する ({selected.length})</button></div>
         </div>
       </div>
     );
 };
 
-const GroupEditModal = ({ onClose, chatId, currentName, currentIcon, currentMembers, allUsers, showNotification, user, profile }: any) => {
+const GroupEditModal = ({ onClose, chatId, currentName, currentIcon, currentMembers, allUsers, showNotification, user, profile }) => {
     const [name, setName] = useState(currentName);
     const [icon, setIcon] = useState(currentIcon);
-    const [kickTarget, setKickTarget] = useState<any>(null);
+    const [kickTarget, setKickTarget] = useState(null);
 
     const handleUpdate = async () => {
         if (!name.trim()) return showNotification("グループ名を入力してください");
@@ -998,11 +998,11 @@ const GroupEditModal = ({ onClose, chatId, currentName, currentIcon, currentMemb
           <div className="flex justify-between items-center mb-6 border-b pb-4 shrink-0"><h3 className="font-bold text-lg">グループ設定</h3><button onClick={onClose}><X className="w-6 h-6 text-gray-500"/></button></div>
           <div className="flex-1 overflow-y-auto scrollbar-hide">
             <div className="flex flex-col items-center gap-6 mb-8">
-                <div className="relative group"><img src={icon} className="w-24 h-24 rounded-3xl object-cover bg-gray-100 border shadow-sm" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer shadow-lg border-2 border-white hover:bg-green-600 transition-colors"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d: string) => setIcon(d))} /></label></div>
+                <div className="relative group"><img src={icon} className="w-24 h-24 rounded-3xl object-cover bg-gray-100 border shadow-sm" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer shadow-lg border-2 border-white hover:bg-green-600 transition-colors"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d) => setIcon(d))} /></label></div>
                 <div className="w-full"><label className="text-xs font-bold text-gray-400 mb-1 block">グループ名</label><input className="w-full text-center text-lg font-bold border-b py-2 focus:outline-none focus:border-green-500 bg-transparent" placeholder="グループ名を入力" value={name} onChange={e => setName(e.target.value)} /></div>
             </div>
             <div className="mb-6"><h4 className="text-xs font-bold text-gray-400 mb-2 uppercase flex justify-between"><span>メンバー ({currentMembers.length})</span><span className="text-[10px] text-gray-400 font-normal">管理者権限: 削除可能</span></h4>
-                <div className="space-y-2">{currentMembers.map((uid: any) => { const m = allUsers.find((u: any) => u.uid === uid); if (!m) return null; const isMe = uid === user.uid; return ( <div key={uid} className="flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 border border-transparent hover:border-gray-100"><img src={m.avatar} className="w-10 h-10 rounded-full object-cover border" /><div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{m.name} {isMe && <span className="text-gray-400 text-xs">(自分)</span>}</div></div>{!isMe && (<button onClick={() => setKickTarget({ uid, name: m.name })} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors flex items-center gap-1 group" title="強制退会"><span className="text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">強制退会</span><UserMinus className="w-5 h-5" /></button>)}</div> ); })}</div>
+                <div className="space-y-2">{currentMembers.map((uid) => { const m = allUsers.find((u) => u.uid === uid); if (!m) return null; const isMe = uid === user.uid; return ( <div key={uid} className="flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 border border-transparent hover:border-gray-100"><img src={m.avatar} className="w-10 h-10 rounded-full object-cover border" /><div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{m.name} {isMe && <span className="text-gray-400 text-xs">(自分)</span>}</div></div>{!isMe && (<button onClick={() => setKickTarget({ uid, name: m.name })} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors flex items-center gap-1 group" title="強制退会"><span className="text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">強制退会</span><UserMinus className="w-5 h-5" /></button>)}</div> ); })}</div>
             </div>
           </div>
           <button onClick={handleUpdate} className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-2xl shadow-lg transition-all shrink-0 mt-4">保存する</button>
@@ -1012,7 +1012,7 @@ const GroupEditModal = ({ onClose, chatId, currentName, currentIcon, currentMemb
     );
 };
 
-const LeaveGroupConfirmModal = ({ onClose, onLeave }: any) => (
+const LeaveGroupConfirmModal = ({ onClose, onLeave }) => (
   <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
     <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl">
       <div className="text-center mb-6"><div className="mx-auto w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-3"><LogOut className="w-6 h-6 text-red-500" /></div><h3 className="font-bold text-lg text-gray-800">グループを退会しますか？</h3><p className="text-sm text-gray-500 mt-2">この操作は取り消せません。<br/>本当に退会してもよろしいですか？</p></div>
@@ -1021,8 +1021,8 @@ const LeaveGroupConfirmModal = ({ onClose, onLeave }: any) => (
   </div>
 );
 
-const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }: any) => {
-  const caller = allUsers.find((u: any) => u.uid === callData.callerId);
+const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }) => {
+  const caller = allUsers.find((u) => u.uid === callData.callerId);
   const isVideo = callData?.callType !== 'audio';
 
   return (
@@ -1080,23 +1080,23 @@ const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }: any) =
   );
 };
 
-const OutgoingCallOverlay = ({ callData, onCancel, allUsers }: any) => (
+const OutgoingCallOverlay = ({ callData, onCancel, allUsers }) => (
   <div className="fixed inset-0 z-[500] bg-gray-900 flex flex-col items-center justify-between py-24 px-6 animate-in fade-in duration-300">
-     <div className="flex flex-col items-center gap-6 mt-10"><div className="relative"><div className="absolute inset-0 rounded-full bg-white/10 animate-pulse"></div><div className="w-32 h-32 rounded-full bg-gray-700 flex items-center justify-center border-4 border-white/50 shadow-2xl relative z-10"><Video className="w-14 h-14 text-white opacity-80" /></div></div><div className="text-center text-white"><h2 className="text-2xl font-bold mb-2">発信中...</h2><p className="text-sm opacity-60">相手の応答を待っています</p></div></div>
+      <div className="flex flex-col items-center gap-6 mt-10"><div className="relative"><div className="absolute inset-0 rounded-full bg-white/10 animate-pulse"></div><div className="w-32 h-32 rounded-full bg-gray-700 flex items-center justify-center border-4 border-white/50 shadow-2xl relative z-10"><Video className="w-14 h-14 text-white opacity-80" /></div></div><div className="text-center text-white"><h2 className="text-2xl font-bold mb-2">発信中...</h2><p className="text-sm opacity-60">相手の応答を待っています</p></div></div>
     <div className="w-full flex justify-center items-center mb-10"><button onClick={onCancel} className="flex flex-col items-center gap-3 group"><div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center shadow-lg group-active:scale-95 transition-all hover:bg-red-600"><X className="w-10 h-10 text-white" /></div><span className="text-white text-xs font-bold">キャンセル</span></button></div>
   </div>
 );
 
-const CallAcceptedOverlay = ({ callData, onJoin }: any) => (
+const CallAcceptedOverlay = ({ callData, onJoin }) => (
   <div className="fixed inset-0 z-[500] bg-gray-900/90 flex flex-col items-center justify-center px-6 animate-in fade-in duration-300 backdrop-blur-sm">
     <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border border-white/20"><div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce"><Video className="w-10 h-10 text-green-600" /></div><h2 className="text-2xl font-bold text-gray-800 mb-2">相手が応答しました</h2><p className="text-gray-500 mb-8 text-sm">下のボタンを押して通話を開始してください</p><button onClick={onJoin} className="w-full py-4 bg-green-500 hover:bg-green-600 text-white font-bold rounded-2xl transition-all shadow-lg shadow-green-200 transform hover:scale-[1.02] flex items-center justify-center gap-2"><Video className="w-5 h-5" />通話に参加する</button></div>
   </div>
 );
 
-const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, myProfile, allUsers, showNotification }: any) => {
-  const myFriends: string[] = myProfile?.friends || [];
+const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, myProfile, allUsers, showNotification }) => {
+  const myFriends = myProfile?.friends || [];
   const myFriendsSet = useMemo(() => new Set(myFriends), [myFriends]);
-  const friendFriends: string[] = friend?.friends || [];
+  const friendFriends = friend?.friends || [];
 
   const isFriend = myFriendsSet.has(friend?.uid);
   const isHidden = (myProfile?.hiddenFriends || []).includes(friend?.uid);
@@ -1215,14 +1215,14 @@ const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, m
   );
 };
 
-const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, addFriendById, onEdit, onDelete, onPreview, onReply, onReaction, allUsers, onStickerClick, onShowProfile, onJoinCall }: any) => {
+const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, addFriendById, onEdit, onDelete, onPreview, onReply, onReaction, allUsers, onStickerClick, onShowProfile, onJoinCall }) => {
     const isMe = m.senderId === user.uid;
-    const [mediaSrc, setMediaSrc] = useState<string | null>(null); 
+    const [mediaSrc, setMediaSrc] = useState(null); 
     const [loading, setLoading] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
     const isInvalidBlob = !isMe && m.content?.startsWith('blob:');
 
-    const setBlobSrcFromBase64 = (base64Data: string, mimeType: string) => {
+    const setBlobSrcFromBase64 = (base64Data, mimeType) => {
         try {
             const byteCharacters = atob(base64Data);
             const byteNumbers = new Array(byteCharacters.length);
@@ -1303,7 +1303,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
       } catch(e) { console.error("Download failed", e); } finally { setLoading(false); }
     };
 
-    const handleStickerClick = (e: any) => {
+    const handleStickerClick = (e) => {
         e.stopPropagation();
         if (m.audio) {
             new Audio(m.audio).play().catch(e => console.error("Audio playback error:", e));
@@ -1316,9 +1316,9 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
     const readCount = (m.readBy?.length || 1) - 1;
     const finalSrc = mediaSrc || m.preview;
     const isShowingPreview = loading || isInvalidBlob || (finalSrc === m.preview);
-    const handleBubbleClick = (e: any) => { e.stopPropagation(); setShowMenu(!showMenu); };
+    const handleBubbleClick = (e) => { e.stopPropagation(); setShowMenu(!showMenu); };
     
-    const renderContent = (text: string) => {
+    const renderContent = (text) => {
       if (!text) return "";
       const regex = /(https?:\/\/[^\s]+)|(@[^\s]+)/g;
       const parts = text.split(regex);
@@ -1327,14 +1327,14 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
         if (part.match(/^https?:\/\//)) return <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all" onClick={(e) => e.stopPropagation()}>{part}</a>;
         if (part.startsWith('@')) {
            const name = part.substring(1);
-           const mentionedUser = allUsers.find((u: any) => u.name === name);
+           const mentionedUser = allUsers.find((u) => u.name === name);
            if (mentionedUser) return <span key={i} className="text-blue-500 font-bold cursor-pointer hover:underline bg-blue-50 px-1 rounded" onClick={(e) => { e.stopPropagation(); onShowProfile && onShowProfile(mentionedUser); }}>{part}</span>;
         }
         return part;
       });
     };
     
-    const getUserNames = (uids: string[]) => { if (!uids || !allUsers) return ""; return uids.map(uid => { const u = allUsers.find((user: any) => user.uid === uid); return u ? u.name : "不明なユーザー"; }).join(", "); };
+    const getUserNames = (uids) => { if (!uids || !allUsers) return ""; return uids.map(uid => { const u = allUsers.find((user) => user.uid === uid); return u ? u.name : "不明なユーザー"; }).join(", "); };
 
     return (
       <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} gap-2 relative group mb-4`}>
@@ -1372,16 +1372,16 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
               {showMenu && (<div className={`absolute top-full ${isMe ? 'right-0' : 'left-0'} mt-1 z-[100] flex flex-col bg-white rounded-xl shadow-2xl border overflow-hidden min-w-[180px] animate-in slide-in-from-top-2 duration-200`}><div className="flex justify-between items-center p-2 bg-gray-50 border-b gap-1 overflow-x-auto scrollbar-hide">{REACTION_EMOJIS.map(emoji => (<button key={emoji} onClick={(e) => { e.stopPropagation(); onReaction(m.id, emoji); setShowMenu(false); }} className="hover:scale-125 transition-transform text-lg p-1">{emoji}</button>))}</div><button onClick={(e) => { e.stopPropagation(); onReply(m); setShowMenu(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-100 text-xs font-bold text-gray-700 text-left"><Reply className="w-4 h-4" />リプライ</button>{(m.type === 'image' || m.type === 'video') && (<button onClick={(e) => { e.stopPropagation(); onPreview(finalSrc, m.type); setShowMenu(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-100 text-xs font-bold text-gray-700 text-left border-t border-gray-100"><Maximize className="w-4 h-4" />拡大表示</button>)}{m.type === 'file' && (<button onClick={(e) => { e.stopPropagation(); handleDownload(); setShowMenu(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-100 text-xs font-bold text-gray-700 text-left border-t border-gray-100"><Download className="w-4 h-4" />保存</button>)}{m.type === 'text' && isMe && (<button onClick={(e) => { e.stopPropagation(); onEdit(m.id, m.content); setShowMenu(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-100 text-xs font-bold text-gray-700 text-left border-t border-gray-100"><Edit2 className="w-4 h-4" />編集</button>)}{isMe && (<button onClick={(e) => { e.stopPropagation(); onDelete(m.id); setShowMenu(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-red-50 text-xs font-bold text-red-500 text-left border-t border-gray-100"><Trash2 className="w-4 h-4" />送信取消</button>)}</div>)}
             </div>
           </div>
-          {m.reactions && Object.keys(m.reactions).some(k => m.reactions[k]?.length > 0) && (<div className={`flex flex-wrap gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>{Object.entries(m.reactions).map(([emoji, uids]: any) => uids?.length > 0 && (<button key={emoji} onClick={() => onReaction(m.id, emoji)} title={getUserNames(uids)} className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs shadow-sm border transition-all hover:scale-105 active:scale-95 ${uids.includes(user.uid) ? 'bg-white border-green-500 text-green-600 ring-1 ring-green-100' : 'bg-white border-gray-100 text-gray-600'}`}><span className="text-sm">{emoji}</span><span className="font-bold text-[10px]">{uids.length}</span></button>))}</div>)}
+          {m.reactions && Object.keys(m.reactions).some(k => m.reactions[k]?.length > 0) && (<div className={`flex flex-wrap gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>{Object.entries(m.reactions).map(([emoji, uids]) => uids?.length > 0 && (<button key={emoji} onClick={() => onReaction(m.id, emoji)} title={getUserNames(uids)} className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs shadow-sm border transition-all hover:scale-105 active:scale-95 ${uids.includes(user.uid) ? 'bg-white border-green-500 text-green-600 ring-1 ring-green-100' : 'bg-white border-gray-100 text-gray-600'}`}><span className="text-sm">{emoji}</span><span className="font-bold text-[10px]">{uids.length}</span></button>))}</div>)}
           {isMe && readCount > 0 && (<div className="text-[10px] font-bold text-green-600 mt-0.5">既読 {isGroup ? readCount : ''}</div>)}
         </div>
       </div>
     );
 });
 
-const PostItem = ({ post, user, allUsers, db, appId, profile }: any) => {
-    const [commentText, setCommentText] = useState(''), [mediaSrc, setMediaSrc] = useState<string | null>(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
-    const u = allUsers.find((x: any) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
+const PostItem = ({ post, user, allUsers, db, appId, profile }) => {
+    const [commentText, setCommentText] = useState(''), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
+    const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
     // Fixed: Defined isMe
     const isMe = post.userId === user.uid;
 
@@ -1425,18 +1425,18 @@ const PostItem = ({ post, user, allUsers, db, appId, profile }: any) => {
         <div className="text-sm mb-3 whitespace-pre-wrap">{post.content}</div>
         {(mediaSrc || isLoadingMedia) && <div className="mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px]">{isLoadingMedia ? <Loader2 className="animate-spin w-5 h-5"/> : post.mediaType === 'video' ? <video src={mediaSrc || ""} className="w-full rounded-2xl max-h-96 bg-black" controls playsInline /> : <img src={mediaSrc || ""} className="w-full rounded-2xl max-h-96 object-cover" loading="lazy" />}</div>}
         <div className="flex items-center gap-6 py-2 border-y mb-3"><button onClick={toggleLike} className="flex items-center gap-1.5"><Heart className={`w-5 h-5 ${isLiked ? 'fill-red-500 text-red-500' : 'text-gray-400'}`} /><span className="text-xs">{post.likes?.length || 0}</span></button><div className="flex items-center gap-1.5 text-gray-400"><MessageCircle className="w-5 h-5" /><span className="text-xs">{post.comments?.length || 0}</span></div></div>
-        <div className="space-y-3 mb-4">{post.comments?.map((c: any, i: number) => <div key={i} className="bg-gray-50 rounded-2xl px-3 py-2"><div className="text-[10px] font-bold text-gray-500">{c.userName}</div><div className="text-xs">{c.text}</div></div>)}</div>
+        <div className="space-y-3 mb-4">{post.comments?.map((c, i) => <div key={i} className="bg-gray-50 rounded-2xl px-3 py-2"><div className="text-[10px] font-bold text-gray-500">{c.userName}</div><div className="text-xs">{c.text}</div></div>)}</div>
         <div className="flex items-center gap-2 bg-gray-100 rounded-full px-4 py-1"><input className="flex-1 bg-transparent text-xs py-2 outline-none" placeholder="コメント..." value={commentText} onChange={e => setCommentText(e.target.value)} onKeyPress={e => e.key === 'Enter' && submitComment()} /><button onClick={submitComment} className="text-green-500"><Send className="w-4 h-4" /></button></div>
       </div>
     );
 };
 
-const GroupCreateView = ({ user, profile, allUsers, setView, showNotification }: any) => {
+const GroupCreateView = ({ user, profile, allUsers, setView, showNotification }) => {
     const [groupName, setGroupName] = useState('');
     const [groupIcon, setGroupIcon] = useState("https://api.dicebear.com/7.x/shapes/svg?seed=group");
-    const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
-    const friendsList = allUsers.filter((u: any) => profile?.friends?.includes(u.uid));
-    const toggleMember = (uid: string) => { setSelectedMembers(prev => prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid]); };
+    const [selectedMembers, setSelectedMembers] = useState([]);
+    const friendsList = allUsers.filter((u) => profile?.friends?.includes(u.uid));
+    const toggleMember = (uid) => { setSelectedMembers(prev => prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid]); };
     const handleCreate = async () => {
       if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
       if (!groupName.trim()) return showNotification("グループ名を入力してください");
@@ -1449,26 +1449,26 @@ const GroupCreateView = ({ user, profile, allUsers, setView, showNotification }:
       <div className="flex flex-col h-full bg-white">
         <div className="p-4 flex items-center gap-4 bg-white border-b sticky top-0 z-10"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><span className="font-bold flex-1">グループ作成</span><button onClick={handleCreate} className="text-green-500 font-bold text-sm">作成</button></div>
         <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide">
-          <div className="flex flex-col items-center gap-4"><div className="relative"><img src={groupIcon} className="w-24 h-24 rounded-3xl object-cover bg-gray-100 border shadow-sm" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer shadow-lg border-2 border-white"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d: string) => setGroupIcon(d))} /></label></div><input className="w-full text-center text-lg font-bold border-b py-2 focus:outline-none focus:border-green-500" placeholder="グループ名を入力" value={groupName} onChange={e => setGroupName(e.target.value)} /></div>
-          <div className="space-y-3"><h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest px-1">友だちを選択</h3><div className="divide-y border-y">{friendsList.map((f: any) => (<div key={f.uid} className="flex items-center gap-4 py-3 cursor-pointer" onClick={() => toggleMember(f.uid)}><div className="relative"><img src={f.avatar} className="w-10 h-10 rounded-xl object-cover border" /></div><span className="flex-1 font-bold text-sm">{f.name}</span><div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${selectedMembers.includes(f.uid) ? 'bg-green-500 border-green-500' : 'border-gray-200'}`}>{selectedMembers.includes(f.uid) && <Check className="w-4 h-4 text-white" />}</div></div>))}</div></div>
+          <div className="flex flex-col items-center gap-4"><div className="relative"><img src={groupIcon} className="w-24 h-24 rounded-3xl object-cover bg-gray-100 border shadow-sm" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer shadow-lg border-2 border-white"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d) => setGroupIcon(d))} /></label></div><input className="w-full text-center text-lg font-bold border-b py-2 focus:outline-none focus:border-green-500" placeholder="グループ名を入力" value={groupName} onChange={e => setGroupName(e.target.value)} /></div>
+          <div className="space-y-3"><h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest px-1">友だちを選択</h3><div className="divide-y border-y">{friendsList.map((f) => (<div key={f.uid} className="flex items-center gap-4 py-3 cursor-pointer" onClick={() => toggleMember(f.uid)}><div className="relative"><img src={f.avatar} className="w-10 h-10 rounded-xl object-cover border" /></div><span className="flex-1 font-bold text-sm">{f.name}</span><div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${selectedMembers.includes(f.uid) ? 'bg-green-500 border-green-500' : 'border-gray-200'}`}>{selectedMembers.includes(f.uid) && <Check className="w-4 h-4 text-white" />}</div></div>))}</div></div>
         </div>
       </div>
     );
 };
 
-const BirthdayCardBox = ({ user, setView }: any) => {
-    const [myCards, setMyCards] = useState<any[]>([]);
+const BirthdayCardBox = ({ user, setView }) => {
+    const [myCards, setMyCards] = useState([]);
     useEffect(() => {
       if (!user) return;
       const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'birthday_cards'), where('toUserId', '==', user.uid));
       const unsub = onSnapshot(q, (snap) => {
         const cards = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        cards.sort((a: any, b: any) => (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0) - (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0));
+        cards.sort((a, b) => (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0) - (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0));
         setMyCards(cards);
       });
       return () => unsub();
     }, [user]);
-    const getColorClass = (color: string) => { switch(color) { case 'pink': return 'bg-pink-100 border-pink-200 text-pink-800'; case 'blue': return 'bg-blue-100 border-blue-200 text-blue-800'; case 'yellow': return 'bg-yellow-100 border-yellow-200 text-yellow-800'; case 'green': return 'bg-green-100 border-green-200 text-green-800'; default: return 'bg-white border-gray-200'; } };
+    const getColorClass = (color) => { switch(color) { case 'pink': return 'bg-pink-100 border-pink-200 text-pink-800'; case 'blue': return 'bg-blue-100 border-blue-200 text-blue-800'; case 'yellow': return 'bg-yellow-100 border-yellow-200 text-yellow-800'; case 'green': return 'bg-green-100 border-green-200 text-green-800'; default: return 'bg-white border-gray-200'; } };
     return (
       <div className="flex flex-col h-full bg-white">
         <div className="p-4 border-b flex items-center gap-4 sticky top-0 bg-white z-10 shrink-0"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><h1 className="text-xl font-bold flex items-center gap-2"><Gift className="w-6 h-6 text-pink-500"/> カードBOX</h1></div>
@@ -1477,26 +1477,26 @@ const BirthdayCardBox = ({ user, setView }: any) => {
     );
 };
 
-const StickerEditor = ({ user, profile, onClose, showNotification }: any) => {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
-    const cuttingSnapshotRef = useRef<ImageData | null>(null);
+const StickerEditor = ({ user, profile, onClose, showNotification }) => {
+    const canvasRef = useRef(null);
+    const containerRef = useRef(null);
+    const cuttingSnapshotRef = useRef(null);
     const [color, setColor] = useState('#000000');
     const [lineWidth, setLineWidth] = useState(5);
     const [fontSize, setFontSize] = useState(24);
-    const [createdStickers, setCreatedStickers] = useState<any[]>([]);
+    const [createdStickers, setCreatedStickers] = useState([]);
     const [packName, setPackName] = useState('');
     const [packDescription, setPackDescription] = useState('');
     const [isDrawing, setIsDrawing] = useState(false);
     const [mode, setMode] = useState('pen');
     const [textInput, setTextInput] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [cutPoints, setCutPoints] = useState<{x: number, y: number}[]>([]);
-    const [audioData, setAudioData] = useState<string | null>(null);
+    const [cutPoints, setCutPoints] = useState([]);
+    const [audioData, setAudioData] = useState(null);
     const [isRecordingSticker, setIsRecordingSticker] = useState(false);
-    const stickerMediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const [textObjects, setTextObjects] = useState<any[]>([]);
-    const [draggingTextId, setDraggingTextId] = useState<number | null>(null);
+    const stickerMediaRecorderRef = useRef(null);
+    const [textObjects, setTextObjects] = useState([]);
+    const [draggingTextId, setDraggingTextId] = useState(null);
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -1509,7 +1509,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }: any) => {
         }
     }, []);
 
-    const startDraw = (e: any) => {
+    const startDraw = (e) => {
         if (draggingTextId) return;
         const canvas = canvasRef.current; 
         if (!canvas) return;
@@ -1524,7 +1524,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }: any) => {
         ctx.beginPath(); ctx.moveTo(x, y); setIsDrawing(true);
     };
 
-    const draw = (e: any) => {
+    const draw = (e) => {
         if (!isDrawing) return;
         const canvas = canvasRef.current; 
         if (!canvas) return;
@@ -1550,12 +1550,12 @@ const StickerEditor = ({ user, profile, onClose, showNotification }: any) => {
         showNotification("テキストを追加しました。ドラッグして移動できます"); 
     };
 
-    const handleTextMouseDown = (e: any, id: number) => {
+    const handleTextMouseDown = (e, id) => {
         e.stopPropagation();
         setDraggingTextId(id);
     };
 
-    const handleContainerMouseMove = (e: any) => {
+    const handleContainerMouseMove = (e) => {
         if (draggingTextId && containerRef.current) {
             const rect = containerRef.current.getBoundingClientRect();
             const x = (e.clientX || e.touches[0].clientX) - rect.left;
@@ -1568,9 +1568,9 @@ const StickerEditor = ({ user, profile, onClose, showNotification }: any) => {
         setDraggingTextId(null);
     };
 
-    const handleImageUpload = (e: any) => {
+    const handleImageUpload = (e) => {
         const file = e.target.files[0]; if (!file) return;
-        handleCompressedUpload(e, (dataUrl: string) => {
+        handleCompressedUpload(e, (dataUrl) => {
              const img = new Image();
              img.onload = () => {
                  const canvas = canvasRef.current; const ctx = canvas?.getContext('2d');
@@ -1586,11 +1586,11 @@ const StickerEditor = ({ user, profile, onClose, showNotification }: any) => {
         e.target.value = '';
     };
 
-    const handleAudioUpload = (e: any) => {
+    const handleAudioUpload = (e) => {
         const file = e.target.files[0];
         if (!file) return;
         const reader = new FileReader();
-        reader.onload = (ev: any) => {
+        reader.onload = (ev) => {
             setAudioData(ev.target.result);
             showNotification("音声を追加しました 🎵");
         };
@@ -1603,13 +1603,13 @@ const StickerEditor = ({ user, profile, onClose, showNotification }: any) => {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const mediaRecorder = new MediaRecorder(stream);
             stickerMediaRecorderRef.current = mediaRecorder;
-            const chunks: Blob[] = [];
+            const chunks = [];
             mediaRecorder.ondataavailable = e => chunks.push(e.data);
             mediaRecorder.onstop = () => {
                 const blob = new Blob(chunks, { type: 'audio/webm' });
                 const reader = new FileReader();
                 reader.onloadend = () => {
-                    setAudioData(reader.result as string);
+                    setAudioData(reader.result);
                     showNotification("録音しました 🎤");
                 };
                 reader.readAsDataURL(blob);
@@ -1629,7 +1629,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }: any) => {
         }
     };
 
-    const cutShape = (shape: string) => {
+    const cutShape = (shape) => {
         const canvas = canvasRef.current; const ctx = canvas?.getContext('2d'); 
         if (!canvas || !ctx) return;
         const width = canvas.width; const height = canvas.height;
@@ -1755,15 +1755,15 @@ const StickerEditor = ({ user, profile, onClose, showNotification }: any) => {
     );
 };
 
-const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }: any) => {
-    const [packs, setPacks] = useState<any[]>([]);
+const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }) => {
+    const [packs, setPacks] = useState([]);
     const [activeTab, setActiveTab] = useState('shop');
     const [activeShopTab, setActiveShopTab] = useState('stickers'); // stickers or effects
     const [adminSubTab, setAdminSubTab] = useState('stickers');
     const [adminMode, setAdminMode] = useState(false);
     const [adminPass, setAdminPass] = useState('');
-    const [purchasing, setPurchasing] = useState<string | null>(null);
-    const [banTarget, setBanTarget] = useState<any>(null);
+    const [purchasing, setPurchasing] = useState(null);
+    const [banTarget, setBanTarget] = useState(null);
     const [grantAmount, setGrantAmount] = useState('');
 
     // Predefined effects for sale (Hardcoded for demo)
@@ -1776,14 +1776,14 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     useEffect(() => {
         if (activeTab === 'shop' && activeShopTab === 'stickers') {
              const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'sticker_packs'), where('status', '==', 'approved'));
-             const unsub = onSnapshot(q, (snap) => { const fetchedPacks = snap.docs.map(d => ({ id: d.id, ...d.data() })); fetchedPacks.sort((a: any, b: any) => { const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds * 1000 || 0); const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds * 1000 || 0); return tB - tA; }); setPacks(fetchedPacks); }); return () => unsub();
+             const unsub = onSnapshot(q, (snap) => { const fetchedPacks = snap.docs.map(d => ({ id: d.id, ...d.data() })); fetchedPacks.sort((a, b) => { const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds * 1000 || 0); const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds * 1000 || 0); return tB - tA; }); setPacks(fetchedPacks); }); return () => unsub();
         } else if (activeTab === 'admin' && adminSubTab === 'stickers') {
              const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'sticker_packs'), where('status', '==', 'pending'));
              const unsub = onSnapshot(q, (snap) => { const fetchedPacks = snap.docs.map(d => ({ id: d.id, ...d.data() })); setPacks(fetchedPacks); }); return () => unsub();
         }
     }, [activeTab, adminSubTab, activeShopTab]);
 
-    const handleBuyEffect = async (effect: any) => {
+    const handleBuyEffect = async (effect) => {
         if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
         if ((profile.wallet || 0) < effect.price) { showNotification("コインが足りません"); return; }
         
@@ -1804,14 +1804,14 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
         } catch (e) { console.error(e); showNotification("購入に失敗しました"); } finally { setPurchasing(null); }
     };
 
-    const handleBuy = async (pack: any) => {
+    const handleBuy = async (pack) => {
         if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
         if ((profile.wallet || 0) < pack.price) { showNotification("コインが足りません"); return; }
         if (pack.purchasedBy?.includes(user.uid) || pack.authorId === user.uid) { showNotification("既に入手済みです"); return; }
         setPurchasing(pack.id);
         try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { wallet: increment(-pack.price) }); await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', pack.authorId), { wallet: increment(pack.price) }); await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sticker_packs', pack.id), { purchasedBy: arrayUnion(user.uid) }); showNotification("購入しました！"); } catch (e) { console.error(e); showNotification("購入に失敗しました"); } finally { setPurchasing(null); }
     };
-    const handleApprove = async (packId: string, authorId: string, approve: boolean) => {
+    const handleApprove = async (packId, authorId, approve) => {
         try {
             await runTransaction(db, async (transaction) => {
                 const packRef = doc(db, 'artifacts', appId, 'public', 'data', 'sticker_packs', packId); const packDoc = await transaction.get(packRef);
@@ -1843,24 +1843,24 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
             
             {activeTab === 'shop' && activeShopTab === 'effects' && (
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                     {effectsForSale.map((effect: any) => (
-                         <div key={effect.id} className="border rounded-2xl p-4 shadow-sm bg-white flex items-center gap-4">
-                             <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100"><img src={effect.image} className="w-full h-full object-cover"/></div>
-                             <div className="flex-1">
-                                 <h3 className="font-bold">{effect.name}</h3>
-                                 <p className="text-xs text-gray-500">{effect.description}</p>
-                             </div>
-                             <button onClick={() => handleBuyEffect(effect)} disabled={purchasing === effect.id} className="bg-purple-500 text-white px-4 py-2 rounded-full font-bold text-xs shadow-md hover:bg-purple-600 disabled:bg-gray-300 min-w-[60px]">
-                                {purchasing === effect.id ? <Loader2 className="w-4 h-4 animate-spin"/> : `¥${effect.price}`}
-                             </button>
-                         </div>
-                     ))}
+                      {effectsForSale.map((effect) => (
+                          <div key={effect.id} className="border rounded-2xl p-4 shadow-sm bg-white flex items-center gap-4">
+                              <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100"><img src={effect.image} className="w-full h-full object-cover"/></div>
+                              <div className="flex-1">
+                                  <h3 className="font-bold">{effect.name}</h3>
+                                  <p className="text-xs text-gray-500">{effect.description}</p>
+                              </div>
+                              <button onClick={() => handleBuyEffect(effect)} disabled={purchasing === effect.id} className="bg-purple-500 text-white px-4 py-2 rounded-full font-bold text-xs shadow-md hover:bg-purple-600 disabled:bg-gray-300 min-w-[60px]">
+                                  {purchasing === effect.id ? <Loader2 className="w-4 h-4 animate-spin"/> : `¥${effect.price}`}
+                              </button>
+                          </div>
+                      ))}
                 </div>
             )}
 
             {(activeTab === 'shop' && activeShopTab === 'stickers') && (<div className="flex-1 overflow-y-auto p-4 space-y-4">{packs.length === 0 && <div className="text-center py-10 text-gray-400">スタンプがありません</div>}{packs.map(pack => { const isOwned = pack.purchasedBy?.includes(user.uid) || pack.authorId === user.uid; return (<div key={pack.id} className="border rounded-2xl p-4 shadow-sm bg-white"><div className="flex justify-between items-start mb-2"><div className="flex-1"><h3 className="font-bold text-lg">{pack.name}</h3><p className="text-xs text-gray-500 font-bold mb-1">作: {pack.authorName || '不明'}</p>{pack.description && <p className="text-xs text-gray-400 bg-gray-50 p-2 rounded-lg mb-2">{pack.description}</p>}</div>{!isOwned && activeTab === 'shop' && (<button onClick={() => handleBuy(pack)} disabled={purchasing === pack.id} className="bg-green-500 text-white px-4 py-2 rounded-full font-bold text-xs shadow-md hover:bg-green-600 disabled:bg-gray-300 shrink-0 ml-2">{purchasing === pack.id ? <Loader2 className="w-4 h-4 animate-spin"/> : `¥${pack.price}`}</button>)}{isOwned && activeTab === 'shop' && (<span className="bg-gray-100 text-gray-500 px-3 py-1 rounded-full text-xs font-bold shrink-0 ml-2">入手済み</span>)}</div>
             <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                {pack.stickers.map((s: any, i: number) => (
+                {pack.stickers.map((s, i) => (
                     <div key={i} className="relative flex-shrink-0">
                         <img 
                             src={typeof s === 'string' ? s : s.image} 
@@ -1871,15 +1871,15 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
                 ))}
             </div></div>); })}</div>)}
 
-            {adminMode && activeTab === 'admin' && adminSubTab === 'stickers' && (<div className="flex-1 overflow-y-auto p-4 space-y-4">{packs.length === 0 && <div className="text-center py-10 text-gray-400">申請中のスタンプはありません</div>}{packs.map(pack => (<div key={pack.id} className="border rounded-2xl p-4 shadow-sm bg-white"><div className="flex justify-between items-start mb-2"><div className="flex-1"><h3 className="font-bold text-lg">{pack.name}</h3><p className="text-xs text-gray-500 font-bold mb-1">作: {pack.authorName || '不明'}</p></div></div><div className="grid grid-cols-4 gap-2 mt-2">{pack.stickers.map((s: any, i: number) => (<img key={i} src={typeof s === 'string' ? s : s.image} className="w-full aspect-square object-contain bg-gray-50 rounded-lg border"/>))}</div><div className="flex gap-2 mt-4 pt-2 border-t"><button onClick={() => handleApprove(pack.id, pack.authorId, true)} className="flex-1 py-2 bg-blue-500 text-white rounded-lg font-bold text-xs">承認 (+100コイン)</button><button onClick={() => handleApprove(pack.id, pack.authorId, false)} className="flex-1 py-2 bg-red-500 text-white rounded-lg font-bold text-xs">拒否</button></div></div>))}</div>)}
-            {adminMode && activeTab === 'admin' && adminSubTab === 'users' && (<div className="flex-1 overflow-y-auto p-4 space-y-2">{allUsers.map((u: any) => (<div key={u.uid} className={`flex items-center gap-3 p-3 rounded-xl border ${u.isBanned ? 'bg-red-50 border-red-200' : 'bg-white'}`}><img src={u.avatar} className="w-10 h-10 rounded-full border" /><div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{u.name}</div><div className="text-xs text-gray-400 font-mono">{u.id}</div></div><button onClick={() => setBanTarget(u)} className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white ${u.isBanned ? 'bg-gray-500' : 'bg-red-500'}`}>管理</button></div>))}</div>)}
+            {adminMode && activeTab === 'admin' && adminSubTab === 'stickers' && (<div className="flex-1 overflow-y-auto p-4 space-y-4">{packs.length === 0 && <div className="text-center py-10 text-gray-400">申請中のスタンプはありません</div>}{packs.map(pack => (<div key={pack.id} className="border rounded-2xl p-4 shadow-sm bg-white"><div className="flex justify-between items-start mb-2"><div className="flex-1"><h3 className="font-bold text-lg">{pack.name}</h3><p className="text-xs text-gray-500 font-bold mb-1">作: {pack.authorName || '不明'}</p></div></div><div className="grid grid-cols-4 gap-2 mt-2">{pack.stickers.map((s, i) => (<img key={i} src={typeof s === 'string' ? s : s.image} className="w-full aspect-square object-contain bg-gray-50 rounded-lg border"/>))}</div><div className="flex gap-2 mt-4 pt-2 border-t"><button onClick={() => handleApprove(pack.id, pack.authorId, true)} className="flex-1 py-2 bg-blue-500 text-white rounded-lg font-bold text-xs">承認 (+100コイン)</button><button onClick={() => handleApprove(pack.id, pack.authorId, false)} className="flex-1 py-2 bg-red-500 text-white rounded-lg font-bold text-xs">拒否</button></div></div>))}</div>)}
+            {adminMode && activeTab === 'admin' && adminSubTab === 'users' && (<div className="flex-1 overflow-y-auto p-4 space-y-2">{allUsers.map((u) => (<div key={u.uid} className={`flex items-center gap-3 p-3 rounded-xl border ${u.isBanned ? 'bg-red-50 border-red-200' : 'bg-white'}`}><img src={u.avatar} className="w-10 h-10 rounded-full border" /><div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{u.name}</div><div className="text-xs text-gray-400 font-mono">{u.id}</div></div><button onClick={() => setBanTarget(u)} className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white ${u.isBanned ? 'bg-gray-500' : 'bg-red-500'}`}>管理</button></div>))}</div>)}
             {banTarget && (<div className="fixed inset-0 z-[600] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm"><div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl overflow-y-auto max-h-[80vh]"><h3 className="font-bold text-lg mb-1 text-center text-gray-900">ユーザー管理: {banTarget.name}</h3><p className="text-center text-gray-400 text-xs mb-6 font-mono">{banTarget.id}</p><div className="mb-6 pb-6 border-b"><h4 className="font-bold text-sm text-gray-700 mb-2">利用制限</h4><p className="text-sm text-gray-600 mb-3">{banTarget.isBanned ? "現在は停止中です。解除しますか？" : "現在利用可能です。停止しますか？"}</p><button onClick={executeBanToggle} className={`w-full py-3 font-bold rounded-2xl text-white transition-colors ${banTarget.isBanned ? 'bg-blue-500 hover:bg-blue-600' : 'bg-red-500 hover:bg-red-600'}`}>{banTarget.isBanned ? "制限を解除する" : "アカウントを停止する"}</button></div><div className="mb-6"><h4 className="font-bold text-sm text-gray-700 mb-2">コイン操作</h4><div className="flex items-center justify-between bg-yellow-50 p-3 rounded-xl mb-3"><span className="text-xs font-bold text-yellow-800">現在の所持コイン</span><span className="text-lg font-bold text-yellow-600">{banTarget.wallet || 0}</span></div><div className="flex gap-2"><input type="number" placeholder="金額 (-で没収)" className="flex-1 border p-3 rounded-xl text-center font-bold outline-none focus:border-yellow-500" value={grantAmount} onChange={e => setGrantAmount(e.target.value)} /><button onClick={handleGrantCoins} className="bg-yellow-500 text-white font-bold px-6 rounded-xl hover:bg-yellow-600 shadow-md">付与</button></div><p className="text-[10px] text-gray-400 mt-2 text-center">※マイナスの値を入力すると減算されます</p></div><button onClick={() => { setBanTarget(null); setGrantAmount(''); }} className="w-full py-3 bg-gray-100 hover:bg-gray-200 font-bold rounded-2xl text-gray-600 transition-colors">閉じる</button></div></div>)}
         </div>
     );
 };
 
-const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }: any) => {
-    const [messages, setMessages] = useState<any[]>([]);
+const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }) => {
+    const [messages, setMessages] = useState([]);
     const [text, setText] = useState('');
     const [plusMenuOpen, setPlusMenuOpen] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
@@ -1890,52 +1890,52 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     const [leaveModalOpen, setLeaveModalOpen] = useState(false);
     const [groupEditModalOpen, setGroupEditModalOpen] = useState(false);
     const [backgroundMenuOpen, setBackgroundMenuOpen] = useState(false);
-    const [previewMedia, setPreviewMedia] = useState<any>(null); 
+    const [previewMedia, setPreviewMedia] = useState(null); 
     const [isRecording, setIsRecording] = useState(false);
     const [recordingTime, setRecordingTime] = useState(0);
-    const [replyTo, setReplyTo] = useState<any>(null); 
-    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const audioChunksRef = useRef<Blob[]>([]);
-    const audioStreamRef = useRef<MediaStream | null>(null);
-    const recordingIntervalRef = useRef<any>(null);
-    const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+    const [replyTo, setReplyTo] = useState(null); 
+    const mediaRecorderRef = useRef(null);
+    const audioChunksRef = useRef([]);
+    const audioStreamRef = useRef(null);
+    const recordingIntervalRef = useRef(null);
+    const [editingMsgId, setEditingMsgId] = useState(null);
     const [editingText, setEditingText] = useState('');
-    const scrollRef = useRef<HTMLDivElement>(null);
+    const scrollRef = useRef(null);
     const isFirstLoad = useRef(true);
     const [messageLimit, setMessageLimit] = useState(50);
-    const lastMessageIdRef = useRef<string | null>(null);
-    const [backgroundSrc, setBackgroundSrc] = useState<string | null>(null);
+    const lastMessageIdRef = useRef(null);
+    const [backgroundSrc, setBackgroundSrc] = useState(null);
     const [stickerMenuOpen, setStickerMenuOpen] = useState(false); 
-    const [myStickerPacks, setMyStickerPacks] = useState<any[]>([]);
-    const [selectedPackId, setSelectedPackId] = useState<string | null>(null);
-    const [buyStickerModalPackId, setBuyStickerModalPackId] = useState<string | null>(null);
-    const [viewProfile, setViewProfile] = useState<any>(null);
-    const [coinModalTarget, setCoinModalTarget] = useState<any>(null);
+    const [myStickerPacks, setMyStickerPacks] = useState([]);
+    const [selectedPackId, setSelectedPackId] = useState(null);
+    const [buyStickerModalPackId, setBuyStickerModalPackId] = useState(null);
+    const [viewProfile, setViewProfile] = useState(null);
+    const [coinModalTarget, setCoinModalTarget] = useState(null);
     
     // AI Effect States
     const [aiEffectModalOpen, setAiEffectModalOpen] = useState(false);
 
     // Derived values moved up (Safe access with optional chaining)
-    const chatData = chats.find((c: any) => c.id === activeChatId);
+    const chatData = chats.find((c) => c.id === activeChatId);
     const isGroup = chatData?.isGroup || false;
-    let partnerId: string | null = null;
+    let partnerId = null;
     let partnerData = null;
 
     if (chatData && !isGroup) {
-        partnerId = chatData.participants.find((p: string) => p !== user.uid);
+        partnerId = chatData.participants.find((p) => p !== user.uid);
         if (!partnerId) partnerId = user.uid; 
-        partnerData = allUsers.find((u: any) => u.uid === partnerId);
+        partnerData = allUsers.find((u) => u.uid === partnerId);
     }
 
     const title = !isGroup && partnerData ? partnerData.name : (chatData?.name || '');
     const icon = !isGroup && partnerData ? partnerData.avatar : (chatData?.icon || '');
 
     // --- Added missing functions definitions ---
-    const onStickerClick = (packId: string) => {
+    const onStickerClick = (packId) => {
         setBuyStickerModalPackId(packId);
     };
 
-    const sendBirthdayCard = async ({ color, message }: any) => {
+    const sendBirthdayCard = async ({ color, message }) => {
         if (!partnerId) {
              showNotification("送信先が見つかりません");
              return;
@@ -1958,7 +1958,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     };
     
     // Join call wrapper
-    const handleJoinCall = (isVideo: boolean, callerId?: string) => {
+    const handleJoinCall = (isVideo, callerId) => {
          startVideoCall(activeChatId, isVideo, true, callerId); // true = join existing
     };
     // ------------------------------------------
@@ -1971,7 +1971,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             getDocs(q2).then(snap2 => {
                 const ownPacks = snap2.docs.map(d => ({ id: d.id, ...d.data() }));
                 const all = [...packs, ...ownPacks];
-                const unique = Array.from(new Map(all.map((item: any) => [item.id, item])).values());
+                const unique = Array.from(new Map(all.map((item) => [item.id, item])).values());
                 setMyStickerPacks(unique);
                 if (unique.length > 0 && !selectedPackId) setSelectedPackId(unique[0].id);
             });
@@ -2056,7 +2056,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         }
     };
 
-    const sendMessage = async (content: string, type = 'text', additionalData = {}, file: File | null = null) => {
+    const sendMessage = async (content, type = 'text', additionalData = {}, file = null) => {
       if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
       if ((!content && !file && type === 'text') || isUploading) return;
       setIsUploading(true); setUploadProgress(0);
@@ -2067,19 +2067,19 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         const msgCol = collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages');
         const newMsgRef = doc(msgCol);
         let localBlobUrl = null; let storedContent = content; let previewData = null;
-        const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: allUsers.find((u: any) => u.uid === currentReply.senderId)?.name || 'Unknown', type: currentReply.type } } : {};
+        const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: allUsers.find((u) => u.uid === currentReply.senderId)?.name || 'Unknown', type: currentReply.type } } : {};
         const fileData = file ? { fileName: file.name, fileSize: file.size, mimeType: file.type } : {};
 
         // Prepare updates for the chat document (unread counts, last message)
-        const currentChat = chats.find((c: any) => c.id === activeChatId);
-        const updateData: any = { 
+        const currentChat = chats.find((c) => c.id === activeChatId);
+        const updateData = { 
             lastMessage: { content: type === 'text' ? content : `[${type}]`, senderId: user.uid, readBy: [user.uid] }, 
             updatedAt: serverTimestamp() 
         };
         
         // Increment unread count for other participants
         if (currentChat) {
-            currentChat.participants.forEach((uid: string) => {
+            currentChat.participants.forEach((uid) => {
                 if (uid !== user.uid) {
                     updateData[`unreadCounts.${uid}`] = increment(1);
                 }
@@ -2108,7 +2108,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             const start = i * CHUNK_SIZE; const end = Math.min(start + CHUNK_SIZE, file.size); const blobSlice = file.slice(start, end);
             const p = new Promise((resolve, reject) => {
                 const reader = new FileReader(); 
-                reader.onload = async (e: any) => { 
+                reader.onload = async (e) => { 
                     try {
                         const base64Data = e.target.result.split(',')[1]; 
                         await setDoc(doc(msgCol, newMsgRef.id, 'chunks', `${i}`), { data: base64Data, index: i }); 
@@ -2121,7 +2121,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
                 reader.readAsDataURL(blobSlice);
             });
             // FIX: Explicit type to break circular inference cycle
-            const pWrapper: Promise<boolean> = p.then(() => executing.delete(pWrapper));
+            const pWrapper = p.then(() => executing.delete(pWrapper));
             executing.add(pWrapper);
             if (executing.size >= CONCURRENCY) { await Promise.race(executing); }
           }
@@ -2130,11 +2130,11 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         } else if (!hasChunks) {
              if (localBlobUrl && file) {
                  const reader = new FileReader(); reader.readAsDataURL(file);
-                 await new Promise(resolve => { reader.onload = async (e: any) => { await updateDoc(newMsgRef, { content: e.target.result, isUploading: false }); resolve(null); } });
+                 await new Promise(resolve => { reader.onload = async (e) => { await updateDoc(newMsgRef, { content: e.target.result, isUploading: false }); resolve(null); } });
              } else {
                  if (typeof content === 'object' && content !== null && type === 'sticker') { // Handle sticker object with audio
-                     const stickerContent = (content as any).image || content;
-                     const stickerAudio = (content as any).audio || null;
+                     const stickerContent = content.image || content;
+                     const stickerAudio = content.audio || null;
                      await setDoc(newMsgRef, { senderId: user.uid, content: stickerContent, audio: stickerAudio, type, ...additionalData, ...replyData, ...fileData, hasChunks, chunkCount, createdAt: serverTimestamp(), readBy: [user.uid] });
                  } else {
                      await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, ...additionalData, ...replyData, ...fileData, hasChunks, chunkCount, createdAt: serverTimestamp(), readBy: [user.uid] });
@@ -2149,16 +2149,16 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       } catch (e) { console.error(e); showNotification("送信に失敗しました"); } finally { setIsUploading(false); setUploadProgress(0); }
     };
 
-    const handleDeleteMessage = useCallback(async (msgId: string) => { try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', msgId)); const c = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', msgId, 'chunks')); for (const d of c.docs) await deleteDoc(d.ref); showNotification("メッセージの送信を取り消しました"); } catch (e) { showNotification("送信取消に失敗しました"); } }, [db, appId, activeChatId, showNotification]);
-    const handleEditMessage = useCallback((id: string, content: string) => { setEditingMsgId(id); setEditingText(content); }, []);
-    const handlePreviewMedia = useCallback((src: string, type: string) => { setPreviewMedia({ src, type }); }, []);
-    const handleReaction = async (messageId: string, emoji: string) => { try { const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', messageId); const msg = messages.find(m => m.id === messageId); const currentReactions = msg.reactions?.[emoji] || []; if (currentReactions.includes(user.uid)) { await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayRemove(user.uid) }); } else { await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayUnion(user.uid) }); } } catch (e) { console.error("Reaction error", e); } };
+    const handleDeleteMessage = useCallback(async (msgId) => { try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', msgId)); const c = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', msgId, 'chunks')); for (const d of c.docs) await deleteDoc(d.ref); showNotification("メッセージの送信を取り消しました"); } catch (e) { showNotification("送信取消に失敗しました"); } }, [db, appId, activeChatId, showNotification]);
+    const handleEditMessage = useCallback((id, content) => { setEditingMsgId(id); setEditingText(content); }, []);
+    const handlePreviewMedia = useCallback((src, type) => { setPreviewMedia({ src, type }); }, []);
+    const handleReaction = async (messageId, emoji) => { try { const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', messageId); const msg = messages.find(m => m.id === messageId); const currentReactions = msg.reactions?.[emoji] || []; if (currentReactions.includes(user.uid)) { await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayRemove(user.uid) }); } else { await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayUnion(user.uid) }); } } catch (e) { console.error("Reaction error", e); } };
     const submitEditMessage = async () => { if (!editingText.trim() || !editingMsgId) return; try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', editingMsgId), { content: editingText, isEdited: true, updatedAt: serverTimestamp() }); setEditingMsgId(null); } catch (e) { showNotification("編集に失敗しました"); } };
     const handleLeaveGroup = async () => { if (!activeChatId) return; try { await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages'), { senderId: user.uid, content: `${profile.name}が退会しました。`, type: 'text', createdAt: serverTimestamp(), readBy: [user.uid] }); await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId), { participants: arrayRemove(user.uid) }); showNotification("グループから退会しました"); setLeaveModalOpen(false); setView('home'); setActiveChatId(null); } catch (e) { showNotification("退会に失敗しました"); } };
-    const handleBackgroundUpload = async (e: any) => {
+    const handleBackgroundUpload = async (e) => {
       const file = e.target.files[0]; if (!file) return;
       const reader = new FileReader();
-      reader.onload = async (event: any) => {
+      reader.onload = async (event) => {
         const result = event.target.result;
         try {
           const batch = writeBatch(db); const chatRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId);
@@ -2175,7 +2175,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     };
     const resetBackground = async () => { try { const batch = writeBatch(db); const chatRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId); const chunksSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'background_chunks')); chunksSnap.forEach(d => batch.delete(d.ref)); batch.update(chatRef, { backgroundImage: deleteField(), hasBackgroundChunks: deleteField(), backgroundChunkCount: deleteField(), updatedAt: serverTimestamp() }); await batch.commit(); showNotification("背景をリセットしました"); setBackgroundMenuOpen(false); } catch(e) { showNotification("リセットに失敗しました"); } };
     
-    const handleVideoCallButton = (isVideo: boolean) => {
+    const handleVideoCallButton = (isVideo) => {
        startVideoCall(activeChatId, isVideo);
     };
 
@@ -2203,10 +2203,10 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             <button onClick={() => toggleMuteChat(activeChatId)}>{mutedChats.includes(activeChatId) ? <BellOff className="w-6 h-6 text-gray-400" /> : <Bell className="w-6 h-6 text-gray-600" />}</button>
           </div>
         </div>
-        {!isGroup && partnerId && isTodayBirthday(allUsers.find((u: any) => u.uid === partnerId)?.birthday) && (<div className="bg-pink-100 p-2 flex items-center justify-between px-4"><div className="flex items-center gap-2"><Cake className="w-5 h-5 text-pink-500 animate-bounce" /><span className="text-xs font-bold text-pink-700">今日は{title}さんの誕生日です！</span></div><button onClick={() => setCardModalOpen(true)} className="bg-pink-500 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">カードを書く</button></div>)}
+        {!isGroup && partnerId && isTodayBirthday(allUsers.find((u) => u.uid === partnerId)?.birthday) && (<div className="bg-pink-100 p-2 flex items-center justify-between px-4"><div className="flex items-center gap-2"><Cake className="w-5 h-5 text-pink-500 animate-bounce" /><span className="text-xs font-bold text-pink-700">今日は{title}さんの誕生日です！</span></div><button onClick={() => setCardModalOpen(true)} className="bg-pink-500 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">カードを書く</button></div>)}
         <div className={`flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide ${backgroundSrc ? 'bg-white/40 backdrop-blur-sm' : ''}`}>
           {messages.length >= messageLimit && (<div className="flex justify-center py-2"><button onClick={() => setMessageLimit(prev => prev + 50)} className="bg-white/50 backdrop-blur-md px-4 py-1 rounded-full text-xs font-bold text-gray-700 shadow-sm flex items-center gap-1 hover:bg-white/70"><ArrowUpCircle className="w-4 h-4" /> 以前のメッセージを読み込む</button></div>)}
-          {messages.map(m => { const sender = allUsers.find((u: any) => u.uid === m.senderId); return (<MessageItem key={m.id} m={m} user={user} sender={sender} isGroup={isGroup} db={db} appId={appId} chatId={activeChatId} addFriendById={addFriendById} onEdit={handleEditMessage} onDelete={handleDeleteMessage} onPreview={handlePreviewMedia} onReply={setReplyTo} onReaction={handleReaction} allUsers={allUsers} onStickerClick={onStickerClick} onShowProfile={setViewProfile} onJoinCall={handleJoinCall} />); })}
+          {messages.map(m => { const sender = allUsers.find((u) => u.uid === m.senderId); return (<MessageItem key={m.id} m={m} user={user} sender={sender} isGroup={isGroup} db={db} appId={appId} chatId={activeChatId} addFriendById={addFriendById} onEdit={handleEditMessage} onDelete={handleDeleteMessage} onPreview={handlePreviewMedia} onReply={setReplyTo} onReaction={handleReaction} allUsers={allUsers} onStickerClick={onStickerClick} onShowProfile={setViewProfile} onJoinCall={handleJoinCall} />); })}
           <div ref={scrollRef} className="h-2 w-full" />
         </div>
         {previewMedia && (<div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center p-4" onClick={() => setPreviewMedia(null)}><button className="absolute top-6 right-6 text-white p-2 rounded-full bg-white/20"><X className="w-6 h-6"/></button>{previewMedia.type === 'video' ? <video src={previewMedia.src} controls autoPlay className="max-w-full max-h-[85vh] rounded shadow-2xl" onClick={e=>e.stopPropagation()}/> : <img src={previewMedia.src} className="max-w-full max-h-[85vh] object-contain rounded shadow-2xl" onClick={e=>e.stopPropagation()}/>}</div>)}
@@ -2215,17 +2215,17 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         {groupEditModalOpen && <GroupEditModal onClose={() => setGroupEditModalOpen(false)} chatId={activeChatId} currentName={chatData.name} currentIcon={chatData.icon} currentMembers={chatData.participants} allUsers={allUsers} showNotification={showNotification} user={user} profile={profile} />}
         {leaveModalOpen && <LeaveGroupConfirmModal onClose={() => setLeaveModalOpen(false)} onLeave={handleLeaveGroup} />}
         {cardModalOpen && <BirthdayCardModal onClose={() => setCardModalOpen(false)} onSend={sendBirthdayCard} toName={title} />}
-        {contactModalOpen && <ContactSelectModal onClose={() => setContactModalOpen(false)} onSend={(c: any) => sendMessage("", "contact", { contactId: c.uid, contactName: c.name, contactAvatar: c.avatar })} friends={allUsers.filter((u: any) => (profile?.friends || []).includes(u.uid) && !(profile?.hiddenFriends || []).includes(u.uid))}/>}
-        {buyStickerModalPackId && <StickerBuyModal onClose={() => setBuyStickerModalPackId(null)} packId={buyStickerModalPackId} onGoToStore={(id: string) => { setView('sticker-store'); setBuyStickerModalPackId(null); }} />}
+        {contactModalOpen && <ContactSelectModal onClose={() => setContactModalOpen(false)} onSend={(c) => sendMessage("", "contact", { contactId: c.uid, contactName: c.name, contactAvatar: c.avatar })} friends={allUsers.filter((u) => (profile?.friends || []).includes(u.uid) && !(profile?.hiddenFriends || []).includes(u.uid))}/>}
+        {buyStickerModalPackId && <StickerBuyModal onClose={() => setBuyStickerModalPackId(null)} packId={buyStickerModalPackId} onGoToStore={(id) => { setView('sticker-store'); setBuyStickerModalPackId(null); }} />}
         
         {/* AI Effect Modal */}
         {aiEffectModalOpen && <AIEffectGenerator user={user} onClose={() => setAiEffectModalOpen(false)} showNotification={showNotification} />}
 
         {plusMenuOpen && (
             <div className="absolute bottom-16 left-4 right-4 bg-white rounded-3xl p-4 shadow-2xl grid grid-cols-4 gap-4 animate-in slide-in-from-bottom-4 z-20">
-                <label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-green-50 rounded-2xl"><ImageIcon className="w-6 h-6 text-green-500" /></div><span className="text-[10px] font-bold">画像</span><input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, (d: string, t: string, f: File) => sendMessage(d, t, {}, f))} /></label>
-                <label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-blue-50 rounded-2xl"><Play className="w-6 h-6 text-blue-500" /></div><span className="text-[10px] font-bold">動画</span><input type="file" className="hidden" accept="video/*" onChange={(e) => handleFileUpload(e, (d: string, t: string, f: File) => sendMessage(d, t, {}, f))} /></label>
-                <label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-gray-100 rounded-2xl"><Paperclip className="w-6 h-6 text-gray-600" /></div><span className="text-[10px] font-bold">ファイル</span><input type="file" className="hidden" onChange={(e) => handleFileUpload(e, (d: string, t: string, f: File) => sendMessage(d, t, {}, f))} /></label>
+                <label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-green-50 rounded-2xl"><ImageIcon className="w-6 h-6 text-green-500" /></div><span className="text-[10px] font-bold">画像</span><input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label>
+                <label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-blue-50 rounded-2xl"><Play className="w-6 h-6 text-blue-500" /></div><span className="text-[10px] font-bold">動画</span><input type="file" className="hidden" accept="video/*" onChange={(e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label>
+                <label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-gray-100 rounded-2xl"><Paperclip className="w-6 h-6 text-gray-600" /></div><span className="text-[10px] font-bold">ファイル</span><input type="file" className="hidden" onChange={(e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label>
                 <div className="flex flex-col items-center gap-2 cursor-pointer" onClick={() => setContactModalOpen(true)}><div className="p-3 bg-yellow-50 rounded-2xl"><Contact className="w-6 h-6 text-yellow-500" /></div><span className="text-[10px] font-bold">連絡先</span></div>
                 <div className="flex flex-col items-center gap-2 cursor-pointer" onClick={() => setCardModalOpen(true)}><div className="p-3 bg-pink-50 rounded-2xl"><Gift className="w-6 h-6 text-pink-500" /></div><span className="text-[10px] font-bold">カード</span></div>
                 {/* Remittance Button (Send Money) */}
@@ -2247,15 +2247,15 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           {stickerMenuOpen && myStickerPacks.length > 0 && (
             <div className="absolute bottom-full left-0 right-0 bg-gray-50 border-t h-72 flex flex-col shadow-2xl rounded-t-3xl overflow-hidden animate-in slide-in-from-bottom-2 z-20">
                 <div className="flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-4 content-start">
-                     {myStickerPacks.find((p: any) => p.id === selectedPackId)?.stickers.map((s: any, i: number) => (
-                         <div key={i} className="relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm" onClick={() => sendMessage(s, 'sticker', { packId: selectedPackId })}>
-                            <img src={typeof s === 'string' ? s : s.image} className="w-full aspect-square object-contain" />
-                            {(typeof s !== 'string' && s.audio) && <div className="absolute bottom-0 right-0 bg-black/20 text-white rounded-full p-1"><Volume2 className="w-3 h-3"/></div>}
-                         </div>
-                     ))}
+                      {myStickerPacks.find((p) => p.id === selectedPackId)?.stickers.map((s, i) => (
+                          <div key={i} className="relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm" onClick={() => sendMessage(s, 'sticker', { packId: selectedPackId })}>
+                             <img src={typeof s === 'string' ? s : s.image} className="w-full aspect-square object-contain" />
+                             {(typeof s !== 'string' && s.audio) && <div className="absolute bottom-0 right-0 bg-black/20 text-white rounded-full p-1"><Volume2 className="w-3 h-3"/></div>}
+                          </div>
+                      ))}
                 </div>
                 <div className="bg-white border-t flex overflow-x-auto p-2 gap-2 scrollbar-hide shrink-0">
-                    {myStickerPacks.map((pack: any) => (
+                    {myStickerPacks.map((pack) => (
                         <div key={pack.id} onClick={() => setSelectedPackId(pack.id)} className={`flex-shrink-0 cursor-pointer p-2 rounded-xl transition-colors ${selectedPackId === pack.id ? 'bg-gray-200' : 'hover:bg-gray-100'}`}>
                              <img src={typeof pack.stickers[0] === 'string' ? pack.stickers[0] : pack.stickers[0].image} className="w-8 h-8 object-contain" />
                         </div>
@@ -2267,7 +2267,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           {replyTo && (
             <div className="flex items-center justify-between bg-gray-100 p-2 rounded-xl text-xs mb-1 border-l-4 border-green-500">
               <div className="flex flex-col max-w-[90%]">
-                <span className="font-bold text-green-600 mb-0.5">{allUsers.find((u: any) => u.uid === replyTo.senderId)?.name || 'Unknown'} への返信</span>
+                <span className="font-bold text-green-600 mb-0.5">{allUsers.find((u) => u.uid === replyTo.senderId)?.name || 'Unknown'} への返信</span>
                 <div className="truncate text-gray-600 flex items-center gap-1">
                   {replyTo.type === 'image' && <ImageIcon className="w-3 h-3" />}
                   {replyTo.type === 'video' && <Video className="w-3 h-3" />}
@@ -2288,14 +2288,14 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             {(text || isUploading) && <button onClick={() => sendMessage(text)} disabled={!text && !isUploading} className={`p-2 rounded-full ${text ? 'text-green-500' : 'text-gray-300'}`}>{isUploading ? <div className="relative"><Loader2 className="w-6 h-6 animate-spin text-green-500" />{uploadProgress > 0 && <div className="absolute top-full left-1/2 -translate-x-1/2 text-[8px] font-bold mt-1">{uploadProgress}%</div>}</div> : <Send className="w-6 h-6" />}</button>}
           </div>
         </div>
-        {viewProfile && <FriendProfileModal friend={viewProfile} onClose={() => setViewProfile(null)} onStartChat={(uid: string) => { setViewProfile(null); }} onTransfer={() => { setCoinModalTarget(viewProfile); setViewProfile(null); }} myUid={user.uid} myProfile={profile} allUsers={allUsers} showNotification={showNotification} />}
+        {viewProfile && <FriendProfileModal friend={viewProfile} onClose={() => setViewProfile(null)} onStartChat={(uid) => { setViewProfile(null); }} onTransfer={() => { setCoinModalTarget(viewProfile); setViewProfile(null); }} myUid={user.uid} myProfile={profile} allUsers={allUsers} showNotification={showNotification} />}
         {coinModalTarget && <CoinTransferModal onClose={() => setCoinModalTarget(null)} myWallet={profile.wallet} myUid={user.uid} targetUid={coinModalTarget.uid} targetName={coinModalTarget.name} showNotification={showNotification} />}
       </div>
     );
 };
 
-const VoomView = ({ user, allUsers, profile, posts, showNotification, db, appId }: any) => { 
-    const [content, setContent] = useState(''), [media, setMedia] = useState<string | null>(null), [mediaType, setMediaType] = useState('image'), [isUploading, setIsUploading] = useState(false);
+const VoomView = ({ user, allUsers, profile, posts, showNotification, db, appId }) => { 
+    const [content, setContent] = useState(''), [media, setMedia] = useState(null), [mediaType, setMediaType] = useState('image'), [isUploading, setIsUploading] = useState(false);
     const postMessage = async () => { 
         if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
         if ((!content && !media) || isUploading) return; 
@@ -2312,7 +2312,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db, appId 
                     const start = i * CHUNK_SIZE; const end = Math.min(start + CHUNK_SIZE, media.length); const chunkData = media.slice(start, end); 
                     const p = setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'posts', newPostRef.id, 'chunks', `${i}`), { data: chunkData, index: i }); 
                     
-                    const pWrapper: Promise<boolean> = p.then(() => executing.delete(pWrapper));
+                    const pWrapper = p.then(() => executing.delete(pWrapper));
                     executing.add(pWrapper);
                     if (executing.size >= CONCURRENCY) { await Promise.race(executing); }
                 } 
@@ -2324,21 +2324,21 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db, appId 
             setContent(''); setMedia(null); showNotification("投稿しました"); 
         } finally { setIsUploading(false); } 
     };
-    const handleVoomFileUpload = (e: any) => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev: any) => { setMedia(ev.target.result); setMediaType(file.type.startsWith('video') ? 'video' : 'image'); }; reader.readAsDataURL(file); };
-    return (<div className="flex flex-col h-full bg-gray-50"><div className="bg-white p-4 border-b shrink-0"><h1 className="text-xl font-bold">VOOM</h1></div><div className="flex-1 overflow-y-auto scrollbar-hide pb-20"><div className="bg-white p-4 mb-2"><textarea className="w-full text-sm outline-none resize-none min-h-[60px]" placeholder="何をしていますか？" value={content} onChange={e => setContent(e.target.value)} />{media && <div className="relative mt-2">{mediaType === 'video' ? <video src={media} className="w-full rounded-xl bg-black" controls /> : <img src={media} className="max-h-60 rounded-xl" />}<button onClick={() => setMedia(null)} className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1"><X className="w-3 h-3"/></button></div>}<div className="flex justify-between items-center pt-2 border-t mt-2"><label className="cursor-pointer p-2 flex items-center gap-2"><ImageIcon className="w-5 h-5 text-gray-400" /><input type="file" className="hidden" accept="image/*,video/*" onChange={handleVoomFileUpload} /></label><button onClick={postMessage} disabled={isUploading} className={`text-xs font-bold px-4 py-2 rounded-full ${content || media ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-400'}`}>投稿</button></div></div>{posts.map((p: any) => <PostItem key={p.id} post={p} user={user} allUsers={allUsers} db={db} appId={appId} profile={profile} />)}</div></div>);
+    const handleVoomFileUpload = (e) => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev) => { setMedia(ev.target.result); setMediaType(file.type.startsWith('video') ? 'video' : 'image'); }; reader.readAsDataURL(file); };
+    return (<div className="flex flex-col h-full bg-gray-50"><div className="bg-white p-4 border-b shrink-0"><h1 className="text-xl font-bold">VOOM</h1></div><div className="flex-1 overflow-y-auto scrollbar-hide pb-20"><div className="bg-white p-4 mb-2"><textarea className="w-full text-sm outline-none resize-none min-h-[60px]" placeholder="何をしていますか？" value={content} onChange={e => setContent(e.target.value)} />{media && <div className="relative mt-2">{mediaType === 'video' ? <video src={media} className="w-full rounded-xl bg-black" controls /> : <img src={media} className="max-h-60 rounded-xl" />}<button onClick={() => setMedia(null)} className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1"><X className="w-3 h-3"/></button></div>}<div className="flex justify-between items-center pt-2 border-t mt-2"><label className="cursor-pointer p-2 flex items-center gap-2"><ImageIcon className="w-5 h-5 text-gray-400" /><input type="file" className="hidden" accept="image/*,video/*" onChange={handleVoomFileUpload} /></label><button onClick={postMessage} disabled={isUploading} className={`text-xs font-bold px-4 py-2 rounded-full ${content || media ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-400'}`}>投稿</button></div></div>{posts.map((p) => <PostItem key={p.id} post={p} user={user} allUsers={allUsers} db={db} appId={appId} profile={profile} />)}</div></div>);
 };
 
-const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard }: any) => {
-    const [edit, setEdit] = useState<any>(profile || {});
+const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard }) => {
+    const [edit, setEdit] = useState(profile || {});
     useEffect(() => { if (profile) setEdit(prev => (!prev || Object.keys(prev).length === 0) ? { ...profile } : { ...profile, name: prev.name, id: prev.id, status: prev.status, birthday: prev.birthday, avatar: prev.avatar, cover: prev.cover }); }, [profile]);
     const handleSave = () => { updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), edit); showNotification("保存しました ✅"); };
     return (
       <div className="flex flex-col h-full bg-white">
         <div className="p-4 border-b flex items-center gap-4 sticky top-0 bg-white shrink-0"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><span className="font-bold">設定</span></div>
         <div className="flex-1 overflow-y-auto pb-8">
-          <div className="w-full h-48 relative bg-gray-200"><img src={edit.cover} className="w-full h-full object-cover" /><label className="absolute inset-0 flex items-center justify-center bg-black/20 text-white font-bold cursor-pointer opacity-0 hover:opacity-100 transition-opacity">背景変更<input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d: string) => setEdit({...edit, cover: d}))} /></label></div>
+          <div className="w-full h-48 relative bg-gray-200"><img src={edit.cover} className="w-full h-full object-cover" /><label className="absolute inset-0 flex items-center justify-center bg-black/20 text-white font-bold cursor-pointer opacity-0 hover:opacity-100 transition-opacity">背景変更<input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d) => setEdit({...edit, cover: d}))} /></label></div>
           <div className="px-8 -mt-12 flex flex-col items-center gap-6">
-            <div className="relative"><img src={edit.avatar} className="w-24 h-24 rounded-3xl border-4 border-white object-cover" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d: string) => setEdit({...edit, avatar: d}))} /></label></div>
+            <div className="relative"><img src={edit.avatar} className="w-24 h-24 rounded-3xl border-4 border-white object-cover" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d) => setEdit({...edit, avatar: d}))} /></label></div>
             <div className="w-full space-y-4">
               <div><label className="text-xs font-bold text-gray-400">名前</label><input className="w-full border-b py-2 outline-none" value={edit.name || ''} onChange={e => setEdit({...edit, name: e.target.value})} /></div>
               <div><label className="text-xs font-bold text-gray-400">ID</label><div className="flex items-center gap-2 border-b py-2"><span className="flex-1 font-mono text-gray-600">{edit.id}</span><button onClick={() => copyToClipboard(edit.id)} className="p-1 hover:bg-gray-100 rounded-full"><Copy className="w-4 h-4 text-gray-500" /></button></div></div>
@@ -2353,9 +2353,9 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
     );
 };
 
-const QRScannerView = ({ user, setView, addFriendById }: any) => {
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const canvasRef = useRef<HTMLCanvasElement>(null);
+const QRScannerView = ({ user, setView, addFriendById }) => {
+    const videoRef = useRef(null);
+    const canvasRef = useRef(null);
     const [scanning, setScanning] = useState(false);
     
     const startScanner = async () => { 
@@ -2376,7 +2376,7 @@ const QRScannerView = ({ user, setView, addFriendById }: any) => {
     useEffect(() => {
         return () => {
             if (videoRef.current && videoRef.current.srcObject) {
-                const stream = videoRef.current.srcObject as MediaStream;
+                const stream = videoRef.current.srcObject;
                 stream.getTracks().forEach(t => t.stop());
             }
         };
@@ -2391,12 +2391,12 @@ const QRScannerView = ({ user, setView, addFriendById }: any) => {
                 c.width = videoRef.current.videoWidth; 
                 ctx.drawImage(videoRef.current, 0, 0, c.width, c.height); 
                 
-                const win = window as any;
+                const win = window;
                 if (win.jsQR) {
                     const code = win.jsQR(ctx.getImageData(0,0,c.width,c.height).data, c.width, c.height); 
                     if (code) { 
                         if (videoRef.current.srcObject) {
-                            const stream = videoRef.current.srcObject as MediaStream;
+                            const stream = videoRef.current.srcObject;
                             stream.getTracks().forEach(t => t.stop());
                         }
                         setScanning(false); 
@@ -2409,39 +2409,39 @@ const QRScannerView = ({ user, setView, addFriendById }: any) => {
         if (scanning) requestAnimationFrame(tick); 
     };
 
-    return (<div className="flex flex-col h-full bg-white"><div className="p-4 border-b flex items-center gap-4"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><span className="font-bold">QR</span></div><div className="flex-1 overflow-y-auto p-8"><div className="flex flex-col items-center justify-center gap-8 min-h-full">{scanning ? <div className="relative w-64 h-64 border-4 border-green-500 rounded-3xl overflow-hidden"><video ref={videoRef} className="w-full h-full object-cover" /><canvas ref={canvasRef} className="hidden" /></div> : <div className="bg-white p-6 rounded-[40px] shadow-xl border"><img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user?.uid}`} className="w-48 h-48" /></div>}<div className="grid grid-cols-2 gap-4 w-full"><button onClick={startScanner} className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border"><Maximize className="w-6 h-6 text-green-500" /><span>スキャン</span></button><label className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border cursor-pointer"><Upload className="w-6 h-6 text-blue-500" /><span>読込</span><input type="file" className="hidden" accept="image/*" onChange={e => { const r = new FileReader(); r.onload = (ev: any) => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'), ctx = c.getContext('2d'); if(ctx) { c.width = img.width; c.height = img.height; ctx.drawImage(img,0,0); const win = window as any; const code = win.jsQR(ctx.getImageData(0,0,c.width,c.height).data, c.width, c.height); if (code) addFriendById(code.data); } }; img.src = ev.target.result; }; r.readAsDataURL(e.target.files[0]); }} /></label></div></div></div></div>);
+    return (<div className="flex flex-col h-full bg-white"><div className="p-4 border-b flex items-center gap-4"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><span className="font-bold">QR</span></div><div className="flex-1 overflow-y-auto p-8"><div className="flex flex-col items-center justify-center gap-8 min-h-full">{scanning ? <div className="relative w-64 h-64 border-4 border-green-500 rounded-3xl overflow-hidden"><video ref={videoRef} className="w-full h-full object-cover" /><canvas ref={canvasRef} className="hidden" /></div> : <div className="bg-white p-6 rounded-[40px] shadow-xl border"><img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user?.uid}`} className="w-48 h-48" /></div>}<div className="grid grid-cols-2 gap-4 w-full"><button onClick={startScanner} className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border"><Maximize className="w-6 h-6 text-green-500" /><span>スキャン</span></button><label className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border cursor-pointer"><Upload className="w-6 h-6 text-blue-500" /><span>読込</span><input type="file" className="hidden" accept="image/*" onChange={e => { const r = new FileReader(); r.onload = (ev) => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'), ctx = c.getContext('2d'); if(ctx) { c.width = img.width; c.height = img.height; ctx.drawImage(img,0,0); const win = window; const code = win.jsQR(ctx.getImageData(0,0,c.width,c.height).data, c.width, c.height); if (code) addFriendById(code.data); } }; img.src = ev.target.result; }; r.readAsDataURL(e.target.files[0]); }} /></label></div></div></div></div>);
 };
 
-const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }: any) => {
-  const [tab, setTab] = useState<'friends' | 'hidden' | 'chats'>('chats');
-  const [selectedFriend, setSelectedFriend] = useState<any>(null);
-  const [coinModalTarget, setCoinModalTarget] = useState<any>(null);
+const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }) => {
+  const [tab, setTab] = useState('chats');
+  const [selectedFriend, setSelectedFriend] = useState(null);
+  const [coinModalTarget, setCoinModalTarget] = useState(null);
 
-  const [openChatMenuId, setOpenChatMenuId] = useState<string | null>(null);
-  const [openFriendMenuId, setOpenFriendMenuId] = useState<string | null>(null);
+  const [openChatMenuId, setOpenChatMenuId] = useState(null);
+  const [openFriendMenuId, setOpenFriendMenuId] = useState(null);
 
-  const myFriendUids = useMemo(() => new Set<string>(profile?.friends || []), [profile?.friends]);
-  const hiddenFriendUids = useMemo(() => new Set<string>(profile?.hiddenFriends || []), [profile?.hiddenFriends]);
+  const myFriendUids = useMemo(() => new Set(profile?.friends || []), [profile?.friends]);
+  const hiddenFriendUids = useMemo(() => new Set(profile?.hiddenFriends || []), [profile?.hiddenFriends]);
 
   const friendsListAll = useMemo(
-    () => allUsers.filter((u: any) => myFriendUids.has(u.uid)),
+    () => allUsers.filter((u) => myFriendUids.has(u.uid)),
     [allUsers, myFriendUids]
   );
 
   const visibleFriendsList = useMemo(
-    () => friendsListAll.filter((u: any) => !hiddenFriendUids.has(u.uid)),
+    () => friendsListAll.filter((u) => !hiddenFriendUids.has(u.uid)),
     [friendsListAll, hiddenFriendUids]
   );
 
   const hiddenFriendsList = useMemo(
-    () => friendsListAll.filter((u: any) => hiddenFriendUids.has(u.uid)),
+    () => friendsListAll.filter((u) => hiddenFriendUids.has(u.uid)),
     [friendsListAll, hiddenFriendUids]
   );
 
   const friendsOfFriendsCount = useMemo(() => {
-    const fof = new Set<string>();
-    friendsListAll.forEach((f: any) => {
-      const ff: string[] = f?.friends || [];
+    const fof = new Set();
+    friendsListAll.forEach((f) => {
+      const ff = f?.friends || [];
       ff.forEach((uid) => {
         if (!uid) return;
         if (uid === user.uid) return;
@@ -2452,8 +2452,8 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     return fof.size;
   }, [friendsListAll, user.uid, myFriendUids]);
 
-  const getMutualCount = useCallback((friend: any) => {
-    const ff: string[] = friend?.friends || [];
+  const getMutualCount = useCallback((friend) => {
+    const ff = friend?.friends || [];
     let n = 0;
     for (const uid of ff) {
       if (!uid || uid === user.uid) continue;
@@ -2462,8 +2462,8 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     return n;
   }, [myFriendUids, user.uid]);
 
-  const getFofCandidateCount = useCallback((friend: any) => {
-    const ff: string[] = friend?.friends || [];
+  const getFofCandidateCount = useCallback((friend) => {
+    const ff = friend?.friends || [];
     let n = 0;
     for (const uid of ff) {
       if (!uid || uid === user.uid) continue;
@@ -2472,7 +2472,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     return n;
   }, [myFriendUids, user.uid]);
 
-  const handleHideChat = async (e: any, chatId: string) => {
+  const handleHideChat = async (e, chatId) => {
     e.stopPropagation();
     setOpenChatMenuId(null);
     if (!window.confirm("このトークを非表示にしますか？\n（トーク履歴は削除されません）")) return;
@@ -2486,7 +2486,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     }
   };
 
-  const handleDeleteChat = async (e: any, chatId: string) => {
+  const handleDeleteChat = async (e, chatId) => {
     e.stopPropagation();
     setOpenChatMenuId(null);
     if (!window.confirm("このトークを削除（退出）しますか？\n相手とのトークリストからも削除される可能性があります。")) return;
@@ -2500,7 +2500,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     }
   };
 
-  const handleHideFriend = async (e: any, friendUid: string) => {
+  const handleHideFriend = async (e, friendUid) => {
     e.stopPropagation();
     setOpenFriendMenuId(null);
     if (!window.confirm("この友だちを非表示にしますか？\n（友だち関係は解除されません）")) return;
@@ -2514,7 +2514,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     }
   };
 
-  const handleUnhideFriend = async (e: any, friendUid: string) => {
+  const handleUnhideFriend = async (e, friendUid) => {
     e.stopPropagation();
     setOpenFriendMenuId(null);
     try {
@@ -2596,7 +2596,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
             {visibleFriendsList.length === 0 ? (
               <div className="text-center py-10 text-gray-400 text-sm">友だちがいません</div>
             ) : (
-              visibleFriendsList.map((friend: any) => (
+              visibleFriendsList.map((friend) => (
                 <div
                   key={friend.uid}
                   className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer relative"
@@ -2638,7 +2638,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
             {hiddenFriendsList.length === 0 ? (
               <div className="text-center py-10 text-gray-400 text-sm">非表示の友だちはありません</div>
             ) : (
-              hiddenFriendsList.map((friend: any) => (
+              hiddenFriendsList.map((friend) => (
                 <div
                   key={friend.uid}
                   className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer relative"
@@ -2668,12 +2668,12 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
         )}
 
         {tab === 'chats' && chats
-          .filter((chat: any) => !profile?.hiddenChats?.includes(chat.id))
-          .sort((a: any, b: any) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0))
-          .map((chat: any) => {
+          .filter((chat) => !profile?.hiddenChats?.includes(chat.id))
+          .sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0))
+          .map((chat) => {
             let name = chat.name, icon = chat.icon, partnerData = null;
             if (!chat.isGroup) {
-              partnerData = allUsers.find((u: any) => u.uid === chat.participants.find((p: string) => p !== user.uid));
+              partnerData = allUsers.find((u) => u.uid === chat.participants.find((p) => p !== user.uid));
               if (partnerData) { name = partnerData.name; icon = partnerData.avatar; }
             }
             const unreadCount = chat.unreadCounts?.[user.uid] || 0;
@@ -2752,28 +2752,28 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
 
 // --- 6. Main App Component ---
 function App() {
-  const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState<any>(null);
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [view, setView] = useState('auth'); 
-  const [activeChatId, setActiveChatId] = useState<any>(null);
-  const [allUsers, setAllUsers] = useState<any[]>([]);
-  const [chats, setChats] = useState<any[]>([]);
-  const [posts, setPosts] = useState<any[]>([]);
-  const [notification, setNotification] = useState<string | null>(null);
+  const [activeChatId, setActiveChatId] = useState(null);
+  const [allUsers, setAllUsers] = useState([]);
+  const [chats, setChats] = useState([]);
+  const [posts, setPosts] = useState([]);
+  const [notification, setNotification] = useState(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [mutedChats, setMutedChats] = useState<string[]>(() => {
+  const [mutedChats, setMutedChats] = useState(() => {
     const saved = localStorage.getItem('mutedChats');
     return saved ? JSON.parse(saved) : [];
   });
   
-  const [activeCall, setActiveCall] = useState<any>(null);
-  const [userEffects, setUserEffects] = useState<any[]>([]);
-  const [activeEffect, setActiveEffect] = useState<string>('Normal');
-  const [currentChatBackground, setCurrentChatBackground] = useState<string | null>(null);
-  const processedMsgIds = useRef(new Set<string>());
+  const [activeCall, setActiveCall] = useState(null);
+  const [userEffects, setUserEffects] = useState([]);
+  const [activeEffect, setActiveEffect] = useState('Normal');
+  const [currentChatBackground, setCurrentChatBackground] = useState(null);
+  const processedMsgIds = useRef(new Set());
 
-  const toggleMuteChat = (chatId: string) => {
+  const toggleMuteChat = (chatId) => {
     setMutedChats(prev => {
       const next = prev.includes(chatId) ? prev.filter(id => id !== chatId) : [...prev, chatId];
       localStorage.setItem('mutedChats', JSON.stringify(next));
@@ -2853,12 +2853,12 @@ function App() {
     };
   }, []);
 
-  const showNotification = (msg: string) => {
+  const showNotification = (msg) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
   };
 
-  const copyToClipboard = (text: string) => {
+  const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
     showNotification("IDをコピーしました");
   };
@@ -2878,12 +2878,12 @@ function App() {
     });
 
     const unsubChats = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'chats'), where('participants', 'array-contains', user.uid)), (snap) => {
-      const chatList: any[] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const chatList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       
       // 新着メッセージのチェック（音を鳴らす）
       snap.docChanges().forEach(change => {
         if (change.type === 'added' || change.type === 'modified') {
-            const data: any = change.doc.data();
+            const data = change.doc.data();
             const lastMsg = data.lastMessage;
             
             // メッセージが存在し、自分以外が送信した場合
@@ -2916,7 +2916,7 @@ function App() {
 
       setChats(chatList);
       
-      const incoming: any = chatList.find((c: any) => c.callStatus?.status === 'ringing' && c.callStatus.callerId !== user.uid);
+      const incoming = chatList.find((c) => c.callStatus?.status === 'ringing' && c.callStatus.callerId !== user.uid);
       if (incoming) {
           if (!activeCall || activeCall.chatId !== incoming.id) {
              setActiveCall({ chatId: incoming.id, callData: incoming.callStatus, isIncoming: true, isVideo: incoming.callStatus?.callType !== 'audio' }); 
@@ -2924,12 +2924,12 @@ function App() {
       } else {
           // If we are showing incoming call, but call is gone or not ringing anymore, clear it
           if (activeCall && activeCall.isIncoming) {
-              const callStillExists = chatList.find((c: any) => c.id === activeCall.chatId && c.callStatus?.status === 'ringing');
+              const callStillExists = chatList.find((c) => c.id === activeCall.chatId && c.callStatus?.status === 'ringing');
               if (!callStillExists) setActiveCall(null);
           }
           // Also handle rejection for the caller (if we are waiting and status changes)
           if (activeCall && !activeCall.isIncoming && !activeCall.isGroupCall) {
-              const currentChat = chatList.find((c: any) => c.id === activeCall.chatId);
+              const currentChat = chatList.find((c) => c.id === activeCall.chatId);
               if (!currentChat || !currentChat.callStatus || currentChat.callStatus.status !== 'ringing') {
                    // Status changed (e.g. ended or rejected) so close the view
                    setActiveCall(null);
@@ -2943,11 +2943,11 @@ function App() {
     return () => {
       unsubProfile(); unsubUsers(); unsubChats(); unsubPosts(); unsubEffects();
     };
-  }, [user, activeCall]);
+  }, [user}, [user, activeCall]);
 
-  const addFriendById = async (targetId: string) => {
+  const addFriendById = async (targetId) => {
     if (!targetId) return;
-    const targetUser = allUsers.find((u: any) => u.id === targetId || u.uid === targetId);
+    const targetUser = allUsers.find((u) => u.id === targetId || u.uid === targetId);
     if (targetUser && targetUser.uid !== user.uid) {
       if ((profile.friends || []).includes(targetUser.uid)) {
         showNotification("既に友だちです。");
@@ -2962,15 +2962,15 @@ function App() {
     }
   };
 
-  const startChatWithUser = async (targetUid: string) => {
-    const existingChat = chats.find((c: any) => 
+  const startChatWithUser = async (targetUid) => {
+    const existingChat = chats.find((c) => 
       !c.isGroup && c.participants.includes(targetUid) && c.participants.includes(user.uid)
     );
     if (existingChat) {
       setActiveChatId(existingChat.id);
       setView('chatroom');
     } else {
-      const targetUser = allUsers.find((u: any) => u.uid === targetUid);
+      const targetUser = allUsers.find((u) => u.uid === targetUid);
       const newChat = {
         name: targetUser ? targetUser.name : "Chat", icon: targetUser ? targetUser.avatar : "",
         participants: [user.uid, targetUid], isGroup: false, createdBy: user.uid, updatedAt: serverTimestamp(),
@@ -2986,7 +2986,7 @@ function App() {
     }
   };
 
-    const cleanupCallSignaling = async (chatId: string) => {
+  const cleanupCallSignaling = async (chatId) => {
     try {
       const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
       const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
@@ -2995,7 +2995,7 @@ function App() {
       try { await deleteDoc(signalingRef); } catch {}
 
       // Delete candidates in batches (to avoid 500 limit)
-      const snap = await getDocs(candidatesCol).catch(() => null as any);
+      const snap = await getDocs(candidatesCol).catch(() => null);
       if (!snap) return;
 
       const BATCH_LIMIT = 450;
@@ -3016,9 +3016,9 @@ function App() {
     }
   };
 
-  const startVideoCall = async (chatId: string, isVideo = true, isJoin = false, joinCallerId?: string) => {
+  const startVideoCall = async (chatId, isVideo = true, isJoin = false, joinCallerId) => {
     // Check if group
-    const chat = chats.find((c: any) => c.id === chatId);
+    const chat = chats.find((c) => c.id === chatId);
     const isGroup = chat?.isGroup;
 
     if (isJoin) {
@@ -3069,7 +3069,7 @@ function App() {
 
   useEffect(() => {
     if (!activeCall || !chats.length) return;
-    const callChat = chats.find((c: any) => c.id === activeCall.chatId);
+    const callChat = chats.find((c) => c.id === activeCall.chatId);
     if (callChat && callChat.backgroundImage) {
         setCurrentChatBackground(callChat.backgroundImage);
     } else {
@@ -3120,7 +3120,7 @@ function App() {
                         <div className="absolute bottom-24 left-0 right-0 px-4 flex gap-2 overflow-x-auto scrollbar-hide z-[1001]">
                             <button onClick={() => setActiveEffect('Normal')} className={`p-2 rounded-xl text-xs font-bold whitespace-nowrap ${activeEffect === 'Normal' ? 'bg-white text-black' : 'bg-black/50 text-white'}`}>Normal</button>
                             {/* Render User Effects (Both AI and Purchased) */}
-                            {userEffects.map((ef: any) => (
+                            {userEffects.map((ef) => (
                                 <button key={ef.id} onClick={() => setActiveEffect(ef.name)} className={`p-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-1 ${activeEffect === ef.name ? 'bg-white text-black' : 'bg-black/50 text-white'}`}>
                                     <Sparkles className="w-3 h-3"/> {ef.name}
                                 </button>
