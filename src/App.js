@@ -86,13 +86,13 @@ const formatDate = (timestamp) => {
   return date.toLocaleDateString();
 };
 
-const formatDateTime = (timestamp: any) => {
+const formatDateTime = (timestamp) => {
   if (!timestamp) return '';
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
   return date.toLocaleString([], { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 };
 
-const isTodayBirthday = (birthdayString: string | undefined) => {
+const isTodayBirthday = (birthdayString) => {
   if (!birthdayString) return false;
   const today = new Date();
   const [y, m, d] = birthdayString.split('-').map(Number);
@@ -136,7 +136,7 @@ const playNotificationSound = () => {
 };
 
 // Media Processing Utilities
-const processFileBeforeUpload = (file: File): Promise<File> => {
+const processFileBeforeUpload = (file) => {
   return new Promise((resolve) => {
     if (!file || !file.type.startsWith('image') || file.type === 'image/gif') {
       resolve(file);
