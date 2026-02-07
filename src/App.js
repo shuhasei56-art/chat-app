@@ -1,3 +1,7 @@
+{
+type: uploaded file
+fileName: shuhasei56-art/chat-app/chat-app-679bc218a2d48b35022df62d41f234c5aa7b0ad0/src/App.js
+fullContent:
 // @ts-nocheck
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -736,10 +740,12 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   );
 };
 
-const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) => {
+const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect, profile }) => {
   const [sourceImage, setSourceImage] = useState(null);
   const [generatedEffects, setGeneratedEffects] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [sellPrice, setSellPrice] = useState(100);
+  const [sellingEffect, setSellingEffect] = useState(null);
   const canvasRef = useRef(null);
 
   const handleImageUpload = (e) => {
@@ -816,6 +822,28 @@ const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) 
     }
   };
 
+  const sellEffect = async () => {
+    if (!sellingEffect) return;
+    if ((profile?.wallet || 0) < 0) return;
+    try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'market_effects'), {
+            name: sellingEffect.name + " by " + (user.displayName || "User"),
+            originalName: sellingEffect.name,
+            image: sellingEffect.image,
+            authorId: user.uid,
+            authorName: profile?.name || "Unknown",
+            price: Number(sellPrice),
+            description: "User generated effect",
+            purchasedBy: [],
+            createdAt: serverTimestamp()
+        });
+        showNotification("エフェクトをショップに出品しました！");
+        setSellingEffect(null);
+    } catch(e) {
+        showNotification("出品に失敗しました");
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[2000] bg-black/90 flex flex-col items-center justify-center p-6 backdrop-blur-md animate-in fade-in">
       <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
@@ -841,11 +869,15 @@ const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) 
               ) : (
                 <div className="grid grid-cols-2 gap-4">
                   {generatedEffects.map((ef, i) => (
-                    <div key={i} onClick={() => saveEffect(ef)} className="bg-white p-2 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center cursor-pointer hover:ring-2 ring-purple-500 transition-all group">
-                      <div className="w-full aspect-square bg-gray-100 rounded-lg overflow-hidden mb-2 relative">
-                         <img src={ef.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                    <div key={i} className="bg-white p-2 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center group">
+                      <div className="w-full aspect-square bg-gray-100 rounded-lg overflow-hidden mb-2 relative" onClick={() => saveEffect(ef)}>
+                         <img src={ef.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500 cursor-pointer" />
                       </div>
                       <span className="text-xs font-bold text-gray-700">{ef.name}</span>
+                      <div className="flex gap-2 w-full mt-2">
+                          <button onClick={() => saveEffect(ef)} className="flex-1 text-[10px] bg-gray-100 hover:bg-gray-200 py-1 rounded">保存</button>
+                          <button onClick={() => setSellingEffect(ef)} className="flex-1 text-[10px] bg-purple-100 text-purple-600 hover:bg-purple-200 py-1 rounded">販売</button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -855,6 +887,21 @@ const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) 
           </div>
         )}
         <canvas ref={canvasRef} className="hidden" />
+
+        {sellingEffect && (
+            <div className="absolute inset-0 bg-white z-20 flex flex-col items-center justify-center p-6 animate-in slide-in-from-bottom">
+                <h3 className="font-bold text-lg mb-4">エフェクトを販売する</h3>
+                <img src={sellingEffect.image} className="w-32 h-32 rounded-xl object-cover mb-4 shadow-lg" />
+                <div className="w-full mb-4">
+                    <label className="text-xs font-bold text-gray-500">販売価格 (コイン)</label>
+                    <input type="number" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} className="w-full border-b py-2 text-xl font-bold outline-none text-center" />
+                </div>
+                <div className="flex gap-2 w-full">
+                    <button onClick={() => setSellingEffect(null)} className="flex-1 py-3 bg-gray-100 font-bold rounded-xl text-gray-600">キャンセル</button>
+                    <button onClick={sellEffect} className="flex-1 py-3 bg-purple-500 font-bold rounded-xl text-white">出品する</button>
+                </div>
+            </div>
+        )}
       </div>
     </div>
   );
@@ -1763,6 +1810,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
 
 const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }) => {
     const [packs, setPacks] = useState([]);
+    const [marketEffects, setMarketEffects] = useState([]);
     const [activeTab, setActiveTab] = useState('shop');
     const [activeShopTab, setActiveShopTab] = useState('stickers'); // stickers or effects
     const [adminSubTab, setAdminSubTab] = useState('stickers');
@@ -1772,17 +1820,18 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     const [banTarget, setBanTarget] = useState(null);
     const [grantAmount, setGrantAmount] = useState('');
 
-    // Predefined effects for sale (Hardcoded for demo)
-    const effectsForSale = [
-        { id: 'effect_fire', name: 'Fire', price: 500, description: '燃えるような情熱エフェクト', image: 'https://images.unsplash.com/photo-1486162928267-e6274cb3106f?w=200&q=80' },
-        { id: 'effect_ice', name: 'Ice', price: 500, description: 'クールな氷エフェクト', image: 'https://images.unsplash.com/photo-1549488497-69502a5c3289?w=200&q=80' },
-        { id: 'effect_rainbow', name: 'Rainbow', price: 800, description: '虹色に輝くエフェクト', image: 'https://images.unsplash.com/photo-1517457373958-b7bdd4587205?w=200&q=80' }
-    ];
-
     useEffect(() => {
-        if (activeTab === 'shop' && activeShopTab === 'stickers') {
-             const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'sticker_packs'), where('status', '==', 'approved'));
-             const unsub = onSnapshot(q, (snap) => { const fetchedPacks = snap.docs.map(d => ({ id: d.id, ...d.data() })); fetchedPacks.sort((a, b) => { const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds * 1000 || 0); const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds * 1000 || 0); return tB - tA; }); setPacks(fetchedPacks); }); return () => unsub();
+        if (activeTab === 'shop') {
+             if (activeShopTab === 'stickers') {
+                 const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'sticker_packs'), where('status', '==', 'approved'));
+                 const unsub = onSnapshot(q, (snap) => { const fetchedPacks = snap.docs.map(d => ({ id: d.id, ...d.data() })); fetchedPacks.sort((a, b) => { const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds * 1000 || 0); const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds * 1000 || 0); return tB - tA; }); setPacks(fetchedPacks); }); return () => unsub();
+             } else if (activeShopTab === 'effects') {
+                 const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'market_effects'), orderBy('createdAt', 'desc'));
+                 const unsub = onSnapshot(q, (snap) => {
+                     setMarketEffects(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+                 });
+                 return () => unsub();
+             }
         } else if (activeTab === 'admin' && adminSubTab === 'stickers') {
              const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'sticker_packs'), where('status', '==', 'pending'));
              const unsub = onSnapshot(q, (snap) => { const fetchedPacks = snap.docs.map(d => ({ id: d.id, ...d.data() })); setPacks(fetchedPacks); }); return () => unsub();
@@ -1795,7 +1844,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
         
         // Check if already owned
         const userEffectsRef = collection(db, 'artifacts', appId, 'public', 'data', 'users', user.uid, 'effects');
-        const owned = await getDocs(query(userEffectsRef, where('name', '==', effect.name)));
+        const owned = await getDocs(query(userEffectsRef, where('name', '==', effect.originalName || effect.name)));
         if (!owned.empty) { showNotification("既に持っています"); return; }
 
         setPurchasing(effect.id);
@@ -1803,8 +1852,20 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
             await runTransaction(db, async (t) => {
                 const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
                 t.update(userRef, { wallet: increment(-effect.price) });
+                
+                // Author gets paid
+                if (effect.authorId) {
+                     const authorRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', effect.authorId);
+                     t.update(authorRef, { wallet: increment(effect.price) });
+                }
+
                 const newEffectRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'users', user.uid, 'effects'));
-                t.set(newEffectRef, { name: effect.name, image: effect.image, type: 'premium', createdAt: serverTimestamp() });
+                t.set(newEffectRef, { 
+                    name: effect.originalName || effect.name, 
+                    image: effect.image, 
+                    type: 'premium', 
+                    createdAt: serverTimestamp() 
+                });
             });
             showNotification(`${effect.name}を購入しました！`);
         } catch (e) { console.error(e); showNotification("購入に失敗しました"); } finally { setPurchasing(null); }
@@ -1849,18 +1910,23 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
             
             {activeTab === 'shop' && activeShopTab === 'effects' && (
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                      {effectsForSale.map((effect) => (
-                          <div key={effect.id} className="border rounded-2xl p-4 shadow-sm bg-white flex items-center gap-4">
-                              <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100"><img src={effect.image} className="w-full h-full object-cover"/></div>
-                              <div className="flex-1">
-                                  <h3 className="font-bold">{effect.name}</h3>
-                                  <p className="text-xs text-gray-500">{effect.description}</p>
+                      {marketEffects.length === 0 && <div className="text-center py-10 text-gray-400">販売中のエフェクトはありません</div>}
+                      {marketEffects.map((effect) => {
+                          const isOwned = false; // Logic to check if owned would require fetching user effects or relying on local list passed as prop
+                          return (
+                              <div key={effect.id} className="border rounded-2xl p-4 shadow-sm bg-white flex items-center gap-4">
+                                  <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 border"><img src={effect.image} className="w-full h-full object-cover"/></div>
+                                  <div className="flex-1">
+                                      <h3 className="font-bold text-sm">{effect.name}</h3>
+                                      <p className="text-xs text-gray-500">{effect.description}</p>
+                                      {effect.authorName && <p className="text-[10px] text-gray-400 mt-1">作: {effect.authorName}</p>}
+                                  </div>
+                                  <button onClick={() => handleBuyEffect(effect)} disabled={purchasing === effect.id || effect.authorId === user.uid} className="bg-purple-500 text-white px-4 py-2 rounded-full font-bold text-xs shadow-md hover:bg-purple-600 disabled:bg-gray-300 min-w-[60px]">
+                                      {purchasing === effect.id ? <Loader2 className="w-4 h-4 animate-spin"/> : (effect.authorId === user.uid ? '自作' : `¥${effect.price}`)}
+                                  </button>
                               </div>
-                              <button onClick={() => handleBuyEffect(effect)} disabled={purchasing === effect.id} className="bg-purple-500 text-white px-4 py-2 rounded-full font-bold text-xs shadow-md hover:bg-purple-600 disabled:bg-gray-300 min-w-[60px]">
-                                  {purchasing === effect.id ? <Loader2 className="w-4 h-4 animate-spin"/> : `¥${effect.price}`}
-                              </button>
-                          </div>
-                      ))}
+                          );
+                      })}
                 </div>
             )}
 
@@ -1882,6 +1948,80 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
             {banTarget && (<div className="fixed inset-0 z-[600] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm"><div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl overflow-y-auto max-h-[80vh]"><h3 className="font-bold text-lg mb-1 text-center text-gray-900">ユーザー管理: {banTarget.name}</h3><p className="text-center text-gray-400 text-xs mb-6 font-mono">{banTarget.id}</p><div className="mb-6 pb-6 border-b"><h4 className="font-bold text-sm text-gray-700 mb-2">利用制限</h4><p className="text-sm text-gray-600 mb-3">{banTarget.isBanned ? "現在は停止中です。解除しますか？" : "現在利用可能です。停止しますか？"}</p><button onClick={executeBanToggle} className={`w-full py-3 font-bold rounded-2xl text-white transition-colors ${banTarget.isBanned ? 'bg-blue-500 hover:bg-blue-600' : 'bg-red-500 hover:bg-red-600'}`}>{banTarget.isBanned ? "制限を解除する" : "アカウントを停止する"}</button></div><div className="mb-6"><h4 className="font-bold text-sm text-gray-700 mb-2">コイン操作</h4><div className="flex items-center justify-between bg-yellow-50 p-3 rounded-xl mb-3"><span className="text-xs font-bold text-yellow-800">現在の所持コイン</span><span className="text-lg font-bold text-yellow-600">{banTarget.wallet || 0}</span></div><div className="flex gap-2"><input type="number" placeholder="金額 (-で没収)" className="flex-1 border p-3 rounded-xl text-center font-bold outline-none focus:border-yellow-500" value={grantAmount} onChange={e => setGrantAmount(e.target.value)} /><button onClick={handleGrantCoins} className="bg-yellow-500 text-white font-bold px-6 rounded-xl hover:bg-yellow-600 shadow-md">付与</button></div><p className="text-[10px] text-gray-400 mt-2 text-center">※マイナスの値を入力すると減算されます</p></div><button onClick={() => { setBanTarget(null); setGrantAmount(''); }} className="w-full py-3 bg-gray-100 hover:bg-gray-200 font-bold rounded-2xl text-gray-600 transition-colors">閉じる</button></div></div>)}
         </div>
     );
+};
+
+// --- Added ProfileEditView Definition ---
+const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard }) => {
+  const [name, setName] = useState(profile?.name || "");
+  const [status, setStatus] = useState(profile?.status || "");
+  const [avatar, setAvatar] = useState(profile?.avatar || "");
+  const [cover, setCover] = useState(profile?.cover || "");
+
+  const handleSave = async () => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), {
+        name, status, avatar, cover, updatedAt: serverTimestamp()
+      });
+      showNotification("プロフィールを更新しました");
+      setView('home');
+    } catch (e) {
+      showNotification("更新に失敗しました");
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-white">
+      {/* Header */}
+      <div className="p-4 border-b flex items-center justify-between sticky top-0 bg-white z-10">
+        <button onClick={() => setView('home')}><ChevronLeft className="w-6 h-6" /></button>
+        <h1 className="font-bold text-lg">プロフィール編集</h1>
+        <button onClick={handleSave} className="text-green-500 font-bold text-sm">保存</button>
+      </div>
+      
+      <div className="flex-1 overflow-y-auto">
+        {/* Cover */}
+        <div className="relative h-48 bg-gray-200 group">
+          <img src={cover} className="w-full h-full object-cover" />
+          <label className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+            <CameraIcon className="w-8 h-8 text-white" />
+            <input type="file" className="hidden" accept="image/*" onChange={(e) => handleCompressedUpload(e, setCover)} />
+          </label>
+        </div>
+
+        {/* Avatar */}
+        <div className="relative -mt-16 mb-4 flex justify-center">
+          <div className="relative group">
+            <img src={avatar} className="w-32 h-32 rounded-[40px] border-[6px] border-white object-cover shadow-lg bg-white" />
+             <label className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-[40px] bg-black/20">
+                <CameraIcon className="w-8 h-8 text-white" />
+                <input type="file" className="hidden" accept="image/*" onChange={(e) => handleCompressedUpload(e, setAvatar)} />
+             </label>
+          </div>
+        </div>
+
+        {/* Fields */}
+        <div className="px-6 space-y-6">
+           <div>
+             <label className="text-xs font-bold text-gray-500">名前</label>
+             <input className="w-full border-b py-2 font-bold text-lg outline-none focus:border-green-500" value={name} onChange={e => setName(e.target.value)} />
+           </div>
+           
+           <div>
+             <label className="text-xs font-bold text-gray-500">ステータス</label>
+             <input className="w-full border-b py-2 text-sm outline-none focus:border-green-500" value={status} onChange={e => setStatus(e.target.value)} />
+           </div>
+
+           <div onClick={() => copyToClipboard(profile.id)} className="cursor-pointer">
+             <label className="text-xs font-bold text-gray-500">ユーザーID (タップでコピー)</label>
+             <div className="py-2 text-sm font-mono text-gray-600 flex items-center justify-between">
+               {profile.id}
+               <Copy className="w-4 h-4 text-gray-400" />
+             </div>
+           </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }) => {
@@ -1917,7 +2057,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     const [buyStickerModalPackId, setBuyStickerModalPackId] = useState(null);
     const [viewProfile, setViewProfile] = useState(null);
     const [coinModalTarget, setCoinModalTarget] = useState(null);
-    const [groupMenuOpen, setGroupMenuOpen] = useState(false); // ★追加: グループメニューの開閉状態
+    const [groupMenuOpen, setGroupMenuOpen] = useState(false);
     
     // AI Effect States
     const [aiEffectModalOpen, setAiEffectModalOpen] = useState(false);
@@ -2093,13 +2233,13 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             });
         }
 
-        // ★修正: 1対1の場合、メッセージ送信時に相手を友達リストに追加
-        if (!isGroup && partnerId && profile.friends && !profile.friends.includes(partnerId)) {
-            const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
-            await updateDoc(userRef, { friends: arrayUnion(partnerId) });
-            // 相手側にも自分を友達に追加（双方向にする場合）
-            const partnerRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', partnerId);
-            await updateDoc(partnerRef, { friends: arrayUnion(user.uid) });
+        // 1対1の場合、メッセージ送信時に相互に友達リストに追加
+        if (!isGroup && partnerId) {
+            if (profile.friends && !profile.friends.includes(partnerId)) {
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { friends: arrayUnion(partnerId) });
+            }
+            // 相手側にも自分を追加
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', partnerId), { friends: arrayUnion(user.uid) });
         }
 
         if (file && ['image', 'video', 'audio', 'file'].includes(type)) {
@@ -2207,7 +2347,6 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           <div className="flex gap-4 mr-2 items-center">
             <div className="relative"><button onClick={() => setBackgroundMenuOpen(!backgroundMenuOpen)} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="背景を変更"><Palette className="w-6 h-6 text-gray-600" /></button>{backgroundMenuOpen && (<div className="absolute top-full right-0 mt-2 bg-white rounded-xl shadow-xl border overflow-hidden w-40 z-20"><label className="flex items-center gap-2 px-4 py-3 hover:bg-gray-50 cursor-pointer text-sm font-bold text-gray-700"><ImageIcon className="w-4 h-4" /><span>画像を選択</span><input type="file" className="hidden" accept="image/*" onChange={handleBackgroundUpload} /></label><button onClick={resetBackground} className="w-full flex items-center gap-2 px-4 py-3 hover:bg-red-50 text-sm font-bold text-red-500 border-t"><RefreshCcw className="w-4 h-4" /><span>リセット</span></button></div>)}</div>
             
-            {/* ★変更: グループチャットのボタンをまとめたメニュー */}
             {isGroup && (
                 <div className="relative">
                     <button 
@@ -2257,7 +2396,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         {buyStickerModalPackId && <StickerBuyModal onClose={() => setBuyStickerModalPackId(null)} packId={buyStickerModalPackId} onGoToStore={(id) => { setView('sticker-store'); setBuyStickerModalPackId(null); }} />}
         
         {/* AI Effect Modal */}
-        {aiEffectModalOpen && <AIEffectGenerator user={user} onClose={() => setAiEffectModalOpen(false)} showNotification={showNotification} />}
+        {aiEffectModalOpen && <AIEffectGenerator user={user} onClose={() => setAiEffectModalOpen(false)} showNotification={showNotification} profile={profile} />}
 
         {plusMenuOpen && (
             <div className="absolute bottom-16 left-4 right-4 bg-white rounded-3xl p-4 shadow-2xl grid grid-cols-4 gap-4 animate-in slide-in-from-bottom-4 z-20">
@@ -2393,7 +2532,6 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     return n;
   }, [myFriendUids, user.uid]);
 
-  // ★修正: トーク非表示時、1対1の場合は相手も非表示リストに追加する
   const handleHideChat = async (e, chat) => {
     e.stopPropagation();
     setOpenChatMenuId(null);
@@ -2402,7 +2540,6 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
       const updates = {
           hiddenChats: arrayUnion(chat.id)
       };
-      // 1対1のチャットの場合、相手を非表示リストにも追加する
       if (!chat.isGroup) {
           const partnerId = chat.participants.find(uid => uid !== user.uid);
           if (partnerId) {
@@ -2922,12 +3059,17 @@ function App() {
   };
 
   const startChatWithUser = async (targetUid) => {
-    // ★修正: トーク開始時に自動で友達に追加する
+    // 相手と自分が友達でなければ、互いに友達リストに追加
     if (profile && !profile.friends?.includes(targetUid)) {
          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), {
              friends: arrayUnion(targetUid)
          });
     }
+    try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', targetUid), {
+             friends: arrayUnion(user.uid)
+        });
+    } catch(e) { console.error("Could not add me to partner friend list", e); }
 
     const existingChat = chats.find((c) => 
       !c.isGroup && c.participants.includes(targetUid) && c.participants.includes(user.uid)
@@ -3124,3 +3266,5 @@ function App() {
 }
 
 export default App;
+
+}
