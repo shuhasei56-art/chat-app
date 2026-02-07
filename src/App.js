@@ -534,10 +534,13 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
   const [callError, setCallError] = useState(null);
+  const [needsRemotePlay, setNeedsRemotePlay] = useState(false);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
   const pcRef = useRef(null);
   const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(new MediaStream());
   const unsubscribersRef = useRef([]);
   const pendingCandidatesRef = useRef([]);
   const isMountedRef = useRef(true);
@@ -612,6 +615,15 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     } catch {
     }
     localStreamRef.current = null;
+    try {
+      if (remoteStreamRef.current) {
+        remoteStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    } catch {
+    }
+    remoteStreamRef.current = new MediaStream();
+    setRemoteStream(null);
+    setNeedsRemotePlay(false);
     pendingCandidatesRef.current = [];
   }, []);
   const getMediaErrorMessage = (err) => {
@@ -666,14 +678,29 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         }
       };
       pc.ontrack = async (event) => {
-        const stream = event.streams?.[0];
-        if (!stream) return;
+        const directStream = event.streams?.[0];
+        const stream = directStream || remoteStreamRef.current;
+        if (!directStream && event.track) {
+          const exists = stream.getTracks().some((track) => track.id === event.track.id);
+          if (!exists) stream.addTrack(event.track);
+        }
         setRemoteStream(stream);
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = stream;
+          try {
+            await remoteAudioRef.current.play();
+            setNeedsRemotePlay(false);
+          } catch {
+            setNeedsRemotePlay(true);
+          }
+        }
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = stream;
           try {
             await remoteVideoRef.current.play();
+            setNeedsRemotePlay(false);
           } catch {
+            setNeedsRemotePlay(true);
           }
         }
       };
@@ -810,12 +837,37 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     };
   }, [chatId, user?.uid, isCaller, callData?.callerId, isVideoEnabled, sessionId, cleanup, safeEndCall]);
   useEffect(() => {
+    if (remoteStream && remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      remoteAudioRef.current.play().then(() => {
+        setNeedsRemotePlay(false);
+      }).catch(() => {
+        setNeedsRemotePlay(true);
+      });
+    }
     if (remoteStream && remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = remoteStream;
-      remoteVideoRef.current.play().catch(() => {
+      remoteVideoRef.current.play().then(() => {
+        setNeedsRemotePlay(false);
+      }).catch(() => {
+        setNeedsRemotePlay(true);
       });
     }
   }, [remoteStream]);
+  const hasRemoteVideo = remoteStream?.getVideoTracks?.().some((track) => track.readyState === "live");
+  const resumeRemotePlayback = async () => {
+    try {
+      if (remoteAudioRef.current) {
+        await remoteAudioRef.current.play();
+      }
+      if (remoteVideoRef.current) {
+        await remoteVideoRef.current.play();
+      }
+      setNeedsRemotePlay(false);
+    } catch {
+      setNeedsRemotePlay(true);
+    }
+  };
   const toggleMute = () => {
     const stream = localStreamRef.current;
     if (!stream) return;
@@ -843,9 +895,14 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   }
   return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black flex flex-col animate-in fade-in", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : "none", backgroundSize: "cover" }, children: [
     /* @__PURE__ */ jsxs("div", { className: "relative flex-1 flex items-center justify-center backdrop-blur-md bg-black/30", children: [
-      remoteStream ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover" }) : /* @__PURE__ */ jsxs("div", { className: "text-white flex flex-col items-center gap-4", children: [
+      /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "hidden" }),
+      remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover" }) : /* @__PURE__ */ jsxs("div", { className: "text-white flex flex-col items-center gap-4", children: [
         /* @__PURE__ */ jsx("div", { className: "w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center animate-pulse", children: /* @__PURE__ */ jsx(User, { className: "w-10 h-10" }) }),
-        /* @__PURE__ */ jsx("p", { className: "font-bold text-lg drop-shadow-md", children: "\u63A5\u7D9A\u4E2D..." })
+        /* @__PURE__ */ jsx("p", { className: "font-bold text-lg drop-shadow-md", children: remoteStream ? isVideoEnabled ? "\u30D3\u30C7\u30AA\u3092\u53D7\u4FE1\u4E2D..." : "\u97F3\u58F0\u901A\u8A71\u4E2D..." : "\u63A5\u7D9A\u4E2D..." })
+      ] }),
+      needsRemotePlay && /* @__PURE__ */ jsxs("button", { onClick: resumeRemotePlayback, className: "absolute top-4 left-1/2 -translate-x-1/2 bg-white/90 text-gray-800 text-xs font-bold px-4 py-2 rounded-full shadow-lg", children: [
+        /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
+        "\u97F3\u58F0\u3092\u518D\u751F"
       ] }),
       isVideoEnabled && /* @__PURE__ */ jsxs("div", { className: "absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg transition-all", children: [
         /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover transform scale-x-[-1]", style: { filter: getFilterStyle(activeEffect) } }),
@@ -4507,7 +4564,7 @@ function App() {
     }
     return null;
   }, [activeCall, syncedCallData, user?.uid]);
-  return /* @__PURE__ */ jsxs("div", { className: "max-w-md mx-auto h-[100dvh] border-x bg-white flex flex-col relative overflow-hidden shadow-2xl", children: [
+  return /* @__PURE__ */ jsxs("div", { className: "w-screen h-[100dvh] bg-white flex flex-col relative overflow-hidden", children: [
     notification && /* @__PURE__ */ jsx("div", { className: "fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce", children: notification }),
     !user ? /* @__PURE__ */ jsx(AuthView, { onLogin: setUser, showNotification }) : /* @__PURE__ */ jsxs(Fragment, { children: [
       activeCall ? effectiveCallPhase === "incoming" ? /* @__PURE__ */ jsx(
