@@ -529,7 +529,7 @@ const AuthView = ({ onLogin, showNotification }) => {
     ] })
   ] }) }) });
 };
-const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = true, activeEffect, backgroundUrl, effects = [] }) => {
+const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerProp, isVideoEnabled = true, activeEffect, backgroundUrl, effects = [] }) => {
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
@@ -625,7 +625,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
         setCallError("\u3053\u306E\u30D6\u30E9\u30A6\u30B6\u306F\u901A\u8A71\uFF08getUserMedia\uFF09\u306B\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u305B\u3093\u3002");
         return;
       }
-      const isCaller = callData?.acceptedBy ? callData.acceptedBy !== user.uid : callData?.callerId === user.uid;
+      const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData?.callerId === user.uid;
       const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
       const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
       const pc = new RTCPeerConnection(rtcConfig);
@@ -764,7 +764,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
       cancelled = true;
       stopAll();
     };
-  }, [chatId, user.uid, callData?.callerId, callData?.acceptedBy, isVideoEnabled, onEndCall, stopAll]);
+  }, [chatId, user.uid, callData?.callerId, isCallerProp, isVideoEnabled, onEndCall, stopAll]);
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
@@ -1180,11 +1180,11 @@ const GroupEditModal = ({ onClose, chatId, currentName, currentIcon, currentMemb
     ] }) })
   ] });
 };
-const LeaveGroupConfirmModal = ({ onClose, onLeave }) => /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl", children: [
+const LeaveGroupConfirmModal = ({ onClose, onLeave }) => /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-red-100", children: [
   /* @__PURE__ */ jsxs("div", { className: "text-center mb-6", children: [
-    /* @__PURE__ */ jsx("div", { className: "mx-auto w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-3", children: /* @__PURE__ */ jsx(LogOut, { className: "w-6 h-6 text-red-500" }) }),
-    /* @__PURE__ */ jsx("h3", { className: "font-bold text-lg text-gray-800", children: "\u30B0\u30EB\u30FC\u30D7\u3092\u9000\u4F1A\u3057\u307E\u3059\u304B\uFF1F" }),
-    /* @__PURE__ */ jsxs("p", { className: "text-sm text-gray-500 mt-2", children: [
+    /* @__PURE__ */ jsx("div", { className: "mx-auto w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-3", children: /* @__PURE__ */ jsx(LogOut, { className: "w-6 h-6 text-red-600" }) }),
+    /* @__PURE__ */ jsx("h3", { className: "font-black text-lg text-red-700", children: "\u30B0\u30EB\u30FC\u30D7\u3092\u9000\u4F1A\u3057\u307E\u3059\u304B\uFF1F" }),
+    /* @__PURE__ */ jsxs("p", { className: "text-sm text-gray-600 mt-2", children: [
       "\u3053\u306E\u64CD\u4F5C\u306F\u53D6\u308A\u6D88\u305B\u307E\u305B\u3093\u3002",
       /* @__PURE__ */ jsx("br", {}),
       "\u672C\u5F53\u306B\u9000\u4F1A\u3057\u3066\u3082\u3088\u308D\u3057\u3044\u3067\u3059\u304B\uFF1F"
@@ -3377,20 +3377,23 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
                     );
                   }) })
                 ] }),
-                /* @__PURE__ */ jsxs(
-                  "button",
-                  {
-                    onClick: () => {
-                      setGroupSettingsOpen(false);
-                      setLeaveModalOpen(true);
-                    },
-                    className: "w-full py-3 rounded-2xl bg-red-500 text-white font-bold flex items-center justify-center gap-2 hover:bg-red-600",
-                    children: [
-                      /* @__PURE__ */ jsx(LogOut, { className: "w-5 h-5" }),
-                      " \u30B0\u30EB\u30FC\u30D7\u3092\u9000\u4F1A"
-                    ]
-                  }
-                ),
+                /* @__PURE__ */ jsxs("div", { className: "mb-2 mt-1 rounded-2xl border border-red-200 bg-red-50 p-3", children: [
+                  /* @__PURE__ */ jsx("div", { className: "text-[11px] font-bold text-red-700 mb-2", children: "\u5371\u967A\u306A\u64CD\u4F5C: \u9000\u4F1A\u3059\u308B\u3068\u5143\u306B\u623B\u305B\u307E\u305B\u3093" }),
+                  /* @__PURE__ */ jsxs(
+                    "button",
+                    {
+                      onClick: () => {
+                        setGroupSettingsOpen(false);
+                        setLeaveModalOpen(true);
+                      },
+                      className: "w-full py-3.5 rounded-2xl bg-red-600 text-white font-black text-sm tracking-wide flex items-center justify-center gap-2 hover:bg-red-700 border border-red-700 shadow-lg shadow-red-200",
+                      children: [
+                        /* @__PURE__ */ jsx(LogOut, { className: "w-5 h-5" }),
+                        " \u30B0\u30EB\u30FC\u30D7\u3092\u9000\u4F1A"
+                      ]
+                    }
+                  )
+                ] }),
                 /* @__PURE__ */ jsx("div", { className: "h-3" })
               ]
             }
@@ -4249,6 +4252,7 @@ function App() {
             callData: incoming.callStatus,
             isVideo: incoming.callStatus?.callType !== "audio",
             isGroupCall: false,
+            isCaller: false,
             phase: "incoming"
           };
         }
@@ -4363,7 +4367,7 @@ function App() {
     const isGroup = chat?.isGroup;
     if (isJoin) {
       const callerId = joinCallerId || chat?.callStatus?.callerId || user.uid;
-      setActiveCall({ chatId, callData: { callerId }, isVideo, isGroupCall: !!isGroup, phase: "inCall" });
+      setActiveCall({ chatId, callData: { callerId }, isVideo, isGroupCall: !!isGroup, isCaller: callerId === user.uid, phase: "inCall" });
       return;
     }
     if (isGroup) {
@@ -4377,7 +4381,7 @@ function App() {
           createdAt: serverTimestamp(),
           readBy: [user.uid]
         });
-        setActiveCall({ chatId, callData: { callerId: user.uid }, isVideo, isGroupCall: true, phase: "inCall" });
+        setActiveCall({ chatId, callData: { callerId: user.uid }, isVideo, isGroupCall: true, isCaller: true, phase: "inCall" });
       } catch (e) {
         showNotification("\u958B\u59CB\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
       }
@@ -4392,7 +4396,7 @@ function App() {
             timestamp: Date.now()
           }
         });
-        setActiveCall({ chatId, callData: { status: "ringing", callerId: user.uid, callType: isVideo ? "video" : "audio" }, isVideo, isGroupCall: false, phase: "dialing" });
+        setActiveCall({ chatId, callData: { status: "ringing", callerId: user.uid, callType: isVideo ? "video" : "audio" }, isVideo, isGroupCall: false, isCaller: true, phase: "dialing" });
       } catch (e) {
         console.error(e);
         showNotification("\u767A\u4FE1\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
@@ -4441,7 +4445,7 @@ function App() {
                 acceptedAt: Date.now()
               };
               await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: nextCallData });
-              setActiveCall((prev) => prev ? { ...prev, phase: "inCall", callData: nextCallData } : prev);
+              setActiveCall((prev) => prev ? { ...prev, phase: "inCall", callData: nextCallData, isCaller: false } : prev);
             } catch (e) {
               console.error(e);
               showNotification("\u5FDC\u7B54\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
@@ -4471,6 +4475,7 @@ function App() {
             user,
             chatId: activeCall.chatId,
             callData: syncedCallData || activeCall.callData,
+            isCaller: activeCall.isCaller,
             effects: userEffects,
             isVideoEnabled: activeCall.isVideo,
             activeEffect,
