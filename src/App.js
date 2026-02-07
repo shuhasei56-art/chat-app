@@ -2096,9 +2096,6 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         if (!isGroup && partnerId && profile.friends && !profile.friends.includes(partnerId)) {
             const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
             await updateDoc(userRef, { friends: arrayUnion(partnerId) });
-            // 相手側にも自分を友達に追加（双方向にする場合）
-            const partnerRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', partnerId);
-            await updateDoc(partnerRef, { friends: arrayUnion(user.uid) });
         }
 
         if (file && ['image', 'video', 'audio', 'file'].includes(type)) {
@@ -2488,15 +2485,23 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     return n;
   }, [myFriendUids, user.uid]);
 
-  const handleHideChat = async (e, chatId) => {
+  const handleHideChat = async (e, chat) => {
     e.stopPropagation();
     setOpenChatMenuId(null);
     if (!window.confirm("このトークを非表示にしますか？\n（トーク履歴は削除されません）")) return;
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), {
-        hiddenChats: arrayUnion(chatId),
-      });
-      showNotification("非表示にしました");
+        const updates = {
+            hiddenChats: arrayUnion(chat.id)
+        };
+        // 1対1のチャットの場合、相手を非表示リストにも追加する
+        if (!chat.isGroup) {
+            const partnerId = chat.participants.find(uid => uid !== user.uid);
+            if (partnerId) {
+                updates.hiddenFriends = arrayUnion(partnerId);
+            }
+        }
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), updates);
+        showNotification("非表示にしました");
     } catch (e) {
       showNotification("エラーが発生しました");
     }
@@ -2754,7 +2759,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
                   </button>
                   {openChatMenuId === chat.id && (
                     <div className="absolute right-0 top-8 bg-white shadow-xl border rounded-xl overflow-hidden z-20 min-w-[120px] animate-in fade-in zoom-in-95 duration-100">
-                      <button onClick={(e) => handleHideChat(e, chat.id)} className="w-full text-left px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 flex items-center gap-2">
+                      <button onClick={(e) => handleHideChat(e, chat)} className="w-full text-left px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 flex items-center gap-2">
                         <EyeOff className="w-3 h-3" /> 非表示
                       </button>
                       <button onClick={(e) => handleDeleteChat(e, chat.id)} className="w-full text-left px-4 py-3 text-xs font-bold text-red-500 hover:bg-red-50 border-t flex items-center gap-2">
@@ -3008,6 +3013,15 @@ function App() {
   };
 
   const startChatWithUser = async (targetUid) => {
+    // ★追加: トーク開始時に自動で友達に追加する（1対1の友達としてカウントするため）
+    if (profile && !profile.friends?.includes(targetUid)) {
+         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), {
+             friends: arrayUnion(targetUid)
+         });
+         // 必要であれば相手側にも自分を追加する処理（双方向にする場合）
+         // await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', targetUid), { friends: arrayUnion(user.uid) });
+    }
+
     const existingChat = chats.find((c) => 
       !c.isGroup && c.participants.includes(targetUid) && c.participants.includes(user.uid)
     );
