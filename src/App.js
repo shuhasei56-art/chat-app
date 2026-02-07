@@ -86,11 +86,6 @@ const formatDate = (timestamp) => {
   return date.toLocaleDateString();
 };
 
-const formatDateTime = (timestamp) => {
-  if (!timestamp) return '';
-  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-  return date.toLocaleString([], { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-};
 
 const isTodayBirthday = (birthdayString) => {
   if (!birthdayString) return false;
