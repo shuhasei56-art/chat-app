@@ -1,7 +1,3 @@
-{
-type: uploaded file
-fileName: shuhasei56-art/chat-app/chat-app-679bc218a2d48b35022df62d41f234c5aa7b0ad0/src/App.js
-fullContent:
 // @ts-nocheck
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -3266,5 +3262,3 @@ function App() {
 }
 
 export default App;
-
-}
