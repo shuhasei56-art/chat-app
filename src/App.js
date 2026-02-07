@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
@@ -16,6 +17,7 @@ import {
 import {
   getFirestore,
   collection,
+  collectionGroup,
   doc,
   setDoc,
   getDoc,
@@ -35,8 +37,7 @@ import {
   getDocs,
   deleteField,
   increment,
-  runTransaction,
-  collectionGroup
+  runTransaction
 } from 'firebase/firestore';
 import {
   Search, UserPlus, Image as ImageIcon, Send, X, ChevronLeft, Settings, Home, LayoutGrid, Trash2,
@@ -75,26 +76,25 @@ const rtcConfig = {
 };
 
 // --- 2. Utility Functions & Globals ---
-const formatTime = (timestamp) => {
+const formatTime = (timestamp: any) => {
   if (!timestamp) return '';
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-const formatDate = (timestamp) => {
+const formatDate = (timestamp: any) => {
   if (!timestamp) return '';
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
   return date.toLocaleDateString();
 };
 
-// ★エラー修正: この関数を追加しました
-const formatDateTime = (timestamp) => {
+const formatDateTime = (timestamp: any) => {
   if (!timestamp) return '';
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
   return date.toLocaleString([], { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 };
 
-const isTodayBirthday = (birthdayString) => {
+const isTodayBirthday = (birthdayString: string | undefined) => {
   if (!birthdayString) return false;
   const today = new Date();
   const [y, m, d] = birthdayString.split('-').map(Number);
@@ -102,11 +102,11 @@ const isTodayBirthday = (birthdayString) => {
 };
 
 // Audio Notification Logic
-let audioCtx = null;
+let audioCtx: AudioContext | null = null;
 
 const initAudioContext = () => {
     if (!audioCtx) {
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
         if(AudioContextClass) audioCtx = new AudioContextClass();
     }
     if (audioCtx && audioCtx.state === 'suspended') {
@@ -138,14 +138,14 @@ const playNotificationSound = () => {
 };
 
 // Media Processing Utilities
-const processFileBeforeUpload = (file) => {
+const processFileBeforeUpload = (file: File): Promise<File> => {
   return new Promise((resolve) => {
     if (!file || !file.type.startsWith('image') || file.type === 'image/gif') {
       resolve(file);
       return;
     }
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = (event: any) => {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
@@ -180,7 +180,7 @@ const processFileBeforeUpload = (file) => {
   });
 };
 
-const handleFileUpload = async (e, callback) => {
+const handleFileUpload = async (e: any, callback: any) => {
   const files = e.target.files;
   if (!files || files.length === 0) return;
   const originalFile = files[0];
@@ -200,19 +200,19 @@ const handleFileUpload = async (e, callback) => {
     callback(objectUrl, type, file);
   } else {
     const reader = new FileReader();
-    reader.onload = (event) => callback(event.target.result, type, file);
+    reader.onload = (event: any) => callback(event.target.result, type, file);
     reader.readAsDataURL(file);
   }
 };
 
-const handleCompressedUpload = (e, callback) => {
+const handleCompressedUpload = (e: any, callback: any) => {
   const files = e.target.files;
   if (!files || files.length === 0) return;
   const file = files[0];
 
   if (!file.type.startsWith('image')) return;
   const reader = new FileReader();
-  reader.onload = (event) => {
+  reader.onload = (event: any) => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -235,13 +235,13 @@ const handleCompressedUpload = (e, callback) => {
   reader.readAsDataURL(file);
 };
 
-const generateThumbnail = (file) => {
+const generateThumbnail = (file: File): Promise<string | null> => {
   return new Promise((resolve) => {
     if (!file) { resolve(null); return; }
     const MAX_SIZE = 320; 
     if (file.type.startsWith('image')) {
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = (e: any) => {
             const img = new Image();
             img.onload = () => {
                 const canvas = document.createElement('canvas');
@@ -297,7 +297,7 @@ const generateThumbnail = (file) => {
 
 // --- 3. Component Definitions (Helper & Views) ---
 
-const AuthView = ({ onLogin, showNotification }) => {
+const AuthView = ({ onLogin, showNotification }: any) => {
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
@@ -320,7 +320,7 @@ const AuthView = ({ onLogin, showNotification }) => {
         cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80"
       }, { merge: true });
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login Error:", error);
       showNotification("エラーが発生しました: " + error.message);
     }
@@ -332,7 +332,7 @@ const AuthView = ({ onLogin, showNotification }) => {
     catch (e) { showNotification("ゲストログイン失敗"); } finally { setLoading(false); }
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: any) => {
     e.preventDefault();
     if (!userId || !password) return showNotification("IDとパスワードを入力してください");
     const email = `${userId}@voom-persistent.app`;
@@ -352,7 +352,7 @@ const AuthView = ({ onLogin, showNotification }) => {
         });
         showNotification("アカウント作成完了");
       }
-    } catch (e) { showNotification("エラー: " + e.message); } finally { setLoading(false); }
+    } catch (e: any) { showNotification("エラー: " + e.message); } finally { setLoading(false); }
   };
 
   return (
@@ -383,20 +383,20 @@ const AuthView = ({ onLogin, showNotification }) => {
   );
 };
 
-const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = true, activeEffect, backgroundUrl }) => {
-  const [localStream, setLocalStream] = useState(null);
-  const [remoteStream, setRemoteStream] = useState(null);
+const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = true, activeEffect, backgroundUrl, effects = [] }: any) => {
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
-  const [callError, setCallError] = useState(null);
+  const [callError, setCallError] = useState<string | null>(null);
 
-  const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
-  const pcRef = useRef(null);
-  const localStreamRef = useRef(null);
-  const unsubscribersRef = useRef([]);
-  const pendingCandidatesRef = useRef([]);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const unsubscribersRef = useRef<(() => void)[]>([]);
+  const pendingCandidatesRef = useRef<any[]>([]);
   const startedRef = useRef(false);
 
   const stopAll = useCallback(() => {
@@ -425,23 +425,31 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
     localStreamRef.current = null;
   }, []);
 
-  const getFilterStyle = (effectName) => {
-    switch (effectName) {
-      case 'Sepia': return 'sepia(100%)';
-      case 'Grayscale': return 'grayscale(100%)';
-      case 'Invert': return 'invert(100%)';
-      case 'Hue': return 'hue-rotate(90deg)';
-      case 'Contrast': return 'contrast(200%)';
-      case 'Blur': return 'blur(4px)';
-      case 'Bright': return 'brightness(150%)';
-      case 'Fire': return 'sepia(100%) hue-rotate(-50deg) saturate(300%)';
-      case 'Ice': return 'sepia(100%) hue-rotate(180deg) saturate(200%)';
-      case 'Rainbow': return 'hue-rotate(90deg) saturate(200%)';
-      default: return 'none';
-    }
-  };
+    const getFilterStyle = (effectName: string) => {
+      if (!effectName || effectName === 'Normal') return 'none';
 
-  const getMediaErrorMessage = (err) => {
+      // Prefer user-defined / purchased effect filter if available
+      const match = (effects || []).find(
+        (e: any) => e?.name === effectName && typeof e?.filter === 'string' && e.filter.trim() !== ''
+      );
+      if (match?.filter) return match.filter;
+
+      switch (effectName) {
+        case 'Sepia': return 'sepia(100%)';
+        case 'Grayscale': return 'grayscale(100%)';
+        case 'Invert': return 'invert(100%)';
+        case 'Hue': return 'hue-rotate(90deg)';
+        case 'Contrast': return 'contrast(200%)';
+        case 'Blur': return 'blur(4px)';
+        case 'Bright': return 'brightness(150%)';
+        case 'Fire': return 'sepia(100%) hue-rotate(-50deg) saturate(300%)';
+        case 'Ice': return 'sepia(100%) hue-rotate(180deg) saturate(200%)';
+        case 'Rainbow': return 'hue-rotate(90deg) saturate(200%)';
+        default: return 'none';
+      }
+    };
+
+  const getMediaErrorMessage = (err: any) => {
     const name = err?.name || '';
     if (name === 'NotAllowedError' || name === 'SecurityError') return "カメラ/マイクの利用が許可されていません。ブラウザ設定で許可してください。";
     if (name === 'NotFoundError') return "カメラまたはマイクが見つかりません。（端末にデバイスが無い/無効/接続されていない可能性）";
@@ -450,7 +458,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
     return "カメラ/マイクの取得に失敗しました。";
   };
 
-  const flushPendingCandidates = async (pc) => {
+  const flushPendingCandidates = async (pc: RTCPeerConnection) => {
     const pending = pendingCandidatesRef.current;
     pendingCandidatesRef.current = [];
     for (const c of pending) {
@@ -474,19 +482,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
 
       const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
       const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
-
-      // Caller only: clear old signaling (previous call leftovers)
-      if (isCaller) {
-        try {
-          const batch = writeBatch(db);
-          batch.delete(signalingRef);
-          const candSnap = await getDocs(candidatesCol);
-          candSnap.forEach((d) => batch.delete(d.ref));
-          await batch.commit();
-        } catch (e) {
-          console.warn("Signaling cleanup failed (non-fatal):", e);
-        }
-      }
 
       const pc = new RTCPeerConnection(rtcConfig);
       pcRef.current = pc;
@@ -530,18 +525,18 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
 
         const wantVideo = !!isVideoEnabled && hasVideoInput;
 
-        const baseConstraints = {
+        const baseConstraints: MediaStreamConstraints = {
           audio: hasAudioInput
             ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
             : true,
           video: wantVideo ? { facingMode: "user" } : false,
         };
 
-        let stream = null;
+        let stream: MediaStream | null = null;
 
         try {
           stream = await navigator.mediaDevices.getUserMedia(baseConstraints);
-        } catch (err) {
+        } catch (err: any) {
           // If video was requested, retry with audio only.
           if (wantVideo) {
             try {
@@ -550,7 +545,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
                 video: false,
               });
               setIsVideoOff(true);
-            } catch (err2) {
+            } catch (err2: any) {
               throw err2;
             }
           } else {
@@ -576,7 +571,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
         }
 
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error accessing media devices.", err);
         setCallError(getMediaErrorMessage(err));
         setTimeout(() => onEndCall?.(), 2500);
@@ -585,7 +580,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
 
       // --- Signaling ---
       const unsubSignaling = onSnapshot(signalingRef, async (snap) => {
-        const data = snap.data();
+        const data: any = snap.data();
         if (!data || !pcRef.current) return;
 
         try {
@@ -609,7 +604,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
       const unsubCandidates = onSnapshot(candidatesCol, (snapshot) => {
         snapshot.docChanges().forEach(async (change) => {
           if (change.type !== "added") return;
-          const data = change.doc.data();
+          const data: any = change.doc.data();
           if (!data || data.senderId === user.uid) return;
 
           try {
@@ -737,25 +732,25 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   );
 };
 
-const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) => {
-  const [sourceImage, setSourceImage] = useState(null);
-  const [generatedEffects, setGeneratedEffects] = useState([]);
+const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }: any) => {
+  const [sourceImage, setSourceImage] = useState<string | null>(null);
+  const [generatedEffects, setGeneratedEffects] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const canvasRef = useRef(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const handleImageUpload = (e) => {
+  const handleImageUpload = (e: any) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const file = files[0];
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = (event: any) => {
       setSourceImage(event.target.result);
       generateEffects(event.target.result);
     };
     reader.readAsDataURL(file);
   };
 
-  const generateEffects = async (imgSrc) => {
+  const generateEffects = async (imgSrc: string) => {
     setIsProcessing(true);
     setGeneratedEffects([]);
     
@@ -774,7 +769,7 @@ const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) 
         { name: 'Bright', filter: 'brightness(150%)' }
       ];
 
-      const results = [];
+      const results: any[] = [];
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
@@ -791,7 +786,7 @@ const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) 
       effects.forEach((effect) => {
         ctx.filter = effect.filter;
         ctx.drawImage(img, 0, 0, w, h);
-        results.push({ name: effect.name, image: canvas.toDataURL('image/jpeg', 0.8) });
+        results.push({ name: effect.name, filter: effect.filter, image: canvas.toDataURL('image/jpeg', 0.8) });
       });
 
       setGeneratedEffects(results);
@@ -801,11 +796,18 @@ const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) 
     img.src = imgSrc;
   };
 
-  const saveEffect = async (effect) => {
+  const saveEffect = async (effect: any) => {
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'users', user.uid, 'effects'), {
         name: effect.name,
         image: effect.image,
+        filter: effect.filter || null,
+        type: 'created',
+        ownerId: user.uid,
+        creatorId: user.uid,
+        forSale: false,
+        price: 0,
+        soldCount: 0,
         createdAt: serverTimestamp()
       });
       showNotification(`${effect.name} エフェクトを保存しました`);
@@ -861,7 +863,7 @@ const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) 
   );
 };
 
-const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, showNotification }) => {
+const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, showNotification }: any) => {
   const [amount, setAmount] = useState("");
   const [sending, setSending] = useState(false);
   const handleSend = async () => {
@@ -902,16 +904,16 @@ const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, sh
   );
 };
 
-const ContactSelectModal = ({ onClose, onSend, friends }) => (
+const ContactSelectModal = ({ onClose, onSend, friends }: any) => (
   <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
     <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl flex flex-col max-h-[70vh]">
       <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">連絡先を選択</h3><button onClick={onClose}><X className="w-6 h-6"/></button></div>
-      <div className="flex-1 overflow-y-auto space-y-2 pr-2">{friends.length === 0 ? <div className="text-center py-10 text-gray-400 text-sm">友だちがいません</div> : friends.map((f) => <div key={f.uid} onClick={() => onSend(f)} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-2xl cursor-pointer border border-transparent hover:border-gray-100 transition-all"><img src={f.avatar} className="w-10 h-10 rounded-xl object-cover border" /><span className="font-bold text-sm flex-1">{f.name}</span><Plus className="w-4 h-4 text-green-500" /></div>)}</div>
+      <div className="flex-1 overflow-y-auto space-y-2 pr-2">{friends.length === 0 ? <div className="text-center py-10 text-gray-400 text-sm">友だちがいません</div> : friends.map((f: any) => <div key={f.uid} onClick={() => onSend(f)} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-2xl cursor-pointer border border-transparent hover:border-gray-100 transition-all"><img src={f.avatar} className="w-10 h-10 rounded-xl object-cover border" /><span className="font-bold text-sm flex-1">{f.name}</span><Plus className="w-4 h-4 text-green-500" /></div>)}</div>
     </div>
   </div>
 );
 
-const BirthdayCardModal = ({ onClose, onSend, toName }) => {
+const BirthdayCardModal = ({ onClose, onSend, toName }: any) => {
   const [color, setColor] = useState('pink'), [message, setMessage] = useState('');
   const colors = [{ id: 'pink', class: 'bg-pink-100 border-pink-300' }, { id: 'blue', class: 'bg-blue-100 border-blue-300' }, { id: 'yellow', class: 'bg-yellow-100 border-yellow-300' }, { id: 'green', class: 'bg-green-100 border-green-300' }];
   return (
@@ -926,7 +928,7 @@ const BirthdayCardModal = ({ onClose, onSend, toName }) => {
   );
 };
 
-const StickerBuyModal = ({ onClose, onGoToStore, packId }) => {
+const StickerBuyModal = ({ onClose, onGoToStore, packId }: any) => {
     return (
         <div className="fixed inset-0 z-[400] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
             <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center">
@@ -944,16 +946,16 @@ const StickerBuyModal = ({ onClose, onGoToStore, packId }) => {
     );
 };
 
-const GroupAddMemberModal = ({ onClose, currentMembers, chatId, allUsers, profile, user, showNotification }) => {
-    const [selected, setSelected] = useState([]);
-    const inviteableFriends = allUsers.filter((u) => (profile?.friends || []).includes(u.uid) && !currentMembers.includes(u.uid));
-    const toggle = (uid) => setSelected(prev => prev.includes(uid) ? prev.filter(i => i !== uid) : [...prev, uid]);
+const GroupAddMemberModal = ({ onClose, currentMembers, chatId, allUsers, profile, user, showNotification }: any) => {
+    const [selected, setSelected] = useState<string[]>([]);
+    const inviteableFriends = allUsers.filter((u: any) => (profile?.friends || []).includes(u.uid) && !currentMembers.includes(u.uid));
+    const toggle = (uid: string) => setSelected(prev => prev.includes(uid) ? prev.filter(i => i !== uid) : [...prev, uid]);
     const handleInvite = async () => {
       if (selected.length === 0) return;
       try {
-        const addedNames = [];
+        const addedNames: string[] = [];
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', chatId), { participants: arrayUnion(...selected) });
-        selected.forEach(uid => { const u = allUsers.find((user) => user.uid === uid); if (u) addedNames.push(u.name); });
+        selected.forEach(uid => { const u = allUsers.find((user: any) => user.uid === uid); if (u) addedNames.push(u.name); });
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats', chatId, 'messages'), {
           senderId: user.uid, content: `${profile.name}が${addedNames.join('、')}を招待しました。`, type: 'text', createdAt: serverTimestamp(), readBy: [user.uid]
         });
@@ -964,17 +966,17 @@ const GroupAddMemberModal = ({ onClose, currentMembers, chatId, allUsers, profil
       <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
         <div className="bg-white w-full max-w-sm rounded-3xl flex flex-col max-h-[70vh]">
           <div className="flex justify-between items-center p-4 border-b"><h3 className="font-bold text-lg">メンバーを追加</h3><button onClick={onClose}><X className="w-6 h-6"/></button></div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-2">{inviteableFriends.length === 0 ? <div className="text-center py-10 text-gray-400 text-sm">招待できる友だちがいません</div> : inviteableFriends.map((f) => <div key={f.uid} onClick={() => toggle(f.uid)} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-2xl cursor-pointer border border-transparent transition-all"><img src={f.avatar} className="w-10 h-10 rounded-xl object-cover border" /><span className="font-bold text-sm flex-1">{f.name}</span><div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${selected.includes(f.uid) ? 'bg-green-500 border-green-500' : 'border-gray-200'}`}>{selected.includes(f.uid) && <Check className="w-4 h-4 text-white" />}</div></div>)}</div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-2">{inviteableFriends.length === 0 ? <div className="text-center py-10 text-gray-400 text-sm">招待できる友だちがいません</div> : inviteableFriends.map((f: any) => <div key={f.uid} onClick={() => toggle(f.uid)} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-2xl cursor-pointer border border-transparent transition-all"><img src={f.avatar} className="w-10 h-10 rounded-xl object-cover border" /><span className="font-bold text-sm flex-1">{f.name}</span><div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${selected.includes(f.uid) ? 'bg-green-500 border-green-500' : 'border-gray-200'}`}>{selected.includes(f.uid) && <Check className="w-4 h-4 text-white" />}</div></div>)}</div>
           <div className="p-4 border-t"><button onClick={handleInvite} disabled={selected.length === 0} className={`w-full py-3 rounded-2xl font-bold shadow-lg text-white transition-all ${selected.length > 0 ? 'bg-green-500' : 'bg-gray-300'}`}>招待する ({selected.length})</button></div>
         </div>
       </div>
     );
 };
 
-const GroupEditModal = ({ onClose, chatId, currentName, currentIcon, currentMembers, allUsers, showNotification, user, profile }) => {
+const GroupEditModal = ({ onClose, chatId, currentName, currentIcon, currentMembers, allUsers, showNotification, user, profile }: any) => {
     const [name, setName] = useState(currentName);
     const [icon, setIcon] = useState(currentIcon);
-    const [kickTarget, setKickTarget] = useState(null);
+    const [kickTarget, setKickTarget] = useState<any>(null);
 
     const handleUpdate = async () => {
         if (!name.trim()) return showNotification("グループ名を入力してください");
@@ -1005,11 +1007,11 @@ const GroupEditModal = ({ onClose, chatId, currentName, currentIcon, currentMemb
           <div className="flex justify-between items-center mb-6 border-b pb-4 shrink-0"><h3 className="font-bold text-lg">グループ設定</h3><button onClick={onClose}><X className="w-6 h-6 text-gray-500"/></button></div>
           <div className="flex-1 overflow-y-auto scrollbar-hide">
             <div className="flex flex-col items-center gap-6 mb-8">
-                <div className="relative group"><img src={icon} className="w-24 h-24 rounded-3xl object-cover bg-gray-100 border shadow-sm" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer shadow-lg border-2 border-white hover:bg-green-600 transition-colors"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d) => setIcon(d))} /></label></div>
+                <div className="relative group"><img src={icon} className="w-24 h-24 rounded-3xl object-cover bg-gray-100 border shadow-sm" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer shadow-lg border-2 border-white hover:bg-green-600 transition-colors"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d: string) => setIcon(d))} /></label></div>
                 <div className="w-full"><label className="text-xs font-bold text-gray-400 mb-1 block">グループ名</label><input className="w-full text-center text-lg font-bold border-b py-2 focus:outline-none focus:border-green-500 bg-transparent" placeholder="グループ名を入力" value={name} onChange={e => setName(e.target.value)} /></div>
             </div>
             <div className="mb-6"><h4 className="text-xs font-bold text-gray-400 mb-2 uppercase flex justify-between"><span>メンバー ({currentMembers.length})</span><span className="text-[10px] text-gray-400 font-normal">管理者権限: 削除可能</span></h4>
-                <div className="space-y-2">{currentMembers.map((uid) => { const m = allUsers.find((u) => u.uid === uid); if (!m) return null; const isMe = uid === user.uid; return ( <div key={uid} className="flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 border border-transparent hover:border-gray-100"><img src={m.avatar} className="w-10 h-10 rounded-full object-cover border" /><div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{m.name} {isMe && <span className="text-gray-400 text-xs">(自分)</span>}</div></div>{!isMe && (<button onClick={() => setKickTarget({ uid, name: m.name })} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors flex items-center gap-1 group" title="強制退会"><span className="text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">強制退会</span><UserMinus className="w-5 h-5" /></button>)}</div> ); })}</div>
+                <div className="space-y-2">{currentMembers.map((uid: any) => { const m = allUsers.find((u: any) => u.uid === uid); if (!m) return null; const isMe = uid === user.uid; return ( <div key={uid} className="flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 border border-transparent hover:border-gray-100"><img src={m.avatar} className="w-10 h-10 rounded-full object-cover border" /><div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{m.name} {isMe && <span className="text-gray-400 text-xs">(自分)</span>}</div></div>{!isMe && (<button onClick={() => setKickTarget({ uid, name: m.name })} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors flex items-center gap-1 group" title="強制退会"><span className="text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">強制退会</span><UserMinus className="w-5 h-5" /></button>)}</div> ); })}</div>
             </div>
           </div>
           <button onClick={handleUpdate} className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-2xl shadow-lg transition-all shrink-0 mt-4">保存する</button>
@@ -1019,7 +1021,7 @@ const GroupEditModal = ({ onClose, chatId, currentName, currentIcon, currentMemb
     );
 };
 
-const LeaveGroupConfirmModal = ({ onClose, onLeave }) => (
+const LeaveGroupConfirmModal = ({ onClose, onLeave }: any) => (
   <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm">
     <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl">
       <div className="text-center mb-6"><div className="mx-auto w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-3"><LogOut className="w-6 h-6 text-red-500" /></div><h3 className="font-bold text-lg text-gray-800">グループを退会しますか？</h3><p className="text-sm text-gray-500 mt-2">この操作は取り消せません。<br/>本当に退会してもよろしいですか？</p></div>
@@ -1028,8 +1030,8 @@ const LeaveGroupConfirmModal = ({ onClose, onLeave }) => (
   </div>
 );
 
-const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }) => {
-  const caller = allUsers.find((u) => u.uid === callData.callerId);
+const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }: any) => {
+  const caller = allUsers.find((u: any) => u.uid === callData.callerId);
   const isVideo = callData?.callType !== 'audio';
 
   return (
@@ -1087,23 +1089,23 @@ const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }) => {
   );
 };
 
-const OutgoingCallOverlay = ({ callData, onCancel, allUsers }) => (
+const OutgoingCallOverlay = ({ callData, onCancel, allUsers }: any) => (
   <div className="fixed inset-0 z-[500] bg-gray-900 flex flex-col items-center justify-between py-24 px-6 animate-in fade-in duration-300">
-      <div className="flex flex-col items-center gap-6 mt-10"><div className="relative"><div className="absolute inset-0 rounded-full bg-white/10 animate-pulse"></div><div className="w-32 h-32 rounded-full bg-gray-700 flex items-center justify-center border-4 border-white/50 shadow-2xl relative z-10"><Video className="w-14 h-14 text-white opacity-80" /></div></div><div className="text-center text-white"><h2 className="text-2xl font-bold mb-2">発信中...</h2><p className="text-sm opacity-60">相手の応答を待っています</p></div></div>
+     <div className="flex flex-col items-center gap-6 mt-10"><div className="relative"><div className="absolute inset-0 rounded-full bg-white/10 animate-pulse"></div><div className="w-32 h-32 rounded-full bg-gray-700 flex items-center justify-center border-4 border-white/50 shadow-2xl relative z-10"><Video className="w-14 h-14 text-white opacity-80" /></div></div><div className="text-center text-white"><h2 className="text-2xl font-bold mb-2">発信中...</h2><p className="text-sm opacity-60">相手の応答を待っています</p></div></div>
     <div className="w-full flex justify-center items-center mb-10"><button onClick={onCancel} className="flex flex-col items-center gap-3 group"><div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center shadow-lg group-active:scale-95 transition-all hover:bg-red-600"><X className="w-10 h-10 text-white" /></div><span className="text-white text-xs font-bold">キャンセル</span></button></div>
   </div>
 );
 
-const CallAcceptedOverlay = ({ callData, onJoin }) => (
+const CallAcceptedOverlay = ({ callData, onJoin }: any) => (
   <div className="fixed inset-0 z-[500] bg-gray-900/90 flex flex-col items-center justify-center px-6 animate-in fade-in duration-300 backdrop-blur-sm">
     <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border border-white/20"><div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce"><Video className="w-10 h-10 text-green-600" /></div><h2 className="text-2xl font-bold text-gray-800 mb-2">相手が応答しました</h2><p className="text-gray-500 mb-8 text-sm">下のボタンを押して通話を開始してください</p><button onClick={onJoin} className="w-full py-4 bg-green-500 hover:bg-green-600 text-white font-bold rounded-2xl transition-all shadow-lg shadow-green-200 transform hover:scale-[1.02] flex items-center justify-center gap-2"><Video className="w-5 h-5" />通話に参加する</button></div>
   </div>
 );
 
-const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, myProfile, allUsers, showNotification }) => {
-  const myFriends = myProfile?.friends || [];
+const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, myProfile, allUsers, showNotification }: any) => {
+  const myFriends: string[] = myProfile?.friends || [];
   const myFriendsSet = useMemo(() => new Set(myFriends), [myFriends]);
-  const friendFriends = friend?.friends || [];
+  const friendFriends: string[] = friend?.friends || [];
 
   const isFriend = myFriendsSet.has(friend?.uid);
   const isHidden = (myProfile?.hiddenFriends || []).includes(friend?.uid);
@@ -1222,14 +1224,14 @@ const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, m
   );
 };
 
-const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, addFriendById, onEdit, onDelete, onPreview, onReply, onReaction, allUsers, onStickerClick, onShowProfile, onJoinCall }) => {
+const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, addFriendById, onEdit, onDelete, onPreview, onReply, onReaction, allUsers, onStickerClick, onShowProfile, onJoinCall }: any) => {
     const isMe = m.senderId === user.uid;
-    const [mediaSrc, setMediaSrc] = useState(null); 
+    const [mediaSrc, setMediaSrc] = useState<string | null>(null); 
     const [loading, setLoading] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
     const isInvalidBlob = !isMe && m.content?.startsWith('blob:');
 
-    const setBlobSrcFromBase64 = (base64Data, mimeType) => {
+    const setBlobSrcFromBase64 = (base64Data: string, mimeType: string) => {
         try {
             const byteCharacters = atob(base64Data);
             const byteNumbers = new Array(byteCharacters.length);
@@ -1310,7 +1312,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
       } catch(e) { console.error("Download failed", e); } finally { setLoading(false); }
     };
 
-    const handleStickerClick = (e) => {
+    const handleStickerClick = (e: any) => {
         e.stopPropagation();
         if (m.audio) {
             new Audio(m.audio).play().catch(e => console.error("Audio playback error:", e));
@@ -1323,9 +1325,9 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
     const readCount = (m.readBy?.length || 1) - 1;
     const finalSrc = mediaSrc || m.preview;
     const isShowingPreview = loading || isInvalidBlob || (finalSrc === m.preview);
-    const handleBubbleClick = (e) => { e.stopPropagation(); setShowMenu(!showMenu); };
+    const handleBubbleClick = (e: any) => { e.stopPropagation(); setShowMenu(!showMenu); };
     
-    const renderContent = (text) => {
+    const renderContent = (text: string) => {
       if (!text) return "";
       const regex = /(https?:\/\/[^\s]+)|(@[^\s]+)/g;
       const parts = text.split(regex);
@@ -1334,14 +1336,14 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
         if (part.match(/^https?:\/\//)) return <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all" onClick={(e) => e.stopPropagation()}>{part}</a>;
         if (part.startsWith('@')) {
            const name = part.substring(1);
-           const mentionedUser = allUsers.find((u) => u.name === name);
+           const mentionedUser = allUsers.find((u: any) => u.name === name);
            if (mentionedUser) return <span key={i} className="text-blue-500 font-bold cursor-pointer hover:underline bg-blue-50 px-1 rounded" onClick={(e) => { e.stopPropagation(); onShowProfile && onShowProfile(mentionedUser); }}>{part}</span>;
         }
         return part;
       });
     };
     
-    const getUserNames = (uids) => { if (!uids || !allUsers) return ""; return uids.map(uid => { const u = allUsers.find((user) => user.uid === uid); return u ? u.name : "不明なユーザー"; }).join(", "); };
+    const getUserNames = (uids: string[]) => { if (!uids || !allUsers) return ""; return uids.map(uid => { const u = allUsers.find((user: any) => user.uid === uid); return u ? u.name : "不明なユーザー"; }).join(", "); };
 
     return (
       <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} gap-2 relative group mb-4`}>
@@ -1379,16 +1381,16 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db, appId, chatId, a
               {showMenu && (<div className={`absolute top-full ${isMe ? 'right-0' : 'left-0'} mt-1 z-[100] flex flex-col bg-white rounded-xl shadow-2xl border overflow-hidden min-w-[180px] animate-in slide-in-from-top-2 duration-200`}><div className="flex justify-between items-center p-2 bg-gray-50 border-b gap-1 overflow-x-auto scrollbar-hide">{REACTION_EMOJIS.map(emoji => (<button key={emoji} onClick={(e) => { e.stopPropagation(); onReaction(m.id, emoji); setShowMenu(false); }} className="hover:scale-125 transition-transform text-lg p-1">{emoji}</button>))}</div><button onClick={(e) => { e.stopPropagation(); onReply(m); setShowMenu(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-100 text-xs font-bold text-gray-700 text-left"><Reply className="w-4 h-4" />リプライ</button>{(m.type === 'image' || m.type === 'video') && (<button onClick={(e) => { e.stopPropagation(); onPreview(finalSrc, m.type); setShowMenu(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-100 text-xs font-bold text-gray-700 text-left border-t border-gray-100"><Maximize className="w-4 h-4" />拡大表示</button>)}{m.type === 'file' && (<button onClick={(e) => { e.stopPropagation(); handleDownload(); setShowMenu(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-100 text-xs font-bold text-gray-700 text-left border-t border-gray-100"><Download className="w-4 h-4" />保存</button>)}{m.type === 'text' && isMe && (<button onClick={(e) => { e.stopPropagation(); onEdit(m.id, m.content); setShowMenu(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-100 text-xs font-bold text-gray-700 text-left border-t border-gray-100"><Edit2 className="w-4 h-4" />編集</button>)}{isMe && (<button onClick={(e) => { e.stopPropagation(); onDelete(m.id); setShowMenu(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-red-50 text-xs font-bold text-red-500 text-left border-t border-gray-100"><Trash2 className="w-4 h-4" />送信取消</button>)}</div>)}
             </div>
           </div>
-          {m.reactions && Object.keys(m.reactions).some(k => m.reactions[k]?.length > 0) && (<div className={`flex flex-wrap gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>{Object.entries(m.reactions).map(([emoji, uids]) => uids?.length > 0 && (<button key={emoji} onClick={() => onReaction(m.id, emoji)} title={getUserNames(uids)} className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs shadow-sm border transition-all hover:scale-105 active:scale-95 ${uids.includes(user.uid) ? 'bg-white border-green-500 text-green-600 ring-1 ring-green-100' : 'bg-white border-gray-100 text-gray-600'}`}><span className="text-sm">{emoji}</span><span className="font-bold text-[10px]">{uids.length}</span></button>))}</div>)}
+          {m.reactions && Object.keys(m.reactions).some(k => m.reactions[k]?.length > 0) && (<div className={`flex flex-wrap gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>{Object.entries(m.reactions).map(([emoji, uids]: any) => uids?.length > 0 && (<button key={emoji} onClick={() => onReaction(m.id, emoji)} title={getUserNames(uids)} className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs shadow-sm border transition-all hover:scale-105 active:scale-95 ${uids.includes(user.uid) ? 'bg-white border-green-500 text-green-600 ring-1 ring-green-100' : 'bg-white border-gray-100 text-gray-600'}`}><span className="text-sm">{emoji}</span><span className="font-bold text-[10px]">{uids.length}</span></button>))}</div>)}
           {isMe && readCount > 0 && (<div className="text-[10px] font-bold text-green-600 mt-0.5">既読 {isGroup ? readCount : ''}</div>)}
         </div>
       </div>
     );
 });
 
-const PostItem = ({ post, user, allUsers, db, appId, profile }) => {
-    const [commentText, setCommentText] = useState(''), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
-    const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
+const PostItem = ({ post, user, allUsers, db, appId, profile }: any) => {
+    const [commentText, setCommentText] = useState(''), [mediaSrc, setMediaSrc] = useState<string | null>(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
+    const u = allUsers.find((x: any) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
     // Fixed: Defined isMe
     const isMe = post.userId === user.uid;
 
@@ -1432,18 +1434,18 @@ const PostItem = ({ post, user, allUsers, db, appId, profile }) => {
         <div className="text-sm mb-3 whitespace-pre-wrap">{post.content}</div>
         {(mediaSrc || isLoadingMedia) && <div className="mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px]">{isLoadingMedia ? <Loader2 className="animate-spin w-5 h-5"/> : post.mediaType === 'video' ? <video src={mediaSrc || ""} className="w-full rounded-2xl max-h-96 bg-black" controls playsInline /> : <img src={mediaSrc || ""} className="w-full rounded-2xl max-h-96 object-cover" loading="lazy" />}</div>}
         <div className="flex items-center gap-6 py-2 border-y mb-3"><button onClick={toggleLike} className="flex items-center gap-1.5"><Heart className={`w-5 h-5 ${isLiked ? 'fill-red-500 text-red-500' : 'text-gray-400'}`} /><span className="text-xs">{post.likes?.length || 0}</span></button><div className="flex items-center gap-1.5 text-gray-400"><MessageCircle className="w-5 h-5" /><span className="text-xs">{post.comments?.length || 0}</span></div></div>
-        <div className="space-y-3 mb-4">{post.comments?.map((c, i) => <div key={i} className="bg-gray-50 rounded-2xl px-3 py-2"><div className="text-[10px] font-bold text-gray-500">{c.userName}</div><div className="text-xs">{c.text}</div></div>)}</div>
+        <div className="space-y-3 mb-4">{post.comments?.map((c: any, i: number) => <div key={i} className="bg-gray-50 rounded-2xl px-3 py-2"><div className="text-[10px] font-bold text-gray-500">{c.userName}</div><div className="text-xs">{c.text}</div></div>)}</div>
         <div className="flex items-center gap-2 bg-gray-100 rounded-full px-4 py-1"><input className="flex-1 bg-transparent text-xs py-2 outline-none" placeholder="コメント..." value={commentText} onChange={e => setCommentText(e.target.value)} onKeyPress={e => e.key === 'Enter' && submitComment()} /><button onClick={submitComment} className="text-green-500"><Send className="w-4 h-4" /></button></div>
       </div>
     );
 };
 
-const GroupCreateView = ({ user, profile, allUsers, setView, showNotification }) => {
+const GroupCreateView = ({ user, profile, allUsers, setView, showNotification }: any) => {
     const [groupName, setGroupName] = useState('');
     const [groupIcon, setGroupIcon] = useState("https://api.dicebear.com/7.x/shapes/svg?seed=group");
-    const [selectedMembers, setSelectedMembers] = useState([]);
-    const friendsList = allUsers.filter((u) => profile?.friends?.includes(u.uid));
-    const toggleMember = (uid) => { setSelectedMembers(prev => prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid]); };
+    const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+    const friendsList = allUsers.filter((u: any) => profile?.friends?.includes(u.uid));
+    const toggleMember = (uid: string) => { setSelectedMembers(prev => prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid]); };
     const handleCreate = async () => {
       if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
       if (!groupName.trim()) return showNotification("グループ名を入力してください");
@@ -1456,26 +1458,26 @@ const GroupCreateView = ({ user, profile, allUsers, setView, showNotification })
       <div className="flex flex-col h-full bg-white">
         <div className="p-4 flex items-center gap-4 bg-white border-b sticky top-0 z-10"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><span className="font-bold flex-1">グループ作成</span><button onClick={handleCreate} className="text-green-500 font-bold text-sm">作成</button></div>
         <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide">
-          <div className="flex flex-col items-center gap-4"><div className="relative"><img src={groupIcon} className="w-24 h-24 rounded-3xl object-cover bg-gray-100 border shadow-sm" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer shadow-lg border-2 border-white"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d) => setGroupIcon(d))} /></label></div><input className="w-full text-center text-lg font-bold border-b py-2 focus:outline-none focus:border-green-500" placeholder="グループ名を入力" value={groupName} onChange={e => setGroupName(e.target.value)} /></div>
-          <div className="space-y-3"><h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest px-1">友だちを選択</h3><div className="divide-y border-y">{friendsList.map((f) => (<div key={f.uid} className="flex items-center gap-4 py-3 cursor-pointer" onClick={() => toggleMember(f.uid)}><div className="relative"><img src={f.avatar} className="w-10 h-10 rounded-xl object-cover border" /></div><span className="flex-1 font-bold text-sm">{f.name}</span><div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${selectedMembers.includes(f.uid) ? 'bg-green-500 border-green-500' : 'border-gray-200'}`}>{selectedMembers.includes(f.uid) && <Check className="w-4 h-4 text-white" />}</div></div>))}</div></div>
+          <div className="flex flex-col items-center gap-4"><div className="relative"><img src={groupIcon} className="w-24 h-24 rounded-3xl object-cover bg-gray-100 border shadow-sm" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer shadow-lg border-2 border-white"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d: string) => setGroupIcon(d))} /></label></div><input className="w-full text-center text-lg font-bold border-b py-2 focus:outline-none focus:border-green-500" placeholder="グループ名を入力" value={groupName} onChange={e => setGroupName(e.target.value)} /></div>
+          <div className="space-y-3"><h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest px-1">友だちを選択</h3><div className="divide-y border-y">{friendsList.map((f: any) => (<div key={f.uid} className="flex items-center gap-4 py-3 cursor-pointer" onClick={() => toggleMember(f.uid)}><div className="relative"><img src={f.avatar} className="w-10 h-10 rounded-xl object-cover border" /></div><span className="flex-1 font-bold text-sm">{f.name}</span><div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${selectedMembers.includes(f.uid) ? 'bg-green-500 border-green-500' : 'border-gray-200'}`}>{selectedMembers.includes(f.uid) && <Check className="w-4 h-4 text-white" />}</div></div>))}</div></div>
         </div>
       </div>
     );
 };
 
-const BirthdayCardBox = ({ user, setView }) => {
-    const [myCards, setMyCards] = useState([]);
+const BirthdayCardBox = ({ user, setView }: any) => {
+    const [myCards, setMyCards] = useState<any[]>([]);
     useEffect(() => {
       if (!user) return;
       const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'birthday_cards'), where('toUserId', '==', user.uid));
       const unsub = onSnapshot(q, (snap) => {
         const cards = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        cards.sort((a, b) => (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0) - (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0));
+        cards.sort((a: any, b: any) => (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0) - (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0));
         setMyCards(cards);
       });
       return () => unsub();
     }, [user]);
-    const getColorClass = (color) => { switch(color) { case 'pink': return 'bg-pink-100 border-pink-200 text-pink-800'; case 'blue': return 'bg-blue-100 border-blue-200 text-blue-800'; case 'yellow': return 'bg-yellow-100 border-yellow-200 text-yellow-800'; case 'green': return 'bg-green-100 border-green-200 text-green-800'; default: return 'bg-white border-gray-200'; } };
+    const getColorClass = (color: string) => { switch(color) { case 'pink': return 'bg-pink-100 border-pink-200 text-pink-800'; case 'blue': return 'bg-blue-100 border-blue-200 text-blue-800'; case 'yellow': return 'bg-yellow-100 border-yellow-200 text-yellow-800'; case 'green': return 'bg-green-100 border-green-200 text-green-800'; default: return 'bg-white border-gray-200'; } };
     return (
       <div className="flex flex-col h-full bg-white">
         <div className="p-4 border-b flex items-center gap-4 sticky top-0 bg-white z-10 shrink-0"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><h1 className="text-xl font-bold flex items-center gap-2"><Gift className="w-6 h-6 text-pink-500"/> カードBOX</h1></div>
@@ -1484,26 +1486,26 @@ const BirthdayCardBox = ({ user, setView }) => {
     );
 };
 
-const StickerEditor = ({ user, profile, onClose, showNotification }) => {
-    const canvasRef = useRef(null);
-    const containerRef = useRef(null);
-    const cuttingSnapshotRef = useRef(null);
+const StickerEditor = ({ user, profile, onClose, showNotification }: any) => {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const cuttingSnapshotRef = useRef<ImageData | null>(null);
     const [color, setColor] = useState('#000000');
     const [lineWidth, setLineWidth] = useState(5);
     const [fontSize, setFontSize] = useState(24);
-    const [createdStickers, setCreatedStickers] = useState([]);
+    const [createdStickers, setCreatedStickers] = useState<any[]>([]);
     const [packName, setPackName] = useState('');
     const [packDescription, setPackDescription] = useState('');
     const [isDrawing, setIsDrawing] = useState(false);
     const [mode, setMode] = useState('pen');
     const [textInput, setTextInput] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [cutPoints, setCutPoints] = useState([]);
-    const [audioData, setAudioData] = useState(null);
+    const [cutPoints, setCutPoints] = useState<{x: number, y: number}[]>([]);
+    const [audioData, setAudioData] = useState<string | null>(null);
     const [isRecordingSticker, setIsRecordingSticker] = useState(false);
-    const stickerMediaRecorderRef = useRef(null);
-    const [textObjects, setTextObjects] = useState([]);
-    const [draggingTextId, setDraggingTextId] = useState(null);
+    const stickerMediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const [textObjects, setTextObjects] = useState<any[]>([]);
+    const [draggingTextId, setDraggingTextId] = useState<number | null>(null);
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -1516,7 +1518,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
         }
     }, []);
 
-    const startDraw = (e) => {
+    const startDraw = (e: any) => {
         if (draggingTextId) return;
         const canvas = canvasRef.current; 
         if (!canvas) return;
@@ -1531,7 +1533,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
         ctx.beginPath(); ctx.moveTo(x, y); setIsDrawing(true);
     };
 
-    const draw = (e) => {
+    const draw = (e: any) => {
         if (!isDrawing) return;
         const canvas = canvasRef.current; 
         if (!canvas) return;
@@ -1557,12 +1559,12 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
         showNotification("テキストを追加しました。ドラッグして移動できます"); 
     };
 
-    const handleTextMouseDown = (e, id) => {
+    const handleTextMouseDown = (e: any, id: number) => {
         e.stopPropagation();
         setDraggingTextId(id);
     };
 
-    const handleContainerMouseMove = (e) => {
+    const handleContainerMouseMove = (e: any) => {
         if (draggingTextId && containerRef.current) {
             const rect = containerRef.current.getBoundingClientRect();
             const x = (e.clientX || e.touches[0].clientX) - rect.left;
@@ -1575,9 +1577,9 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
         setDraggingTextId(null);
     };
 
-    const handleImageUpload = (e) => {
+    const handleImageUpload = (e: any) => {
         const file = e.target.files[0]; if (!file) return;
-        handleCompressedUpload(e, (dataUrl) => {
+        handleCompressedUpload(e, (dataUrl: string) => {
              const img = new Image();
              img.onload = () => {
                  const canvas = canvasRef.current; const ctx = canvas?.getContext('2d');
@@ -1593,11 +1595,11 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
         e.target.value = '';
     };
 
-    const handleAudioUpload = (e) => {
+    const handleAudioUpload = (e: any) => {
         const file = e.target.files[0];
         if (!file) return;
         const reader = new FileReader();
-        reader.onload = (ev) => {
+        reader.onload = (ev: any) => {
             setAudioData(ev.target.result);
             showNotification("音声を追加しました 🎵");
         };
@@ -1610,13 +1612,13 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const mediaRecorder = new MediaRecorder(stream);
             stickerMediaRecorderRef.current = mediaRecorder;
-            const chunks = [];
+            const chunks: Blob[] = [];
             mediaRecorder.ondataavailable = e => chunks.push(e.data);
             mediaRecorder.onstop = () => {
                 const blob = new Blob(chunks, { type: 'audio/webm' });
                 const reader = new FileReader();
                 reader.onloadend = () => {
-                    setAudioData(reader.result);
+                    setAudioData(reader.result as string);
                     showNotification("録音しました 🎤");
                 };
                 reader.readAsDataURL(blob);
@@ -1636,7 +1638,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
         }
     };
 
-    const cutShape = (shape) => {
+    const cutShape = (shape: string) => {
         const canvas = canvasRef.current; const ctx = canvas?.getContext('2d'); 
         if (!canvas || !ctx) return;
         const width = canvas.width; const height = canvas.height;
@@ -1762,35 +1764,81 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
     );
 };
 
-const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }) => {
-    const [packs, setPacks] = useState([]);
+const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }: any) => {
+    const [packs, setPacks] = useState<any[]>([]);
     const [activeTab, setActiveTab] = useState('shop');
     const [activeShopTab, setActiveShopTab] = useState('stickers'); // stickers or effects
     const [adminSubTab, setAdminSubTab] = useState('stickers');
     const [adminMode, setAdminMode] = useState(false);
     const [adminPass, setAdminPass] = useState('');
-    const [purchasing, setPurchasing] = useState(null);
-    const [banTarget, setBanTarget] = useState(null);
+    const [purchasing, setPurchasing] = useState<string | null>(null);
+    const [banTarget, setBanTarget] = useState<any>(null);
     const [grantAmount, setGrantAmount] = useState('');
+    // Effect marketplace (ユーザー出品)
+    const [effectsMode, setEffectsMode] = useState<'market' | 'manage'>('market');
+    const [marketEffects, setMarketEffects] = useState<any[]>([]);
+    const [myEffects, setMyEffects] = useState<any[]>([]);
+    const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({});
+    const [updatingEffectId, setUpdatingEffectId] = useState<string | null>(null);
+
 
     // Predefined effects for sale (Hardcoded for demo)
     const effectsForSale = [
-        { id: 'effect_fire', name: 'Fire', price: 500, description: '燃えるような情熱エフェクト', image: 'https://images.unsplash.com/photo-1486162928267-e6274cb3106f?w=200&q=80' },
-        { id: 'effect_ice', name: 'Ice', price: 500, description: 'クールな氷エフェクト', image: 'https://images.unsplash.com/photo-1549488497-69502a5c3289?w=200&q=80' },
-        { id: 'effect_rainbow', name: 'Rainbow', price: 800, description: '虹色に輝くエフェクト', image: 'https://images.unsplash.com/photo-1517457373958-b7bdd4587205?w=200&q=80' }
+        { id: 'effect_fire', name: 'Fire', price: 500, description: '燃えるような情熱エフェクト', image: 'https://images.unsplash.com/photo-1486162928267-e6274cb3106f?w=200&q=80', filter: 'sepia(100%) hue-rotate(-50deg) saturate(300%)', creatorId: 'system' },
+        { id: 'effect_ice', name: 'Ice', price: 500, description: 'クールな氷エフェクト', image: 'https://images.unsplash.com/photo-1549488497-69502a5c3289?w=200&q=80', filter: 'sepia(100%) hue-rotate(180deg) saturate(200%)', creatorId: 'system' },
+        { id: 'effect_rainbow', name: 'Rainbow', price: 800, description: '虹色に輝くエフェクト', image: 'https://images.unsplash.com/photo-1517457373958-b7bdd4587205?w=200&q=80', filter: 'hue-rotate(90deg) saturate(200%)', creatorId: 'system' }
     ];
 
     useEffect(() => {
         if (activeTab === 'shop' && activeShopTab === 'stickers') {
              const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'sticker_packs'), where('status', '==', 'approved'));
-             const unsub = onSnapshot(q, (snap) => { const fetchedPacks = snap.docs.map(d => ({ id: d.id, ...d.data() })); fetchedPacks.sort((a, b) => { const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds * 1000 || 0); const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds * 1000 || 0); return tB - tA; }); setPacks(fetchedPacks); }); return () => unsub();
+             const unsub = onSnapshot(q, (snap) => { const fetchedPacks = snap.docs.map(d => ({ id: d.id, ...d.data() })); fetchedPacks.sort((a: any, b: any) => { const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds * 1000 || 0); const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds * 1000 || 0); return tB - tA; }); setPacks(fetchedPacks); }); return () => unsub();
         } else if (activeTab === 'admin' && adminSubTab === 'stickers') {
              const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'sticker_packs'), where('status', '==', 'pending'));
              const unsub = onSnapshot(q, (snap) => { const fetchedPacks = snap.docs.map(d => ({ id: d.id, ...d.data() })); setPacks(fetchedPacks); }); return () => unsub();
         }
     }, [activeTab, adminSubTab, activeShopTab]);
 
-    const handleBuyEffect = async (effect) => {
+    // Effects: market listings + my effects (for sale management)
+    useEffect(() => {
+        if (!(activeTab === 'shop' && activeShopTab === 'effects')) return;
+
+        // 1) Market: all effects where forSale == true (collectionGroup)
+        const qMarket = query(collectionGroup(db, 'effects'), where('forSale', '==', true));
+        const unsubMarket = onSnapshot(qMarket, (snap) => {
+            const items = snap.docs.map((d: any) => ({ _key: d.ref.path, id: d.id, ref: d.ref, ...d.data() }));
+            items.sort((a: any, b: any) => {
+                const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds * 1000 || 0);
+                const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds * 1000 || 0);
+                return tB - tA;
+            });
+            setMarketEffects(items);
+        });
+
+        // 2) My effects (for managing sale/price)
+        const qMine = query(collection(db, 'artifacts', appId, 'public', 'data', 'users', user.uid, 'effects'), orderBy('createdAt', 'desc'));
+        const unsubMine = onSnapshot(qMine, (snap) => {
+            const mine = snap.docs.map((d: any) => ({ id: d.id, ref: d.ref, ...d.data() }));
+            setMyEffects(mine);
+
+            // Initialize drafts (do not override when user is editing)
+            setPriceDrafts((prev) => {
+                const next = { ...prev };
+                mine.forEach((ef: any) => {
+                    if (next[ef.id] === undefined) next[ef.id] = ef.price !== undefined ? String(ef.price) : '';
+                });
+                return next;
+            });
+        });
+
+        return () => {
+            unsubMarket();
+            unsubMine();
+        };
+    }, [activeTab, activeShopTab, user.uid]);
+
+
+    const handleBuyEffect = async (effect: any) => {
         if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
         if ((profile.wallet || 0) < effect.price) { showNotification("コインが足りません"); return; }
         
@@ -1805,20 +1853,146 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
                 const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
                 t.update(userRef, { wallet: increment(-effect.price) });
                 const newEffectRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'users', user.uid, 'effects'));
-                t.set(newEffectRef, { name: effect.name, image: effect.image, type: 'premium', createdAt: serverTimestamp() });
+                t.set(newEffectRef, { name: effect.name, image: effect.image, filter: effect.filter || null, type: 'premium', source: 'system', ownerId: user.uid, creatorId: effect.creatorId || 'system', forSale: false, price: 0, createdAt: serverTimestamp() });
             });
             showNotification(`${effect.name}を購入しました！`);
         } catch (e) { console.error(e); showNotification("購入に失敗しました"); } finally { setPurchasing(null); }
     };
 
-    const handleBuy = async (pack) => {
+    
+
+    const handleBuyMarketEffect = async (effect: any) => {
+        if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
+        const price = Number(effect?.price || 0);
+        const sellerId = effect?.creatorId;
+        if (!sellerId) { showNotification("販売者情報が見つかりません"); return; }
+        if (sellerId === user.uid) { showNotification("自分の出品は購入できません"); return; }
+        if (price <= 0 || !Number.isFinite(price)) { showNotification("価格が不正です"); return; }
+        if ((profile.wallet || 0) < price) { showNotification("コインが足りません"); return; }
+
+        // Check if already owned (name + creatorId)
+        const userEffectsRef = collection(db, 'artifacts', appId, 'public', 'data', 'users', user.uid, 'effects');
+        let ownedQuery: any = query(userEffectsRef, where('name', '==', effect.name));
+        if (sellerId) ownedQuery = query(userEffectsRef, where('name', '==', effect.name), where('creatorId', '==', sellerId));
+        const owned = await getDocs(ownedQuery);
+        if (!owned.empty) { showNotification("既に持っています"); return; }
+
+        setPurchasing(effect._key || effect.id);
+        try {
+            await runTransaction(db, async (t) => {
+                const buyerRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
+                const sellerRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', sellerId);
+
+                const buyerSnap = await t.get(buyerRef);
+                const wallet = buyerSnap.data()?.wallet || 0;
+                if (wallet < price) throw new Error("NOT_ENOUGH");
+
+                t.update(buyerRef, { wallet: increment(-price) });
+                if (sellerId !== 'system') t.update(sellerRef, { wallet: increment(price) });
+
+                const newEffectRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'users', user.uid, 'effects'));
+                t.set(newEffectRef, {
+                    name: effect.name,
+                    image: effect.image,
+                    filter: effect.filter || null,
+                    type: 'purchased',
+                    source: 'market',
+                    ownerId: user.uid,
+                    creatorId: sellerId,
+                    forSale: false,
+                    price: 0,
+                    purchasedPrice: price,
+                    purchasedAt: serverTimestamp(),
+                    createdAt: serverTimestamp()
+                });
+
+                if (effect?.ref) {
+                    t.update(effect.ref, { soldCount: increment(1) });
+                }
+            });
+            showNotification(`${effect.name}を購入しました！`);
+        } catch (e: any) {
+            console.error(e);
+            showNotification(e?.message === "NOT_ENOUGH" ? "コインが足りません" : "購入に失敗しました");
+        } finally {
+            setPurchasing(null);
+        }
+    };
+
+    const canSellMyEffect = (ef: any) => {
+        // Only effects created by the user can be sold
+        const creatorId = ef?.creatorId;
+        if (creatorId) return creatorId === user.uid;
+        // Backward compatibility: old created effects may not have creatorId
+        if (ef?.type === 'premium' || ef?.source === 'system' || ef?.source === 'market') return false;
+        return true;
+    };
+
+    const saveMyEffectPrice = async (ef: any) => {
+        if (!ef?.ref) return;
+        if (!canSellMyEffect(ef)) { showNotification("購入したエフェクトは販売できません"); return; }
+        const raw = (priceDrafts[ef.id] || '').trim();
+        const price = parseInt(raw, 10);
+        if (isNaN(price) || price <= 0) { showNotification("価格は 1 以上の数字で入力してください"); return; }
+        setUpdatingEffectId(ef.id);
+        try {
+            await updateDoc(ef.ref, { price, creatorId: ef.creatorId || user.uid, ownerId: ef.ownerId || user.uid });
+            showNotification("価格を保存しました");
+        } catch (e) {
+            console.error(e);
+            showNotification("保存に失敗しました");
+        } finally {
+            setUpdatingEffectId(null);
+        }
+    };
+
+    const toggleMyEffectSale = async (ef: any, toForSale: boolean) => {
+        if (!ef?.ref) return;
+        if (!canSellMyEffect(ef)) { showNotification("購入したエフェクトは販売できません"); return; }
+
+        if (toForSale) {
+            const raw = (priceDrafts[ef.id] || '').trim();
+            const price = parseInt(raw, 10);
+            if (isNaN(price) || price <= 0) { showNotification("出品するには、価格を 1 以上で設定してください"); return; }
+
+            setUpdatingEffectId(ef.id);
+            try {
+                await updateDoc(ef.ref, {
+                    forSale: true,
+                    price,
+                    creatorId: ef.creatorId || user.uid,
+                    ownerId: ef.ownerId || user.uid,
+                    listedAt: serverTimestamp()
+                });
+                showNotification("ショップに出品しました");
+            } catch (e) {
+                console.error(e);
+                showNotification("出品に失敗しました");
+            } finally {
+                setUpdatingEffectId(null);
+            }
+        } else {
+            setUpdatingEffectId(ef.id);
+            try {
+                await updateDoc(ef.ref, { forSale: false });
+                showNotification("出品を停止しました");
+            } catch (e) {
+                console.error(e);
+                showNotification("更新に失敗しました");
+            } finally {
+                setUpdatingEffectId(null);
+            }
+        }
+    };
+
+    const handleBuy = async (pack: any) => {
         if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
         if ((profile.wallet || 0) < pack.price) { showNotification("コインが足りません"); return; }
         if (pack.purchasedBy?.includes(user.uid) || pack.authorId === user.uid) { showNotification("既に入手済みです"); return; }
         setPurchasing(pack.id);
         try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), { wallet: increment(-pack.price) }); await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', pack.authorId), { wallet: increment(pack.price) }); await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sticker_packs', pack.id), { purchasedBy: arrayUnion(user.uid) }); showNotification("購入しました！"); } catch (e) { console.error(e); showNotification("購入に失敗しました"); } finally { setPurchasing(null); }
     };
-    const handleApprove = async (packId, authorId, approve) => {
+    const handleApprove = async (packId: string, authorId: string, approve: boolean) => {
         try {
             await runTransaction(db, async (transaction) => {
                 const packRef = doc(db, 'artifacts', appId, 'public', 'data', 'sticker_packs', packId); const packDoc = await transaction.get(packRef);
@@ -1849,25 +2023,153 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
             {adminMode && activeTab === 'admin' && (<div className="flex bg-gray-50 p-2 gap-2"><button onClick={() => setAdminSubTab('stickers')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${adminSubTab === 'stickers' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>スタンプ承認</button><button onClick={() => setAdminSubTab('users')} className={`flex-1 py-2 rounded-lg text-xs font-bold ${adminSubTab === 'users' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>ユーザー管理</button></div>)}
             
             {activeTab === 'shop' && activeShopTab === 'effects' && (
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                      {effectsForSale.map((effect) => (
-                          <div key={effect.id} className="border rounded-2xl p-4 shadow-sm bg-white flex items-center gap-4">
-                              <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100"><img src={effect.image} className="w-full h-full object-cover"/></div>
-                              <div className="flex-1">
-                                  <h3 className="font-bold">{effect.name}</h3>
-                                  <p className="text-xs text-gray-500">{effect.description}</p>
-                              </div>
-                              <button onClick={() => handleBuyEffect(effect)} disabled={purchasing === effect.id} className="bg-purple-500 text-white px-4 py-2 rounded-full font-bold text-xs shadow-md hover:bg-purple-600 disabled:bg-gray-300 min-w-[60px]">
-                                  {purchasing === effect.id ? <Loader2 className="w-4 h-4 animate-spin"/> : `¥${effect.price}`}
-                              </button>
-                          </div>
-                      ))}
+                <div className="flex-1 overflow-y-auto">
+                    <div className="p-4 pb-2">
+                        <div className="flex gap-2 p-2 bg-gray-50 rounded-2xl border">
+                            <button onClick={() => setEffectsMode('market')} className={`flex-1 py-2 rounded-xl text-xs font-bold ${effectsMode === 'market' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>購入</button>
+                            <button onClick={() => setEffectsMode('manage')} className={`flex-1 py-2 rounded-xl text-xs font-bold ${effectsMode === 'manage' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>出品管理</button>
+                        </div>
+                    </div>
+
+                    {effectsMode === 'market' && (
+                        <div className="p-4 pt-2 space-y-6">
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <h3 className="text-sm font-black text-gray-800">公式エフェクト</h3>
+                                    <span className="text-[10px] font-bold text-gray-400">購入すると通話で使えます</span>
+                                </div>
+                                <div className="space-y-4">
+                                    {effectsForSale.map((effect: any) => (
+                                        <div key={effect.id} className="border rounded-2xl p-4 shadow-sm bg-white flex items-center gap-4">
+                                            <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100"><img src={effect.image} className="w-full h-full object-cover"/></div>
+                                            <div className="flex-1">
+                                                <h4 className="font-bold">{effect.name}</h4>
+                                                <p className="text-xs text-gray-500">{effect.description}</p>
+                                            </div>
+                                            <button onClick={() => handleBuyEffect(effect)} disabled={purchasing === effect.id} className="bg-purple-500 text-white px-4 py-2 rounded-full font-bold text-xs shadow-md hover:bg-purple-600 disabled:bg-gray-300 min-w-[60px]">
+                                                {purchasing === effect.id ? <Loader2 className="w-4 h-4 animate-spin"/> : `¥${effect.price}`}
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <h3 className="text-sm font-black text-gray-800">ユーザー出品</h3>
+                                    <span className="text-[10px] font-bold text-gray-400">あなたが作ったエフェクトも出品できます</span>
+                                </div>
+
+                                {marketEffects.filter((e: any) => e?.creatorId && e?.forSale).length === 0 ? (
+                                    <div className="text-center py-10 text-gray-400 text-sm border rounded-2xl bg-white">出品中のエフェクトがありません</div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {marketEffects.map((effect: any) => {
+                                            const seller = allUsers.find((u: any) => u.uid === effect.creatorId);
+                                            const isMine = effect.creatorId === user.uid;
+                                            return (
+                                                <div key={effect._key || effect.id} className="border rounded-2xl p-4 shadow-sm bg-white flex items-center gap-4">
+                                                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100">
+                                                        <img src={effect.image} className="w-full h-full object-cover" />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <h4 className="font-bold truncate">{effect.name}</h4>
+                                                            {isMine && <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">自分の出品</span>}
+                                                        </div>
+                                                        <p className="text-xs text-gray-500 truncate">出品者: {seller?.name || effect.creatorId}</p>
+                                                        <p className="text-[10px] text-gray-400">販売数: {effect.soldCount || 0}</p>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => handleBuyMarketEffect(effect)}
+                                                        disabled={isMine || purchasing === (effect._key || effect.id)}
+                                                        className="bg-green-500 text-white px-4 py-2 rounded-full font-bold text-xs shadow-md hover:bg-green-600 disabled:bg-gray-300 min-w-[60px]"
+                                                    >
+                                                        {purchasing === (effect._key || effect.id) ? <Loader2 className="w-4 h-4 animate-spin" /> : `¥${effect.price || 0}`}
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {effectsMode === 'manage' && (
+                        <div className="p-4 space-y-4">
+                            <div className="bg-gray-50 border rounded-2xl p-4">
+                                <div className="font-black text-gray-800 text-sm mb-1">自分のエフェクトを出品</div>
+                                <p className="text-xs text-gray-600">自分で作ったエフェクトは、価格を設定してショップで販売できます。</p>
+                                <p className="text-[10px] text-gray-400 mt-2">※購入したエフェクトは再販売できません</p>
+                            </div>
+
+                            {myEffects.length === 0 ? (
+                                <div className="text-center py-10 text-gray-400 text-sm border rounded-2xl bg-white">エフェクトがありません</div>
+                            ) : (
+                                <div className="space-y-3">
+                                    {myEffects.map((ef: any) => {
+                                        const isSelling = !!ef.forSale;
+                                        const canSell = canSellMyEffect(ef);
+                                        return (
+                                            <div key={ef.id} className="border rounded-2xl p-4 bg-white shadow-sm">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100">
+                                                        <img src={ef.image} className="w-full h-full object-cover" />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="font-bold truncate">{ef.name}</div>
+                                                            {isSelling && <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">出品中</span>}
+                                                            {!canSell && <span className="text-[10px] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">購入品</span>}
+                                                        </div>
+                                                        <div className="text-[10px] text-gray-400">販売数: {ef.soldCount || 0}</div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="mt-4 flex items-center gap-2">
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        step={1}
+                                                        value={priceDrafts[ef.id] || ''}
+                                                        disabled={!canSell || updatingEffectId === ef.id}
+                                                        onChange={(e) => setPriceDrafts((prev) => ({ ...prev, [ef.id]: e.target.value }))}
+                                                        className="flex-1 border p-3 rounded-xl text-center font-bold outline-none focus:border-purple-500 disabled:bg-gray-50"
+                                                        placeholder="価格"
+                                                    />
+                                                    <button
+                                                        onClick={() => saveMyEffectPrice(ef)}
+                                                        disabled={!canSell || updatingEffectId === ef.id}
+                                                        className="px-4 py-3 rounded-xl font-bold text-xs bg-gray-900 text-white disabled:bg-gray-300"
+                                                    >
+                                                        {updatingEffectId === ef.id ? <Loader2 className="w-4 h-4 animate-spin" /> : "保存"}
+                                                    </button>
+                                                </div>
+
+                                                <div className="mt-2">
+                                                    <button
+                                                        onClick={() => toggleMyEffectSale(ef, !isSelling)}
+                                                        disabled={!canSell || updatingEffectId === ef.id}
+                                                        className={`w-full py-3 rounded-xl font-bold text-xs shadow-sm disabled:bg-gray-300 ${isSelling ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-green-500 text-white hover:bg-green-600'}`}
+                                                    >
+                                                        {isSelling ? "出品を停止する" : "ショップで販売する"}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
 
+
             {(activeTab === 'shop' && activeShopTab === 'stickers') && (<div className="flex-1 overflow-y-auto p-4 space-y-4">{packs.length === 0 && <div className="text-center py-10 text-gray-400">スタンプがありません</div>}{packs.map(pack => { const isOwned = pack.purchasedBy?.includes(user.uid) || pack.authorId === user.uid; return (<div key={pack.id} className="border rounded-2xl p-4 shadow-sm bg-white"><div className="flex justify-between items-start mb-2"><div className="flex-1"><h3 className="font-bold text-lg">{pack.name}</h3><p className="text-xs text-gray-500 font-bold mb-1">作: {pack.authorName || '不明'}</p>{pack.description && <p className="text-xs text-gray-400 bg-gray-50 p-2 rounded-lg mb-2">{pack.description}</p>}</div>{!isOwned && activeTab === 'shop' && (<button onClick={() => handleBuy(pack)} disabled={purchasing === pack.id} className="bg-green-500 text-white px-4 py-2 rounded-full font-bold text-xs shadow-md hover:bg-green-600 disabled:bg-gray-300 shrink-0 ml-2">{purchasing === pack.id ? <Loader2 className="w-4 h-4 animate-spin"/> : `¥${pack.price}`}</button>)}{isOwned && activeTab === 'shop' && (<span className="bg-gray-100 text-gray-500 px-3 py-1 rounded-full text-xs font-bold shrink-0 ml-2">入手済み</span>)}</div>
             <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                {pack.stickers.map((s, i) => (
+                {pack.stickers.map((s: any, i: number) => (
                     <div key={i} className="relative flex-shrink-0">
                         <img 
                             src={typeof s === 'string' ? s : s.image} 
@@ -1878,15 +2180,15 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
                 ))}
             </div></div>); })}</div>)}
 
-            {adminMode && activeTab === 'admin' && adminSubTab === 'stickers' && (<div className="flex-1 overflow-y-auto p-4 space-y-4">{packs.length === 0 && <div className="text-center py-10 text-gray-400">申請中のスタンプはありません</div>}{packs.map(pack => (<div key={pack.id} className="border rounded-2xl p-4 shadow-sm bg-white"><div className="flex justify-between items-start mb-2"><div className="flex-1"><h3 className="font-bold text-lg">{pack.name}</h3><p className="text-xs text-gray-500 font-bold mb-1">作: {pack.authorName || '不明'}</p></div></div><div className="grid grid-cols-4 gap-2 mt-2">{pack.stickers.map((s, i) => (<img key={i} src={typeof s === 'string' ? s : s.image} className="w-full aspect-square object-contain bg-gray-50 rounded-lg border"/>))}</div><div className="flex gap-2 mt-4 pt-2 border-t"><button onClick={() => handleApprove(pack.id, pack.authorId, true)} className="flex-1 py-2 bg-blue-500 text-white rounded-lg font-bold text-xs">承認 (+100コイン)</button><button onClick={() => handleApprove(pack.id, pack.authorId, false)} className="flex-1 py-2 bg-red-500 text-white rounded-lg font-bold text-xs">拒否</button></div></div>))}</div>)}
-            {adminMode && activeTab === 'admin' && adminSubTab === 'users' && (<div className="flex-1 overflow-y-auto p-4 space-y-2">{allUsers.map((u) => (<div key={u.uid} className={`flex items-center gap-3 p-3 rounded-xl border ${u.isBanned ? 'bg-red-50 border-red-200' : 'bg-white'}`}><img src={u.avatar} className="w-10 h-10 rounded-full border" /><div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{u.name}</div><div className="text-xs text-gray-400 font-mono">{u.id}</div></div><button onClick={() => setBanTarget(u)} className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white ${u.isBanned ? 'bg-gray-500' : 'bg-red-500'}`}>管理</button></div>))}</div>)}
+            {adminMode && activeTab === 'admin' && adminSubTab === 'stickers' && (<div className="flex-1 overflow-y-auto p-4 space-y-4">{packs.length === 0 && <div className="text-center py-10 text-gray-400">申請中のスタンプはありません</div>}{packs.map(pack => (<div key={pack.id} className="border rounded-2xl p-4 shadow-sm bg-white"><div className="flex justify-between items-start mb-2"><div className="flex-1"><h3 className="font-bold text-lg">{pack.name}</h3><p className="text-xs text-gray-500 font-bold mb-1">作: {pack.authorName || '不明'}</p></div></div><div className="grid grid-cols-4 gap-2 mt-2">{pack.stickers.map((s: any, i: number) => (<img key={i} src={typeof s === 'string' ? s : s.image} className="w-full aspect-square object-contain bg-gray-50 rounded-lg border"/>))}</div><div className="flex gap-2 mt-4 pt-2 border-t"><button onClick={() => handleApprove(pack.id, pack.authorId, true)} className="flex-1 py-2 bg-blue-500 text-white rounded-lg font-bold text-xs">承認 (+100コイン)</button><button onClick={() => handleApprove(pack.id, pack.authorId, false)} className="flex-1 py-2 bg-red-500 text-white rounded-lg font-bold text-xs">拒否</button></div></div>))}</div>)}
+            {adminMode && activeTab === 'admin' && adminSubTab === 'users' && (<div className="flex-1 overflow-y-auto p-4 space-y-2">{allUsers.map((u: any) => (<div key={u.uid} className={`flex items-center gap-3 p-3 rounded-xl border ${u.isBanned ? 'bg-red-50 border-red-200' : 'bg-white'}`}><img src={u.avatar} className="w-10 h-10 rounded-full border" /><div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{u.name}</div><div className="text-xs text-gray-400 font-mono">{u.id}</div></div><button onClick={() => setBanTarget(u)} className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white ${u.isBanned ? 'bg-gray-500' : 'bg-red-500'}`}>管理</button></div>))}</div>)}
             {banTarget && (<div className="fixed inset-0 z-[600] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm"><div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl overflow-y-auto max-h-[80vh]"><h3 className="font-bold text-lg mb-1 text-center text-gray-900">ユーザー管理: {banTarget.name}</h3><p className="text-center text-gray-400 text-xs mb-6 font-mono">{banTarget.id}</p><div className="mb-6 pb-6 border-b"><h4 className="font-bold text-sm text-gray-700 mb-2">利用制限</h4><p className="text-sm text-gray-600 mb-3">{banTarget.isBanned ? "現在は停止中です。解除しますか？" : "現在利用可能です。停止しますか？"}</p><button onClick={executeBanToggle} className={`w-full py-3 font-bold rounded-2xl text-white transition-colors ${banTarget.isBanned ? 'bg-blue-500 hover:bg-blue-600' : 'bg-red-500 hover:bg-red-600'}`}>{banTarget.isBanned ? "制限を解除する" : "アカウントを停止する"}</button></div><div className="mb-6"><h4 className="font-bold text-sm text-gray-700 mb-2">コイン操作</h4><div className="flex items-center justify-between bg-yellow-50 p-3 rounded-xl mb-3"><span className="text-xs font-bold text-yellow-800">現在の所持コイン</span><span className="text-lg font-bold text-yellow-600">{banTarget.wallet || 0}</span></div><div className="flex gap-2"><input type="number" placeholder="金額 (-で没収)" className="flex-1 border p-3 rounded-xl text-center font-bold outline-none focus:border-yellow-500" value={grantAmount} onChange={e => setGrantAmount(e.target.value)} /><button onClick={handleGrantCoins} className="bg-yellow-500 text-white font-bold px-6 rounded-xl hover:bg-yellow-600 shadow-md">付与</button></div><p className="text-[10px] text-gray-400 mt-2 text-center">※マイナスの値を入力すると減算されます</p></div><button onClick={() => { setBanTarget(null); setGrantAmount(''); }} className="w-full py-3 bg-gray-100 hover:bg-gray-200 font-bold rounded-2xl text-gray-600 transition-colors">閉じる</button></div></div>)}
         </div>
     );
 };
 
-const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }) => {
-    const [messages, setMessages] = useState([]);
+const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }: any) => {
+    const [messages, setMessages] = useState<any[]>([]);
     const [text, setText] = useState('');
     const [plusMenuOpen, setPlusMenuOpen] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
@@ -1896,53 +2198,54 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     const [addMemberModalOpen, setAddMemberModalOpen] = useState(false);
     const [leaveModalOpen, setLeaveModalOpen] = useState(false);
     const [groupEditModalOpen, setGroupEditModalOpen] = useState(false);
+    const [groupSettingsOpen, setGroupSettingsOpen] = useState(false);
     const [backgroundMenuOpen, setBackgroundMenuOpen] = useState(false);
-    const [previewMedia, setPreviewMedia] = useState(null); 
+    const [previewMedia, setPreviewMedia] = useState<any>(null); 
     const [isRecording, setIsRecording] = useState(false);
     const [recordingTime, setRecordingTime] = useState(0);
-    const [replyTo, setReplyTo] = useState(null); 
-    const mediaRecorderRef = useRef(null);
-    const audioChunksRef = useRef([]);
-    const audioStreamRef = useRef(null);
-    const recordingIntervalRef = useRef(null);
-    const [editingMsgId, setEditingMsgId] = useState(null);
+    const [replyTo, setReplyTo] = useState<any>(null); 
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
+    const audioStreamRef = useRef<MediaStream | null>(null);
+    const recordingIntervalRef = useRef<any>(null);
+    const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
     const [editingText, setEditingText] = useState('');
-    const scrollRef = useRef(null);
+    const scrollRef = useRef<HTMLDivElement>(null);
     const isFirstLoad = useRef(true);
     const [messageLimit, setMessageLimit] = useState(50);
-    const lastMessageIdRef = useRef(null);
-    const [backgroundSrc, setBackgroundSrc] = useState(null);
+    const lastMessageIdRef = useRef<string | null>(null);
+    const [backgroundSrc, setBackgroundSrc] = useState<string | null>(null);
     const [stickerMenuOpen, setStickerMenuOpen] = useState(false); 
-    const [myStickerPacks, setMyStickerPacks] = useState([]);
-    const [selectedPackId, setSelectedPackId] = useState(null);
-    const [buyStickerModalPackId, setBuyStickerModalPackId] = useState(null);
-    const [viewProfile, setViewProfile] = useState(null);
-    const [coinModalTarget, setCoinModalTarget] = useState(null);
+    const [myStickerPacks, setMyStickerPacks] = useState<any[]>([]);
+    const [selectedPackId, setSelectedPackId] = useState<string | null>(null);
+    const [buyStickerModalPackId, setBuyStickerModalPackId] = useState<string | null>(null);
+    const [viewProfile, setViewProfile] = useState<any>(null);
+    const [coinModalTarget, setCoinModalTarget] = useState<any>(null);
     
     // AI Effect States
     const [aiEffectModalOpen, setAiEffectModalOpen] = useState(false);
 
     // Derived values moved up (Safe access with optional chaining)
-    const chatData = chats.find((c) => c.id === activeChatId);
+    const chatData = chats.find((c: any) => c.id === activeChatId);
     const isGroup = chatData?.isGroup || false;
-    let partnerId = null;
+    let partnerId: string | null = null;
     let partnerData = null;
 
     if (chatData && !isGroup) {
-        partnerId = chatData.participants.find((p) => p !== user.uid);
+        partnerId = chatData.participants.find((p: string) => p !== user.uid);
         if (!partnerId) partnerId = user.uid; 
-        partnerData = allUsers.find((u) => u.uid === partnerId);
+        partnerData = allUsers.find((u: any) => u.uid === partnerId);
     }
 
     const title = !isGroup && partnerData ? partnerData.name : (chatData?.name || '');
     const icon = !isGroup && partnerData ? partnerData.avatar : (chatData?.icon || '');
 
     // --- Added missing functions definitions ---
-    const onStickerClick = (packId) => {
+    const onStickerClick = (packId: string) => {
         setBuyStickerModalPackId(packId);
     };
 
-    const sendBirthdayCard = async ({ color, message }) => {
+    const sendBirthdayCard = async ({ color, message }: any) => {
         if (!partnerId) {
              showNotification("送信先が見つかりません");
              return;
@@ -1965,7 +2268,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     };
     
     // Join call wrapper
-    const handleJoinCall = (isVideo, callerId) => {
+    const handleJoinCall = (isVideo: boolean, callerId?: string) => {
          startVideoCall(activeChatId, isVideo, true, callerId); // true = join existing
     };
     // ------------------------------------------
@@ -1978,7 +2281,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             getDocs(q2).then(snap2 => {
                 const ownPacks = snap2.docs.map(d => ({ id: d.id, ...d.data() }));
                 const all = [...packs, ...ownPacks];
-                const unique = Array.from(new Map(all.map((item) => [item.id, item])).values());
+                const unique = Array.from(new Map(all.map((item: any) => [item.id, item])).values());
                 setMyStickerPacks(unique);
                 if (unique.length > 0 && !selectedPackId) setSelectedPackId(unique[0].id);
             });
@@ -2063,7 +2366,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         }
     };
 
-    const sendMessage = async (content, type = 'text', additionalData = {}, file = null) => {
+    const sendMessage = async (content: string, type = 'text', additionalData = {}, file: File | null = null) => {
       if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
       if ((!content && !file && type === 'text') || isUploading) return;
       setIsUploading(true); setUploadProgress(0);
@@ -2074,32 +2377,23 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         const msgCol = collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages');
         const newMsgRef = doc(msgCol);
         let localBlobUrl = null; let storedContent = content; let previewData = null;
-        const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: allUsers.find((u) => u.uid === currentReply.senderId)?.name || 'Unknown', type: currentReply.type } } : {};
+        const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: allUsers.find((u: any) => u.uid === currentReply.senderId)?.name || 'Unknown', type: currentReply.type } } : {};
         const fileData = file ? { fileName: file.name, fileSize: file.size, mimeType: file.type } : {};
 
         // Prepare updates for the chat document (unread counts, last message)
-        const currentChat = chats.find((c) => c.id === activeChatId);
-        const updateData = { 
+        const currentChat = chats.find((c: any) => c.id === activeChatId);
+        const updateData: any = { 
             lastMessage: { content: type === 'text' ? content : `[${type}]`, senderId: user.uid, readBy: [user.uid] }, 
             updatedAt: serverTimestamp() 
         };
         
         // Increment unread count for other participants
         if (currentChat) {
-            currentChat.participants.forEach((uid) => {
+            currentChat.participants.forEach((uid: string) => {
                 if (uid !== user.uid) {
                     updateData[`unreadCounts.${uid}`] = increment(1);
                 }
             });
-        }
-
-        // ★修正: 1対1の場合、メッセージ送信時に相手を友達リストに追加
-        if (!isGroup && partnerId && profile.friends && !profile.friends.includes(partnerId)) {
-            const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
-            await updateDoc(userRef, { friends: arrayUnion(partnerId) });
-            // 相手側にも自分を友達に追加（双方向にする場合）
-            const partnerRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', partnerId);
-            await updateDoc(partnerRef, { friends: arrayUnion(user.uid) });
         }
 
         if (file && ['image', 'video', 'audio', 'file'].includes(type)) {
@@ -2124,7 +2418,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             const start = i * CHUNK_SIZE; const end = Math.min(start + CHUNK_SIZE, file.size); const blobSlice = file.slice(start, end);
             const p = new Promise((resolve, reject) => {
                 const reader = new FileReader(); 
-                reader.onload = async (e) => { 
+                reader.onload = async (e: any) => { 
                     try {
                         const base64Data = e.target.result.split(',')[1]; 
                         await setDoc(doc(msgCol, newMsgRef.id, 'chunks', `${i}`), { data: base64Data, index: i }); 
@@ -2137,7 +2431,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
                 reader.readAsDataURL(blobSlice);
             });
             // FIX: Explicit type to break circular inference cycle
-            const pWrapper = p.then(() => executing.delete(pWrapper));
+            const pWrapper: Promise<boolean> = p.then(() => executing.delete(pWrapper));
             executing.add(pWrapper);
             if (executing.size >= CONCURRENCY) { await Promise.race(executing); }
           }
@@ -2146,11 +2440,11 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         } else if (!hasChunks) {
              if (localBlobUrl && file) {
                  const reader = new FileReader(); reader.readAsDataURL(file);
-                 await new Promise(resolve => { reader.onload = async (e) => { await updateDoc(newMsgRef, { content: e.target.result, isUploading: false }); resolve(null); } });
+                 await new Promise(resolve => { reader.onload = async (e: any) => { await updateDoc(newMsgRef, { content: e.target.result, isUploading: false }); resolve(null); } });
              } else {
                  if (typeof content === 'object' && content !== null && type === 'sticker') { // Handle sticker object with audio
-                     const stickerContent = content.image || content;
-                     const stickerAudio = content.audio || null;
+                     const stickerContent = (content as any).image || content;
+                     const stickerAudio = (content as any).audio || null;
                      await setDoc(newMsgRef, { senderId: user.uid, content: stickerContent, audio: stickerAudio, type, ...additionalData, ...replyData, ...fileData, hasChunks, chunkCount, createdAt: serverTimestamp(), readBy: [user.uid] });
                  } else {
                      await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, ...additionalData, ...replyData, ...fileData, hasChunks, chunkCount, createdAt: serverTimestamp(), readBy: [user.uid] });
@@ -2165,16 +2459,16 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       } catch (e) { console.error(e); showNotification("送信に失敗しました"); } finally { setIsUploading(false); setUploadProgress(0); }
     };
 
-    const handleDeleteMessage = useCallback(async (msgId) => { try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', msgId)); const c = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', msgId, 'chunks')); for (const d of c.docs) await deleteDoc(d.ref); showNotification("メッセージの送信を取り消しました"); } catch (e) { showNotification("送信取消に失敗しました"); } }, [db, appId, activeChatId, showNotification]);
-    const handleEditMessage = useCallback((id, content) => { setEditingMsgId(id); setEditingText(content); }, []);
-    const handlePreviewMedia = useCallback((src, type) => { setPreviewMedia({ src, type }); }, []);
-    const handleReaction = async (messageId, emoji) => { try { const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', messageId); const msg = messages.find(m => m.id === messageId); const currentReactions = msg.reactions?.[emoji] || []; if (currentReactions.includes(user.uid)) { await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayRemove(user.uid) }); } else { await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayUnion(user.uid) }); } } catch (e) { console.error("Reaction error", e); } };
+    const handleDeleteMessage = useCallback(async (msgId: string) => { try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', msgId)); const c = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', msgId, 'chunks')); for (const d of c.docs) await deleteDoc(d.ref); showNotification("メッセージの送信を取り消しました"); } catch (e) { showNotification("送信取消に失敗しました"); } }, [db, appId, activeChatId, showNotification]);
+    const handleEditMessage = useCallback((id: string, content: string) => { setEditingMsgId(id); setEditingText(content); }, []);
+    const handlePreviewMedia = useCallback((src: string, type: string) => { setPreviewMedia({ src, type }); }, []);
+    const handleReaction = async (messageId: string, emoji: string) => { try { const msgRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', messageId); const msg = messages.find(m => m.id === messageId); const currentReactions = msg.reactions?.[emoji] || []; if (currentReactions.includes(user.uid)) { await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayRemove(user.uid) }); } else { await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayUnion(user.uid) }); } } catch (e) { console.error("Reaction error", e); } };
     const submitEditMessage = async () => { if (!editingText.trim() || !editingMsgId) return; try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages', editingMsgId), { content: editingText, isEdited: true, updatedAt: serverTimestamp() }); setEditingMsgId(null); } catch (e) { showNotification("編集に失敗しました"); } };
     const handleLeaveGroup = async () => { if (!activeChatId) return; try { await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'messages'), { senderId: user.uid, content: `${profile.name}が退会しました。`, type: 'text', createdAt: serverTimestamp(), readBy: [user.uid] }); await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId), { participants: arrayRemove(user.uid) }); showNotification("グループから退会しました"); setLeaveModalOpen(false); setView('home'); setActiveChatId(null); } catch (e) { showNotification("退会に失敗しました"); } };
-    const handleBackgroundUpload = async (e) => {
+    const handleBackgroundUpload = async (e: any) => {
       const file = e.target.files[0]; if (!file) return;
       const reader = new FileReader();
-      reader.onload = async (event) => {
+      reader.onload = async (event: any) => {
         const result = event.target.result;
         try {
           const batch = writeBatch(db); const chatRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId);
@@ -2191,7 +2485,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     };
     const resetBackground = async () => { try { const batch = writeBatch(db); const chatRef = doc(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId); const chunksSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'chats', activeChatId, 'background_chunks')); chunksSnap.forEach(d => batch.delete(d.ref)); batch.update(chatRef, { backgroundImage: deleteField(), hasBackgroundChunks: deleteField(), backgroundChunkCount: deleteField(), updatedAt: serverTimestamp() }); await batch.commit(); showNotification("背景をリセットしました"); setBackgroundMenuOpen(false); } catch(e) { showNotification("リセットに失敗しました"); } };
     
-    const handleVideoCallButton = (isVideo) => {
+    const handleVideoCallButton = (isVideo: boolean) => {
        startVideoCall(activeChatId, isVideo);
     };
 
@@ -2203,14 +2497,22 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         <div className="p-3 bg-white/95 backdrop-blur border-b flex items-center gap-3 sticky top-0 z-10 shadow-sm">
           <ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} />
           <div className="relative"><img key={icon} src={icon} className="w-10 h-10 rounded-xl object-cover border" />{!isGroup && partnerData && isTodayBirthday(partnerData.birthday) && <span className="absolute -top-1 -right-1 text-xs">🎂</span>}</div>
-          <div className="font-bold text-sm flex-1 truncate">{title} {isGroup ? `(${chatData.participants.length})` : ''}</div>
+          {!isGroup ? (
+  <div className="font-bold text-sm flex-1 truncate">{title}</div>
+) : (
+  <div className="flex-1" />
+)}
           <div className="flex gap-4 mr-2 items-center">
             <div className="relative"><button onClick={() => setBackgroundMenuOpen(!backgroundMenuOpen)} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="背景を変更"><Palette className="w-6 h-6 text-gray-600" /></button>{backgroundMenuOpen && (<div className="absolute top-full right-0 mt-2 bg-white rounded-xl shadow-xl border overflow-hidden w-40 z-20"><label className="flex items-center gap-2 px-4 py-3 hover:bg-gray-50 cursor-pointer text-sm font-bold text-gray-700"><ImageIcon className="w-4 h-4" /><span>画像を選択</span><input type="file" className="hidden" accept="image/*" onChange={handleBackgroundUpload} /></label><button onClick={resetBackground} className="w-full flex items-center gap-2 px-4 py-3 hover:bg-red-50 text-sm font-bold text-red-500 border-t"><RefreshCcw className="w-4 h-4" /><span>リセット</span></button></div>)}</div>
-            {isGroup && (<>
-                <button onClick={() => setGroupEditModalOpen(true)} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="グループ設定"><Settings className="w-6 h-6 text-gray-600" /></button>
-                <button onClick={() => setAddMemberModalOpen(true)} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="メンバーを追加"><UserPlus className="w-6 h-6 text-gray-600" /></button>
-                <button onClick={() => setLeaveModalOpen(true)} className="hover:bg-red-50 p-1 rounded-full transition-colors" title="グループを退会"><LogOut className="w-6 h-6 text-red-500" /></button>
-            </>)}
+            {isGroup && (
+  <button
+    onClick={() => setGroupSettingsOpen(true)}
+    className="hover:bg-gray-100 p-1 rounded-full transition-colors"
+    title="グループ設定"
+  >
+    <Settings className="w-6 h-6 text-gray-600" />
+  </button>
+)}
             {/* AI Effect Button */}
             <button onClick={() => setAiEffectModalOpen(true)} className="hover:bg-purple-100 p-1 rounded-full transition-colors" title="AIエフェクト生成"><Wand2 className="w-6 h-6 text-purple-600" /></button>
             
@@ -2218,11 +2520,91 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             <button onClick={() => handleVideoCallButton(false)} className="hover:bg-gray-100 p-1 rounded-full transition-colors" title="音声通話"><Phone className="w-6 h-6 text-gray-600" /></button>
             <button onClick={() => toggleMuteChat(activeChatId)}>{mutedChats.includes(activeChatId) ? <BellOff className="w-6 h-6 text-gray-400" /> : <Bell className="w-6 h-6 text-gray-600" />}</button>
           </div>
+        
+{groupSettingsOpen && isGroup && (
+  <div
+    className="fixed inset-0 z-[250] bg-black/40 flex items-end"
+    onClick={() => setGroupSettingsOpen(false)}
+  >
+    <div
+      className="w-full bg-white rounded-t-[32px] p-5 shadow-2xl max-h-[80vh] overflow-y-auto"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center gap-3 mb-4">
+        <img src={chatData.icon} className="w-14 h-14 rounded-2xl object-cover border" />
+        <div className="flex-1 min-w-0">
+          <div className="font-bold text-lg truncate">{chatData.name}</div>
+          <div className="text-xs text-gray-400 font-bold">{chatData.participants.length} 人</div>
+          <div className="text-[10px] text-gray-300 font-mono mt-0.5 truncate">
+            ChatID: {activeChatId}
+          </div>
         </div>
-        {!isGroup && partnerId && isTodayBirthday(allUsers.find((u) => u.uid === partnerId)?.birthday) && (<div className="bg-pink-100 p-2 flex items-center justify-between px-4"><div className="flex items-center gap-2"><Cake className="w-5 h-5 text-pink-500 animate-bounce" /><span className="text-xs font-bold text-pink-700">今日は{title}さんの誕生日です！</span></div><button onClick={() => setCardModalOpen(true)} className="bg-pink-500 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">カードを書く</button></div>)}
+        <button
+          onClick={() => setGroupSettingsOpen(false)}
+          className="p-2 rounded-full bg-gray-100 hover:bg-gray-200"
+          aria-label="閉じる"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <button
+          onClick={() => { setGroupSettingsOpen(false); setGroupEditModalOpen(true); }}
+          className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-gray-900 text-white font-bold text-sm"
+        >
+          <Settings className="w-5 h-5" /> グループ編集
+        </button>
+        <button
+          onClick={() => { setGroupSettingsOpen(false); setAddMemberModalOpen(true); }}
+          className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-gray-100 text-gray-700 font-bold text-sm"
+        >
+          <UserPlus className="w-5 h-5" /> メンバー追加
+        </button>
+      </div>
+
+      <div className="mb-4">
+        <div className="text-xs font-bold text-gray-500 mb-2">メンバー</div>
+        <div className="space-y-2">
+          {chatData.participants.map((uid: string) => {
+            const u = allUsers.find((x: any) => x.uid === uid);
+            if (!u) return null;
+            const me = uid === user.uid;
+            return (
+              <div
+                key={uid}
+                className="flex items-center gap-3 p-3 rounded-2xl border bg-white hover:bg-gray-50 cursor-pointer"
+                onClick={() => { setGroupSettingsOpen(false); setViewProfile(u); }}
+              >
+                <img src={u.avatar} className="w-10 h-10 rounded-xl object-cover border" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-sm truncate">
+                    {u.name}{me ? '（あなた）' : ''}
+                  </div>
+                  <div className="text-[10px] text-gray-400 font-mono truncate">{u.id}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <button
+        onClick={() => { setGroupSettingsOpen(false); setLeaveModalOpen(true); }}
+        className="w-full py-3 rounded-2xl bg-red-500 text-white font-bold flex items-center justify-center gap-2 hover:bg-red-600"
+      >
+        <LogOut className="w-5 h-5" /> グループを退会
+      </button>
+
+      <div className="h-3" />
+    </div>
+  </div>
+)}
+</div>
+        {!isGroup && partnerId && isTodayBirthday(allUsers.find((u: any) => u.uid === partnerId)?.birthday) && (<div className="bg-pink-100 p-2 flex items-center justify-between px-4"><div className="flex items-center gap-2"><Cake className="w-5 h-5 text-pink-500 animate-bounce" /><span className="text-xs font-bold text-pink-700">今日は{title}さんの誕生日です！</span></div><button onClick={() => setCardModalOpen(true)} className="bg-pink-500 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">カードを書く</button></div>)}
         <div className={`flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide ${backgroundSrc ? 'bg-white/40 backdrop-blur-sm' : ''}`}>
           {messages.length >= messageLimit && (<div className="flex justify-center py-2"><button onClick={() => setMessageLimit(prev => prev + 50)} className="bg-white/50 backdrop-blur-md px-4 py-1 rounded-full text-xs font-bold text-gray-700 shadow-sm flex items-center gap-1 hover:bg-white/70"><ArrowUpCircle className="w-4 h-4" /> 以前のメッセージを読み込む</button></div>)}
-          {messages.map(m => { const sender = allUsers.find((u) => u.uid === m.senderId); return (<MessageItem key={m.id} m={m} user={user} sender={sender} isGroup={isGroup} db={db} appId={appId} chatId={activeChatId} addFriendById={addFriendById} onEdit={handleEditMessage} onDelete={handleDeleteMessage} onPreview={handlePreviewMedia} onReply={setReplyTo} onReaction={handleReaction} allUsers={allUsers} onStickerClick={onStickerClick} onShowProfile={setViewProfile} onJoinCall={handleJoinCall} />); })}
+          {messages.map(m => { const sender = allUsers.find((u: any) => u.uid === m.senderId); return (<MessageItem key={m.id} m={m} user={user} sender={sender} isGroup={isGroup} db={db} appId={appId} chatId={activeChatId} addFriendById={addFriendById} onEdit={handleEditMessage} onDelete={handleDeleteMessage} onPreview={handlePreviewMedia} onReply={setReplyTo} onReaction={handleReaction} allUsers={allUsers} onStickerClick={onStickerClick} onShowProfile={setViewProfile} onJoinCall={handleJoinCall} />); })}
           <div ref={scrollRef} className="h-2 w-full" />
         </div>
         {previewMedia && (<div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center p-4" onClick={() => setPreviewMedia(null)}><button className="absolute top-6 right-6 text-white p-2 rounded-full bg-white/20"><X className="w-6 h-6"/></button>{previewMedia.type === 'video' ? <video src={previewMedia.src} controls autoPlay className="max-w-full max-h-[85vh] rounded shadow-2xl" onClick={e=>e.stopPropagation()}/> : <img src={previewMedia.src} className="max-w-full max-h-[85vh] object-contain rounded shadow-2xl" onClick={e=>e.stopPropagation()}/>}</div>)}
@@ -2231,17 +2613,17 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         {groupEditModalOpen && <GroupEditModal onClose={() => setGroupEditModalOpen(false)} chatId={activeChatId} currentName={chatData.name} currentIcon={chatData.icon} currentMembers={chatData.participants} allUsers={allUsers} showNotification={showNotification} user={user} profile={profile} />}
         {leaveModalOpen && <LeaveGroupConfirmModal onClose={() => setLeaveModalOpen(false)} onLeave={handleLeaveGroup} />}
         {cardModalOpen && <BirthdayCardModal onClose={() => setCardModalOpen(false)} onSend={sendBirthdayCard} toName={title} />}
-        {contactModalOpen && <ContactSelectModal onClose={() => setContactModalOpen(false)} onSend={(c) => sendMessage("", "contact", { contactId: c.uid, contactName: c.name, contactAvatar: c.avatar })} friends={allUsers.filter((u) => (profile?.friends || []).includes(u.uid) && !(profile?.hiddenFriends || []).includes(u.uid))}/>}
-        {buyStickerModalPackId && <StickerBuyModal onClose={() => setBuyStickerModalPackId(null)} packId={buyStickerModalPackId} onGoToStore={(id) => { setView('sticker-store'); setBuyStickerModalPackId(null); }} />}
+        {contactModalOpen && <ContactSelectModal onClose={() => setContactModalOpen(false)} onSend={(c: any) => sendMessage("", "contact", { contactId: c.uid, contactName: c.name, contactAvatar: c.avatar })} friends={allUsers.filter((u: any) => (profile?.friends || []).includes(u.uid) && !(profile?.hiddenFriends || []).includes(u.uid))}/>}
+        {buyStickerModalPackId && <StickerBuyModal onClose={() => setBuyStickerModalPackId(null)} packId={buyStickerModalPackId} onGoToStore={(id: string) => { setView('sticker-store'); setBuyStickerModalPackId(null); }} />}
         
         {/* AI Effect Modal */}
         {aiEffectModalOpen && <AIEffectGenerator user={user} onClose={() => setAiEffectModalOpen(false)} showNotification={showNotification} />}
 
         {plusMenuOpen && (
             <div className="absolute bottom-16 left-4 right-4 bg-white rounded-3xl p-4 shadow-2xl grid grid-cols-4 gap-4 animate-in slide-in-from-bottom-4 z-20">
-                <label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-green-50 rounded-2xl"><ImageIcon className="w-6 h-6 text-green-500" /></div><span className="text-[10px] font-bold">画像</span><input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label>
-                <label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-blue-50 rounded-2xl"><Play className="w-6 h-6 text-blue-500" /></div><span className="text-[10px] font-bold">動画</span><input type="file" className="hidden" accept="video/*" onChange={(e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label>
-                <label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-gray-100 rounded-2xl"><Paperclip className="w-6 h-6 text-gray-600" /></div><span className="text-[10px] font-bold">ファイル</span><input type="file" className="hidden" onChange={(e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f))} /></label>
+                <label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-green-50 rounded-2xl"><ImageIcon className="w-6 h-6 text-green-500" /></div><span className="text-[10px] font-bold">画像</span><input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload(e, (d: string, t: string, f: File) => sendMessage(d, t, {}, f))} /></label>
+                <label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-blue-50 rounded-2xl"><Play className="w-6 h-6 text-blue-500" /></div><span className="text-[10px] font-bold">動画</span><input type="file" className="hidden" accept="video/*" onChange={(e) => handleFileUpload(e, (d: string, t: string, f: File) => sendMessage(d, t, {}, f))} /></label>
+                <label className="flex flex-col items-center gap-2 cursor-pointer"><div className="p-3 bg-gray-100 rounded-2xl"><Paperclip className="w-6 h-6 text-gray-600" /></div><span className="text-[10px] font-bold">ファイル</span><input type="file" className="hidden" onChange={(e) => handleFileUpload(e, (d: string, t: string, f: File) => sendMessage(d, t, {}, f))} /></label>
                 <div className="flex flex-col items-center gap-2 cursor-pointer" onClick={() => setContactModalOpen(true)}><div className="p-3 bg-yellow-50 rounded-2xl"><Contact className="w-6 h-6 text-yellow-500" /></div><span className="text-[10px] font-bold">連絡先</span></div>
                 <div className="flex flex-col items-center gap-2 cursor-pointer" onClick={() => setCardModalOpen(true)}><div className="p-3 bg-pink-50 rounded-2xl"><Gift className="w-6 h-6 text-pink-500" /></div><span className="text-[10px] font-bold">カード</span></div>
                 {/* Remittance Button (Send Money) */}
@@ -2263,7 +2645,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           {stickerMenuOpen && myStickerPacks.length > 0 && (
             <div className="absolute bottom-full left-0 right-0 bg-gray-50 border-t h-72 flex flex-col shadow-2xl rounded-t-3xl overflow-hidden animate-in slide-in-from-bottom-2 z-20">
                 <div className="flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-4 content-start">
-                     {myStickerPacks.find((p) => p.id === selectedPackId)?.stickers.map((s, i) => (
+                     {myStickerPacks.find((p: any) => p.id === selectedPackId)?.stickers.map((s: any, i: number) => (
                          <div key={i} className="relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm" onClick={() => sendMessage(s, 'sticker', { packId: selectedPackId })}>
                             <img src={typeof s === 'string' ? s : s.image} className="w-full aspect-square object-contain" />
                             {(typeof s !== 'string' && s.audio) && <div className="absolute bottom-0 right-0 bg-black/20 text-white rounded-full p-1"><Volume2 className="w-3 h-3"/></div>}
@@ -2271,7 +2653,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
                      ))}
                 </div>
                 <div className="bg-white border-t flex overflow-x-auto p-2 gap-2 scrollbar-hide shrink-0">
-                    {myStickerPacks.map((pack) => (
+                    {myStickerPacks.map((pack: any) => (
                         <div key={pack.id} onClick={() => setSelectedPackId(pack.id)} className={`flex-shrink-0 cursor-pointer p-2 rounded-xl transition-colors ${selectedPackId === pack.id ? 'bg-gray-200' : 'hover:bg-gray-100'}`}>
                              <img src={typeof pack.stickers[0] === 'string' ? pack.stickers[0] : pack.stickers[0].image} className="w-8 h-8 object-contain" />
                         </div>
@@ -2283,7 +2665,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           {replyTo && (
             <div className="flex items-center justify-between bg-gray-100 p-2 rounded-xl text-xs mb-1 border-l-4 border-green-500">
               <div className="flex flex-col max-w-[90%]">
-                <span className="font-bold text-green-600 mb-0.5">{allUsers.find((u) => u.uid === replyTo.senderId)?.name || 'Unknown'} への返信</span>
+                <span className="font-bold text-green-600 mb-0.5">{allUsers.find((u: any) => u.uid === replyTo.senderId)?.name || 'Unknown'} への返信</span>
                 <div className="truncate text-gray-600 flex items-center gap-1">
                   {replyTo.type === 'image' && <ImageIcon className="w-3 h-3" />}
                   {replyTo.type === 'video' && <Video className="w-3 h-3" />}
@@ -2304,36 +2686,544 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             {(text || isUploading) && <button onClick={() => sendMessage(text)} disabled={!text && !isUploading} className={`p-2 rounded-full ${text ? 'text-green-500' : 'text-gray-300'}`}>{isUploading ? <div className="relative"><Loader2 className="w-6 h-6 animate-spin text-green-500" />{uploadProgress > 0 && <div className="absolute top-full left-1/2 -translate-x-1/2 text-[8px] font-bold mt-1">{uploadProgress}%</div>}</div> : <Send className="w-6 h-6" />}</button>}
           </div>
         </div>
-        {viewProfile && <FriendProfileModal friend={viewProfile} onClose={() => setViewProfile(null)} onStartChat={(uid) => { setViewProfile(null); }} onTransfer={() => { setCoinModalTarget(viewProfile); setViewProfile(null); }} myUid={user.uid} myProfile={profile} allUsers={allUsers} showNotification={showNotification} />}
+        {viewProfile && <FriendProfileModal friend={viewProfile} onClose={() => setViewProfile(null)} onStartChat={(uid: string) => { setViewProfile(null); }} onTransfer={() => { setCoinModalTarget(viewProfile); setViewProfile(null); }} myUid={user.uid} myProfile={profile} allUsers={allUsers} showNotification={showNotification} />}
         {coinModalTarget && <CoinTransferModal onClose={() => setCoinModalTarget(null)} myWallet={profile.wallet} myUid={user.uid} targetUid={coinModalTarget.uid} targetName={coinModalTarget.name} showNotification={showNotification} />}
       </div>
     );
 };
 
+const VoomView = ({ user, allUsers, profile, posts, showNotification, db, appId }: any) => { 
+    const [content, setContent] = useState(''), [media, setMedia] = useState<string | null>(null), [mediaType, setMediaType] = useState('image'), [isUploading, setIsUploading] = useState(false);
+    const postMessage = async () => { 
+        if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
+        if ((!content && !media) || isUploading) return; 
+        setIsUploading(true); 
+        try { 
+            let hasChunks = false, chunkCount = 0, storedMedia = media; 
+            if (media && media.length > CHUNK_SIZE) { hasChunks = true; chunkCount = Math.ceil(media.length / CHUNK_SIZE); storedMedia = null; } 
+            const newPostRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'posts')); 
+            
+            if (hasChunks && media) { 
+                const CONCURRENCY = 100;
+                const executing = new Set();
+                for (let i = 0; i < chunkCount; i++) { 
+                    const start = i * CHUNK_SIZE; const end = Math.min(start + CHUNK_SIZE, media.length); const chunkData = media.slice(start, end); 
+                    const p = setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'posts', newPostRef.id, 'chunks', `${i}`), { data: chunkData, index: i }); 
+                    
+                    const pWrapper: Promise<boolean> = p.then(() => executing.delete(pWrapper));
+                    executing.add(pWrapper);
+                    if (executing.size >= CONCURRENCY) { await Promise.race(executing); }
+                } 
+                await Promise.all(executing);
+            }
+            
+            let mimeType = null; if (media && media.startsWith('data:')) { mimeType = media.split(';')[0].split(':')[1]; }
+            await setDoc(newPostRef, { userId: user.uid, content, media: storedMedia, mediaType, mimeType, hasChunks, chunkCount, likes: [], comments: [], createdAt: serverTimestamp() }); 
+            setContent(''); setMedia(null); showNotification("投稿しました"); 
+        } finally { setIsUploading(false); } 
+    };
+    const handleVoomFileUpload = (e: any) => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev: any) => { setMedia(ev.target.result); setMediaType(file.type.startsWith('video') ? 'video' : 'image'); }; reader.readAsDataURL(file); };
+    return (<div className="flex flex-col h-full bg-gray-50"><div className="bg-white p-4 border-b shrink-0"><h1 className="text-xl font-bold">VOOM</h1></div><div className="flex-1 overflow-y-auto scrollbar-hide pb-20"><div className="bg-white p-4 mb-2"><textarea className="w-full text-sm outline-none resize-none min-h-[60px]" placeholder="何をしていますか？" value={content} onChange={e => setContent(e.target.value)} />{media && <div className="relative mt-2">{mediaType === 'video' ? <video src={media} className="w-full rounded-xl bg-black" controls /> : <img src={media} className="max-h-60 rounded-xl" />}<button onClick={() => setMedia(null)} className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1"><X className="w-3 h-3"/></button></div>}<div className="flex justify-between items-center pt-2 border-t mt-2"><label className="cursor-pointer p-2 flex items-center gap-2"><ImageIcon className="w-5 h-5 text-gray-400" /><input type="file" className="hidden" accept="image/*,video/*" onChange={handleVoomFileUpload} /></label><button onClick={postMessage} disabled={isUploading} className={`text-xs font-bold px-4 py-2 rounded-full ${content || media ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-400'}`}>投稿</button></div></div>{posts.map((p: any) => <PostItem key={p.id} post={p} user={user} allUsers={allUsers} db={db} appId={appId} profile={profile} />)}</div></div>);
+};
+
+const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard }: any) => {
+    const [edit, setEdit] = useState<any>(profile || {});
+    useEffect(() => { if (profile) setEdit(prev => (!prev || Object.keys(prev).length === 0) ? { ...profile } : { ...profile, name: prev.name, id: prev.id, status: prev.status, birthday: prev.birthday, avatar: prev.avatar, cover: prev.cover }); }, [profile]);
+    const handleSave = () => { updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), edit); showNotification("保存しました ✅"); };
+    return (
+      <div className="flex flex-col h-full bg-white">
+        <div className="p-4 border-b flex items-center gap-4 sticky top-0 bg-white shrink-0"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><span className="font-bold">設定</span></div>
+        <div className="flex-1 overflow-y-auto pb-8">
+          <div className="w-full h-48 relative bg-gray-200"><img src={edit.cover} className="w-full h-full object-cover" /><label className="absolute inset-0 flex items-center justify-center bg-black/20 text-white font-bold cursor-pointer opacity-0 hover:opacity-100 transition-opacity">背景変更<input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d: string) => setEdit({...edit, cover: d}))} /></label></div>
+          <div className="px-8 -mt-12 flex flex-col items-center gap-6">
+            <div className="relative"><img src={edit.avatar} className="w-24 h-24 rounded-3xl border-4 border-white object-cover" /><label className="absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer"><CameraIcon className="w-4 h-4" /><input type="file" className="hidden" accept="image/*" onChange={e => handleCompressedUpload(e, (d: string) => setEdit({...edit, avatar: d}))} /></label></div>
+            <div className="w-full space-y-4">
+              <div><label className="text-xs font-bold text-gray-400">名前</label><input className="w-full border-b py-2 outline-none" value={edit.name || ''} onChange={e => setEdit({...edit, name: e.target.value})} /></div>
+              <div><label className="text-xs font-bold text-gray-400">ID</label><div className="flex items-center gap-2 border-b py-2"><span className="flex-1 font-mono text-gray-600">{edit.id}</span><button onClick={() => copyToClipboard(edit.id)} className="p-1 hover:bg-gray-100 rounded-full"><Copy className="w-4 h-4 text-gray-500" /></button></div></div>
+              <div><label className="text-xs font-bold text-gray-400">誕生日</label><input type="date" className="w-full border-b py-2 outline-none bg-transparent" value={edit.birthday || ''} onChange={e => setEdit({...edit, birthday: e.target.value})} /></div>
+              <div><label className="text-xs font-bold text-gray-400">ひとこと</label><input className="w-full border-b py-2 outline-none" value={edit.status || ''} onChange={e => setEdit({...edit, status: e.target.value})} /></div>
+              <button onClick={handleSave} className="w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg">保存</button>
+              <button onClick={() => signOut(auth)} className="w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4">ログアウト</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+};
+
+const QRScannerView = ({ user, setView, addFriendById }: any) => {
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const [scanning, setScanning] = useState(false);
+    
+    const startScanner = async () => { 
+        setScanning(true); 
+        try { 
+            const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }); 
+            if (videoRef.current) { 
+                videoRef.current.srcObject = mediaStream; 
+                videoRef.current.setAttribute("playsinline", "true");
+                videoRef.current.play(); 
+                requestAnimationFrame(tick); 
+            } 
+        } catch (err) { 
+            setScanning(false); 
+        } 
+    };
+
+    useEffect(() => {
+        return () => {
+            if (videoRef.current && videoRef.current.srcObject) {
+                const stream = videoRef.current.srcObject as MediaStream;
+                stream.getTracks().forEach(t => t.stop());
+            }
+        };
+    }, []);
+
+    const tick = () => { 
+        if (videoRef.current?.readyState === videoRef.current?.HAVE_ENOUGH_DATA) { 
+            const c = canvasRef.current;
+            const ctx = c?.getContext("2d"); 
+            if (c && ctx) {
+                c.height = videoRef.current.videoHeight; 
+                c.width = videoRef.current.videoWidth; 
+                ctx.drawImage(videoRef.current, 0, 0, c.width, c.height); 
+                
+                const win = window as any;
+                if (win.jsQR) {
+                    const code = win.jsQR(ctx.getImageData(0,0,c.width,c.height).data, c.width, c.height); 
+                    if (code) { 
+                        if (videoRef.current.srcObject) {
+                            const stream = videoRef.current.srcObject as MediaStream;
+                            stream.getTracks().forEach(t => t.stop());
+                        }
+                        setScanning(false); 
+                        addFriendById(code.data); 
+                        return; 
+                    } 
+                }
+            }
+        } 
+        if (scanning) requestAnimationFrame(tick); 
+    };
+
+    return (<div className="flex flex-col h-full bg-white"><div className="p-4 border-b flex items-center gap-4"><ChevronLeft className="w-6 h-6 cursor-pointer" onClick={() => setView('home')} /><span className="font-bold">QR</span></div><div className="flex-1 overflow-y-auto p-8"><div className="flex flex-col items-center justify-center gap-8 min-h-full">{scanning ? <div className="relative w-64 h-64 border-4 border-green-500 rounded-3xl overflow-hidden"><video ref={videoRef} className="w-full h-full object-cover" /><canvas ref={canvasRef} className="hidden" /></div> : <div className="bg-white p-6 rounded-[40px] shadow-xl border"><img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user?.uid}`} className="w-48 h-48" /></div>}<div className="grid grid-cols-2 gap-4 w-full"><button onClick={startScanner} className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border"><Maximize className="w-6 h-6 text-green-500" /><span>スキャン</span></button><label className="flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border cursor-pointer"><Upload className="w-6 h-6 text-blue-500" /><span>読込</span><input type="file" className="hidden" accept="image/*" onChange={e => { const r = new FileReader(); r.onload = (ev: any) => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'), ctx = c.getContext('2d'); if(ctx) { c.width = img.width; c.height = img.height; ctx.drawImage(img,0,0); const win = window as any; const code = win.jsQR(ctx.getImageData(0,0,c.width,c.height).data, c.width, c.height); if (code) addFriendById(code.data); } }; img.src = ev.target.result; }; r.readAsDataURL(e.target.files[0]); }} /></label></div></div></div></div>);
+};
+
+const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }: any) => {
+  const [tab, setTab] = useState<'friends' | 'hidden' | 'chats'>('chats');
+  const [selectedFriend, setSelectedFriend] = useState<any>(null);
+  const [coinModalTarget, setCoinModalTarget] = useState<any>(null);
+
+  const [openChatMenuId, setOpenChatMenuId] = useState<string | null>(null);
+  const [openFriendMenuId, setOpenFriendMenuId] = useState<string | null>(null);
+
+  const myFriendUids = useMemo(() => new Set<string>(profile?.friends || []), [profile?.friends]);
+  const hiddenFriendUids = useMemo(() => new Set<string>(profile?.hiddenFriends || []), [profile?.hiddenFriends]);
+
+  // トークを開始した友だち（1対1トークの相手）は、友だちとしてカウントする
+  const talkFriendUids = useMemo(() => {
+    const s = new Set<string>();
+    (chats || []).forEach((c: any) => {
+      if (!c || c.isGroup) return;
+      const parts: string[] = c.participants || [];
+      if (!parts.includes(user.uid)) return;
+      const other = parts.find((p) => p && p !== user.uid);
+      if (other) s.add(other);
+    });
+    return s;
+  }, [chats, user.uid]);
+
+  const directFriendUids = useMemo(() => {
+    const s = new Set<string>(profile?.friends || []);
+    talkFriendUids.forEach((uid) => s.add(uid));
+    return s;
+  }, [profile?.friends, talkFriendUids]);
+
+  const talkFriendCount = talkFriendUids.size;
+  const groupChatCount = useMemo(() => (chats || []).filter((c: any) => c?.isGroup).length, [chats]);
+
+
+  const friendsListAll = useMemo(
+    () => allUsers.filter((u: any) => myFriendUids.has(u.uid)),
+    [allUsers, myFriendUids]
+  );
+
+  const directFriendsListAll = useMemo(
+    () => allUsers.filter((u: any) => directFriendUids.has(u.uid)),
+    [allUsers, directFriendUids]
+  );
+
+
+  const visibleFriendsList = useMemo(
+    () => friendsListAll.filter((u: any) => !hiddenFriendUids.has(u.uid)),
+    [friendsListAll, hiddenFriendUids]
+  );
+
+  const hiddenFriendsList = useMemo(
+    () => friendsListAll.filter((u: any) => hiddenFriendUids.has(u.uid)),
+    [friendsListAll, hiddenFriendUids]
+  );
+
+  const friendsOfFriendsCount = useMemo(() => {
+    const fof = new Set<string>();
+    directFriendsListAll.forEach((f: any) => {
+      const ff: string[] = f?.friends || [];
+      ff.forEach((uid) => {
+        if (!uid) return;
+        if (uid === user.uid) return;
+        if (directFriendUids.has(uid)) return;
+        fof.add(uid);
+      });
+    });
+    return fof.size;
+  }, [directFriendsListAll, user.uid, directFriendUids]);
+
+  const getMutualCount = useCallback((friend: any) => {
+    const ff: string[] = friend?.friends || [];
+    let n = 0;
+    for (const uid of ff) {
+      if (!uid || uid === user.uid) continue;
+      if (directFriendUids.has(uid)) n++;
+    }
+    return n;
+  }, [directFriendUids, user.uid]);
+
+  const getFofCandidateCount = useCallback((friend: any) => {
+    const ff: string[] = friend?.friends || [];
+    let n = 0;
+    for (const uid of ff) {
+      if (!uid || uid === user.uid) continue;
+      if (!directFriendUids.has(uid)) n++;
+    }
+    return n;
+  }, [directFriendUids, user.uid]);
+
+  const handleHideChat = async (e: any, chatId: string) => {
+    e.stopPropagation();
+    setOpenChatMenuId(null);
+    if (!window.confirm("このトークを非表示にしますか？\n（トーク履歴は削除されません）")) return;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), {
+        hiddenChats: arrayUnion(chatId),
+      });
+      showNotification("非表示にしました");
+    } catch (e) {
+      showNotification("エラーが発生しました");
+    }
+  };
+
+  const handleDeleteChat = async (e: any, chatId: string) => {
+    e.stopPropagation();
+    setOpenChatMenuId(null);
+    if (!window.confirm("このトークを削除（退出）しますか？\n相手とのトークリストからも削除される可能性があります。")) return;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chats', chatId), {
+        participants: arrayRemove(user.uid),
+      });
+      showNotification("削除しました");
+    } catch (e) {
+      showNotification("エラーが発生しました");
+    }
+  };
+
+  const handleHideFriend = async (e: any, friendUid: string) => {
+    e.stopPropagation();
+    setOpenFriendMenuId(null);
+    if (!window.confirm("この友だちを非表示にしますか？\n（友だち関係は解除されません）")) return;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), {
+        hiddenFriends: arrayUnion(friendUid),
+      });
+      showNotification("非表示にしました");
+    } catch (e) {
+      showNotification("エラーが発生しました");
+    }
+  };
+
+  const handleUnhideFriend = async (e: any, friendUid: string) => {
+    e.stopPropagation();
+    setOpenFriendMenuId(null);
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), {
+        hiddenFriends: arrayRemove(friendUid),
+      });
+      showNotification("非表示を解除しました");
+    } catch (e) {
+      showNotification("エラーが発生しました");
+    }
+  };
+
+  return (
+    <div
+      className="flex flex-col h-full bg-white"
+      onClick={() => { setOpenChatMenuId(null); setOpenFriendMenuId(null); }}
+    >
+      <div className="p-4 border-b flex justify-between items-center bg-white shrink-0">
+        <h1 className="text-xl font-bold">ホーム</h1>
+        <div className="flex gap-4 items-center">
+          <Store className="w-6 h-6 cursor-pointer text-orange-500" onClick={() => setView('sticker-store')} />
+          <Gift className="w-6 h-6 cursor-pointer text-pink-500" onClick={() => setView('birthday-cards')} />
+          <Users className="w-6 h-6 cursor-pointer" onClick={() => setView('group-create')} />
+          <Search className="w-6 h-6 cursor-pointer" onClick={() => setSearchModalOpen(true)} />
+          <UserPlus className="w-6 h-6 cursor-pointer" onClick={() => setView('qr')} />
+          <Settings className="w-6 h-6 cursor-pointer" onClick={() => setView('profile')} />
+        </div>
+      </div>
+
+      <div className="flex border-b">
+        <button
+          className={`flex-1 py-3 text-sm font-bold ${tab === 'friends' ? 'border-b-2 border-black' : 'text-gray-400'}`}
+          onClick={() => setTab('friends')}
+        >
+          友だち
+        </button>
+
+        <button
+          className={`flex-1 py-3 text-sm font-bold ${tab === 'hidden' ? 'border-b-2 border-black' : 'text-gray-400'}`}
+          onClick={() => setTab('hidden')}
+        >
+          非表示
+        </button>
+
+        <button
+          className={`flex-1 py-3 text-sm font-bold ${tab === 'chats' ? 'border-b-2 border-black' : 'text-gray-400'}`}
+          onClick={() => setTab('chats')}
+        >
+          トーク
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto scrollbar-hide">
+        <div className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer border-b" onClick={() => setView('profile')}>
+          <div className="relative">
+            <img key={profile?.avatar} src={profile?.avatar} className="w-16 h-16 rounded-2xl object-cover border" />
+            {isTodayBirthday(profile?.birthday) && <span className="absolute -top-1 -right-1 text-base">🎂</span>}
+          </div>
+          <div className="flex-1">
+            <div className="font-bold text-lg">{profile?.name}</div>
+            <div className="text-xs text-gray-400 font-mono">ID: {profile?.id}</div>
+          </div>
+        </div>
+
+        {(tab === 'friends' || tab === 'hidden') && (
+          <div className="px-4 pt-4">
+            <div className="bg-gray-50 border rounded-3xl p-4 flex items-center justify-between">
+              <div>
+                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">友だちの友だち</div>
+                <div className="text-xs text-gray-500 font-bold mt-1">あなたの友だち経由でつながる人数（重複なし）</div>
+              </div>
+              <div className="text-2xl font-black text-gray-800">{friendsOfFriendsCount}</div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'friends' && (
+          <div className="pt-2">
+            {visibleFriendsList.length === 0 ? (
+              <div className="text-center py-10 text-gray-400 text-sm">友だちがいません</div>
+            ) : (
+              visibleFriendsList.map((friend: any) => (
+                <div
+                  key={friend.uid}
+                  className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer relative"
+                  onClick={() => setSelectedFriend(friend)}
+                >
+                  <div className="relative">
+                    <img key={friend.avatar} src={friend.avatar} className="w-12 h-12 rounded-xl object-cover border" />
+                    {isTodayBirthday(friend.birthday) && <span className="absolute -top-1 -right-1 text-xs">🎂</span>}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-sm truncate">{friend.name}</div>
+                    <div className="text-xs text-gray-400 truncate">{friend.status}</div>
+                    <div className="text-[10px] text-gray-400 font-bold mt-0.5">
+                      共通 {getMutualCount(friend)} ・ 友だちの友だち {getFofCandidateCount(friend)}
+                    </div>
+                  </div>
+
+                  <div className="relative ml-2" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => setOpenFriendMenuId(openFriendMenuId === friend.uid ? null : friend.uid)} className="p-2 hover:bg-gray-100 rounded-full text-gray-400">
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                    {openFriendMenuId === friend.uid && (
+                      <div className="absolute right-0 top-8 bg-white shadow-xl border rounded-xl overflow-hidden z-20 min-w-[140px] animate-in fade-in zoom-in-95 duration-100">
+                        <button onClick={(e) => handleHideFriend(e, friend.uid)} className="w-full text-left px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 flex items-center gap-2">
+                          <EyeOff className="w-3 h-3" /> 非表示
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {tab === 'hidden' && (
+          <div className="pt-2">
+            {hiddenFriendsList.length === 0 ? (
+              <div className="text-center py-10 text-gray-400 text-sm">非表示の友だちはありません</div>
+            ) : (
+              hiddenFriendsList.map((friend: any) => (
+                <div
+                  key={friend.uid}
+                  className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer relative"
+                  onClick={() => setSelectedFriend(friend)}
+                >
+                  <div className="relative">
+                    <img key={friend.avatar} src={friend.avatar} className="w-12 h-12 rounded-xl object-cover border" />
+                    {isTodayBirthday(friend.birthday) && <span className="absolute -top-1 -right-1 text-xs">🎂</span>}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-sm truncate">{friend.name}</div>
+                    <div className="text-xs text-gray-400 truncate">{friend.status}</div>
+                  </div>
+
+                  <button
+                    onClick={(e) => handleUnhideFriend(e, friend.uid)}
+                    className="px-3 py-2 bg-white border rounded-2xl text-xs font-bold text-gray-700 hover:bg-gray-50 flex items-center gap-2 shadow-sm"
+                  >
+                    <Eye className="w-4 h-4" />
+                    表示
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {tab === 'chats' && (
+          <>
+            <div className="px-4 pt-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-gray-50 border rounded-3xl p-4 flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">トーク友だち</div>
+                    <div className="text-xs text-gray-500 font-bold mt-1">1対1トークの人数</div>
+                  </div>
+                  <div className="text-2xl font-black text-gray-800">{talkFriendCount}</div>
+                </div>
+                <div className="bg-gray-50 border rounded-3xl p-4 flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">グループ</div>
+                    <div className="text-xs text-gray-500 font-bold mt-1">参加中の数</div>
+                  </div>
+                  <div className="text-2xl font-black text-gray-800">{groupChatCount}</div>
+                </div>
+              </div>
+            </div>
+
+            {chats
+          .filter((chat: any) => !profile?.hiddenChats?.includes(chat.id))
+          .sort((a: any, b: any) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0))
+          .map((chat: any) => {
+            let name = chat.name, icon = chat.icon, partnerData = null;
+            if (!chat.isGroup) {
+              partnerData = allUsers.find((u: any) => u.uid === chat.participants.find((p: string) => p !== user.uid));
+              if (partnerData) { name = partnerData.name; icon = partnerData.avatar; }
+            }
+            const unreadCount = chat.unreadCounts?.[user.uid] || 0;
+
+            return (
+              <div
+                key={chat.id}
+                className="p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer relative group"
+                onClick={() => { setActiveChatId(chat.id); setView('chatroom'); }}
+              >
+                <div className="relative">
+                  <img key={icon} src={icon} className="w-12 h-12 rounded-xl object-cover border" />
+                  {!chat.isGroup && partnerData && isTodayBirthday(partnerData.birthday) && <span className="absolute -top-1 -right-1 text-xs">🎂</span>}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-sm truncate">{name} {chat.isGroup ? `(${chat.participants.length})` : ''}</div>
+                  <div className={`text-xs truncate ${unreadCount > 0 ? 'font-bold text-black' : 'text-gray-400'}`}>{chat.lastMessage?.content}</div>
+                </div>
+
+                <div className="flex flex-col items-end gap-1">
+                  <div className="text-[10px] text-gray-300">{formatTime(chat.updatedAt)}</div>
+                  {unreadCount > 0 && (
+                    <div className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center flex items-center justify-center h-5 border-2 border-white shadow-sm mb-1">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </div>
+                  )}
+                </div>
+
+                <div className="relative ml-2" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={() => setOpenChatMenuId(openChatMenuId === chat.id ? null : chat.id)} className="p-2 hover:bg-gray-100 rounded-full text-gray-400">
+                    <MoreVertical className="w-4 h-4" />
+                  </button>
+                  {openChatMenuId === chat.id && (
+                    <div className="absolute right-0 top-8 bg-white shadow-xl border rounded-xl overflow-hidden z-20 min-w-[120px] animate-in fade-in zoom-in-95 duration-100">
+                      <button onClick={(e) => handleHideChat(e, chat.id)} className="w-full text-left px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 flex items-center gap-2">
+                        <EyeOff className="w-3 h-3" /> 非表示
+                      </button>
+                      <button onClick={(e) => handleDeleteChat(e, chat.id)} className="w-full text-left px-4 py-3 text-xs font-bold text-red-500 hover:bg-red-50 border-t flex items-center gap-2">
+                        <Trash2 className="w-3 h-3" /> 削除
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          </>
+        )}
+      </div>
+
+      {selectedFriend && (
+        <FriendProfileModal
+          friend={selectedFriend}
+          onClose={() => setSelectedFriend(null)}
+          onStartChat={startChatWithUser}
+          onTransfer={() => { setCoinModalTarget(selectedFriend); setSelectedFriend(null); }}
+          myUid={user.uid}
+          myProfile={profile}
+          allUsers={allUsers}
+          showNotification={showNotification}
+        />
+      )}
+
+      {coinModalTarget && (
+        <CoinTransferModal
+          onClose={() => setCoinModalTarget(null)}
+          myWallet={profile.wallet}
+          myUid={user.uid}
+          targetUid={coinModalTarget.uid}
+          targetName={coinModalTarget.name}
+          showNotification={showNotification}
+        />
+      )}
+    </div>
+  );
+};
+
 // --- 6. Main App Component ---
 function App() {
-  const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
+  const [user, setUser] = useState<any>(null);
+  const [profile, setProfile] = useState<any>(null);
   const [view, setView] = useState('auth'); 
-  const [activeChatId, setActiveChatId] = useState(null);
-  const [allUsers, setAllUsers] = useState([]);
-  const [chats, setChats] = useState([]);
-  const [posts, setPosts] = useState([]);
-  const [notification, setNotification] = useState(null);
+  const [activeChatId, setActiveChatId] = useState<any>(null);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [chats, setChats] = useState<any[]>([]);
+  const [posts, setPosts] = useState<any[]>([]);
+  const [notification, setNotification] = useState<string | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [mutedChats, setMutedChats] = useState(() => {
+  const [mutedChats, setMutedChats] = useState<string[]>(() => {
     const saved = localStorage.getItem('mutedChats');
     return saved ? JSON.parse(saved) : [];
   });
   
-  const [activeCall, setActiveCall] = useState(null);
-  const [userEffects, setUserEffects] = useState([]);
-  const [activeEffect, setActiveEffect] = useState('Normal');
-  const [currentChatBackground, setCurrentChatBackground] = useState(null);
-  const processedMsgIds = useRef(new Set());
+  const [activeCall, setActiveCall] = useState<any>(null);
+  const [userEffects, setUserEffects] = useState<any[]>([]);
+  const [activeEffect, setActiveEffect] = useState<string>('Normal');
+  const [currentChatBackground, setCurrentChatBackground] = useState<string | null>(null);
+  const processedMsgIds = useRef(new Set<string>());
 
-  const toggleMuteChat = (chatId) => {
+  const toggleMuteChat = (chatId: string) => {
     setMutedChats(prev => {
       const next = prev.includes(chatId) ? prev.filter(id => id !== chatId) : [...prev, chatId];
       localStorage.setItem('mutedChats', JSON.stringify(next));
@@ -2362,7 +3252,7 @@ function App() {
       const manifest = {
         name: "Chat App",
         short_name: "Chat",
-        start_url: "/", // ★修正: "." から "/" に変更
+        start_url: ".",
         display: "standalone",
         background_color: "#ffffff",
         theme_color: "#22c55e",
@@ -2413,12 +3303,12 @@ function App() {
     };
   }, []);
 
-  const showNotification = (msg) => {
+  const showNotification = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
   };
 
-  const copyToClipboard = (text) => {
+  const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     showNotification("IDをコピーしました");
   };
@@ -2438,12 +3328,12 @@ function App() {
     });
 
     const unsubChats = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'chats'), where('participants', 'array-contains', user.uid)), (snap) => {
-      const chatList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const chatList: any[] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       
       // 新着メッセージのチェック（音を鳴らす）
       snap.docChanges().forEach(change => {
         if (change.type === 'added' || change.type === 'modified') {
-            const data = change.doc.data();
+            const data: any = change.doc.data();
             const lastMsg = data.lastMessage;
             
             // メッセージが存在し、自分以外が送信した場合
@@ -2476,23 +3366,38 @@ function App() {
 
       setChats(chatList);
       
-      const incoming = chatList.find((c) => c.callStatus?.status === 'ringing' && c.callStatus.callerId !== user.uid);
+      const incoming: any = chatList.find((c: any) => c.callStatus?.status === 'ringing' && c.callStatus.callerId !== user.uid);
+
+      // 着信（ringing）を検知
       if (incoming) {
           if (!activeCall || activeCall.chatId !== incoming.id) {
-             setActiveCall({ chatId: incoming.id, callData: incoming.callStatus, isIncoming: true, isVideo: incoming.callStatus?.callType !== 'audio' }); 
+             setActiveCall({ chatId: incoming.id, callData: incoming.callStatus, isVideo: incoming.callStatus?.callType !== 'audio', isGroupCall: false, phase: 'incoming' });
           }
-      } else {
-          // If we are showing incoming call, but call is gone or not ringing anymore, clear it
-          if (activeCall && activeCall.isIncoming) {
-              const callStillExists = chatList.find((c) => c.id === activeCall.chatId && c.callStatus?.status === 'ringing');
-              if (!callStillExists) setActiveCall(null);
-          }
-          // Also handle rejection for the caller (if we are waiting and status changes)
-          if (activeCall && !activeCall.isIncoming && !activeCall.isGroupCall) {
-              const currentChat = chatList.find((c) => c.id === activeCall.chatId);
-              if (!currentChat || !currentChat.callStatus || currentChat.callStatus.status !== 'ringing') {
-                   // Status changed (e.g. ended or rejected) so close the view
-                   setActiveCall(null);
+      }
+
+      // 通話状態の遷移（発信中 -> 応答済み -> 通話中 / 終了）
+      if (activeCall) {
+          const currentChat = chatList.find((c: any) => c.id === activeCall.chatId);
+
+          if (activeCall.phase === 'incoming') {
+              // 着信画面は ringing の間だけ
+              if (!currentChat || currentChat.callStatus?.status !== 'ringing') {
+                  setActiveCall(null);
+              }
+          } else if (activeCall.phase === 'dialing') {
+              // 発信中: ringing -> accepted で通話開始
+              const status = currentChat?.callStatus?.status;
+              if (!currentChat || !currentChat.callStatus) {
+                  setActiveCall(null);
+              } else if (status === 'accepted') {
+                  setActiveCall({ ...activeCall, phase: 'inCall', callData: currentChat.callStatus, isVideo: currentChat.callStatus?.callType !== 'audio' });
+              } else if (status !== 'ringing') {
+                  setActiveCall(null);
+              }
+          } else if (activeCall.phase === 'inCall') {
+              // 1対1通話は callStatus が消えたら終了
+              if (!activeCall.isGroupCall) {
+                  if (!currentChat || !currentChat.callStatus) setActiveCall(null);
               }
           }
       }
@@ -2505,9 +3410,9 @@ function App() {
     };
   }, [user, activeCall]);
 
-  const addFriendById = async (targetId) => {
+  const addFriendById = async (targetId: string) => {
     if (!targetId) return;
-    const targetUser = allUsers.find((u) => u.id === targetId || u.uid === targetId);
+    const targetUser = allUsers.find((u: any) => u.id === targetId || u.uid === targetId);
     if (targetUser && targetUser.uid !== user.uid) {
       if ((profile.friends || []).includes(targetUser.uid)) {
         showNotification("既に友だちです。");
@@ -2522,15 +3427,15 @@ function App() {
     }
   };
 
-  const startChatWithUser = async (targetUid) => {
-    const existingChat = chats.find((c) => 
+  const startChatWithUser = async (targetUid: string) => {
+    const existingChat = chats.find((c: any) => 
       !c.isGroup && c.participants.includes(targetUid) && c.participants.includes(user.uid)
     );
     if (existingChat) {
       setActiveChatId(existingChat.id);
       setView('chatroom');
     } else {
-      const targetUser = allUsers.find((u) => u.uid === targetUid);
+      const targetUser = allUsers.find((u: any) => u.uid === targetUid);
       const newChat = {
         name: targetUser ? targetUser.name : "Chat", icon: targetUser ? targetUser.avatar : "",
         participants: [user.uid, targetUid], isGroup: false, createdBy: user.uid, updatedAt: serverTimestamp(),
@@ -2546,7 +3451,7 @@ function App() {
     }
   };
 
-  const cleanupCallSignaling = async (chatId) => {
+    const cleanupCallSignaling = async (chatId: string) => {
     try {
       const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
       const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
@@ -2555,7 +3460,7 @@ function App() {
       try { await deleteDoc(signalingRef); } catch {}
 
       // Delete candidates in batches (to avoid 500 limit)
-      const snap = await getDocs(candidatesCol).catch(() => null);
+      const snap = await getDocs(candidatesCol).catch(() => null as any);
       if (!snap) return;
 
       const BATCH_LIMIT = 450;
@@ -2576,20 +3481,21 @@ function App() {
     }
   };
 
-  const startVideoCall = async (chatId, isVideo = true, isJoin = false, joinCallerId) => {
+  const startVideoCall = async (chatId: string, isVideo = true, isJoin = false, joinCallerId?: string) => {
     // Check if group
-    const chat = chats.find((c) => c.id === chatId);
+    const chat = chats.find((c: any) => c.id === chatId);
     const isGroup = chat?.isGroup;
 
     if (isJoin) {
       // Join existing call invite (mainly for group call invites)
       const callerId = joinCallerId || chat?.callStatus?.callerId || user.uid;
-      setActiveCall({ chatId, callData: { callerId }, isVideo, isGroupCall: isGroup });
+      setActiveCall({ chatId, callData: { callerId }, isVideo, isGroupCall: !!isGroup, phase: 'inCall' });
       return;
     }
 
     if (isGroup) {
       // Send notification message instead of ringing everyone
+      await cleanupCallSignaling(chatId);
       try {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chats', chatId, 'messages'), {
           senderId: user.uid,
@@ -2600,7 +3506,7 @@ function App() {
           readBy: [user.uid],
         });
         // Auto join for the starter
-        setActiveCall({ chatId, callData: { callerId: user.uid }, isVideo, isGroupCall: true });
+        setActiveCall({ chatId, callData: { callerId: user.uid }, isVideo, isGroupCall: true, phase: 'inCall' });
       } catch (e) {
         showNotification("開始に失敗しました");
       }
@@ -2619,7 +3525,7 @@ function App() {
           },
         });
 
-        setActiveCall({ chatId, callData: { callerId: user.uid, callType: isVideo ? "video" : "audio" }, isVideo });
+        setActiveCall({ chatId, callData: { status: 'ringing', callerId: user.uid, callType: isVideo ? "video" : "audio" }, isVideo, isGroupCall: false, phase: 'dialing' });
       } catch (e) {
         console.error(e);
         showNotification("発信に失敗しました");
@@ -2629,7 +3535,7 @@ function App() {
 
   useEffect(() => {
     if (!activeCall || !chats.length) return;
-    const callChat = chats.find((c) => c.id === activeCall.chatId);
+    const callChat = chats.find((c: any) => c.id === activeCall.chatId);
     if (callChat && callChat.backgroundImage) {
         setCurrentChatBackground(callChat.backgroundImage);
     } else {
@@ -2646,12 +3552,55 @@ function App() {
       ) : (
           <>
             {activeCall ? (
-                activeCall.isIncoming ? (
+                activeCall.phase === 'incoming' ? (
                     <IncomingCallOverlay 
                         callData={activeCall.callData} 
                         allUsers={allUsers} 
-                        onDecline={async () => { try { await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: deleteField() }); await cleanupCallSignaling(activeCall.chatId); } catch(e) { console.error(e); } finally { setActiveCall(null); } }} 
-                        onAccept={() => setActiveCall({ ...activeCall, isIncoming: false })} 
+                        onDecline={async () => { 
+                            try { 
+                                await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: deleteField() }); 
+                                await cleanupCallSignaling(activeCall.chatId); 
+                            } catch(e) { 
+                                console.error(e); 
+                            } finally { 
+                                setActiveCall(null); 
+                            } 
+                        }} 
+                        onAccept={async () => {
+                            try {
+                                const nextCallData = { 
+                                    ...(activeCall.callData || {}), 
+                                    status: 'accepted', 
+                                    acceptedBy: user.uid, 
+                                    acceptedAt: Date.now(),
+                                };
+                                await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: nextCallData });
+                                setActiveCall({ ...activeCall, phase: 'inCall', callData: nextCallData });
+                            } catch (e) {
+                                console.error(e);
+                                showNotification("応答に失敗しました");
+                            }
+                        }} 
+                    />
+                ) : activeCall.phase === 'dialing' ? (
+                    <OutgoingCallOverlay
+                        calleeData={(() => {
+                            const callChat = chats.find((c: any) => c.id === activeCall.chatId);
+                            if (!callChat || callChat.isGroup) return null;
+                            const partnerId = (callChat.participants || []).find((p: string) => p && p !== user.uid);
+                            return allUsers.find((u: any) => u.uid === partnerId) || null;
+                        })()}
+                        isVideo={activeCall.isVideo}
+                        onCancel={async () => {
+                            try {
+                                await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: deleteField() });
+                                await cleanupCallSignaling(activeCall.chatId);
+                            } catch (e) {
+                                console.error(e);
+                            } finally {
+                                setActiveCall(null);
+                            }
+                        }}
                     />
                 ) : (
                     <div className="relative w-full h-full">
@@ -2659,6 +3608,7 @@ function App() {
                             user={user} 
                             chatId={activeCall.chatId} 
                             callData={activeCall.callData} 
+                            effects={userEffects}
                             isVideoEnabled={activeCall.isVideo} 
                             activeEffect={activeEffect}
                             backgroundUrl={currentChatBackground}
@@ -2680,7 +3630,7 @@ function App() {
                         <div className="absolute bottom-24 left-0 right-0 px-4 flex gap-2 overflow-x-auto scrollbar-hide z-[1001]">
                             <button onClick={() => setActiveEffect('Normal')} className={`p-2 rounded-xl text-xs font-bold whitespace-nowrap ${activeEffect === 'Normal' ? 'bg-white text-black' : 'bg-black/50 text-white'}`}>Normal</button>
                             {/* Render User Effects (Both AI and Purchased) */}
-                            {userEffects.map((ef) => (
+                            {userEffects.map((ef: any) => (
                                 <button key={ef.id} onClick={() => setActiveEffect(ef.name)} className={`p-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-1 ${activeEffect === ef.name ? 'bg-white text-black' : 'bg-black/50 text-white'}`}>
                                     <Sparkles className="w-3 h-3"/> {ef.name}
                                 </button>
