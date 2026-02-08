@@ -17,7 +17,6 @@ import {
 import {
   getFirestore,
   collection,
-  collectionGroup,
   doc,
   setDoc,
   getDoc,
@@ -2469,6 +2468,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
   const [effectsMode, setEffectsMode] = useState("market");
   const [marketEffects, setMarketEffects] = useState([]);
   const [publicMarketEffects, setPublicMarketEffects] = useState([]);
+  const [fallbackMarketEffects, setFallbackMarketEffects] = useState([]);
   const [myEffects, setMyEffects] = useState([]);
   const [priceDrafts, setPriceDrafts] = useState({});
   const [updatingEffectId, setUpdatingEffectId] = useState(null);
@@ -2501,23 +2501,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
   }, [activeTab, adminSubTab, activeShopTab]);
   useEffect(() => {
     if (!(activeTab === "shop" && activeShopTab === "effects")) return;
-    const qMarket = query(collectionGroup(db, "effects"), where("forSale", "==", true));
-    const unsubMarket = onSnapshot(
-      qMarket,
-      (snap) => {
-        const items = snap.docs.map((d) => ({ _key: d.ref.path, id: d.id, ref: d.ref, ...d.data() }));
-        items.sort((a, b) => {
-          const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : a.createdAt?.seconds * 1e3 || 0;
-          const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : b.createdAt?.seconds * 1e3 || 0;
-          return tB - tA;
-        });
-        setMarketEffects(items);
-      },
-      (err) => {
-        console.warn("market effects subscribe failed:", err);
-        setMarketEffects([]);
-      }
-    );
+    setMarketEffects([]);
     const qPublicMarket = collection(db, "artifacts", appId, "public", "data", "effect_market");
     const unsubPublicMarket = onSnapshot(
       qPublicMarket,
@@ -2559,11 +2543,51 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       });
     });
     return () => {
-      unsubMarket();
       unsubPublicMarket();
       unsubMine();
     };
   }, [activeTab, activeShopTab, user.uid]);
+  useEffect(() => {
+    if (!(activeTab === "shop" && activeShopTab === "effects")) return;
+    let cancelled = false;
+    const loadFallbackMarket = async () => {
+      try {
+        const targets = (allUsers || []).map((u) => u?.uid).filter((uid) => !!uid);
+        const results = await Promise.all(
+          targets.map(async (uid) => {
+            const q = query(collection(db, "artifacts", appId, "public", "data", "users", uid, "effects"), where("forSale", "==", true));
+            const snap = await getDocs(q);
+            return snap.docs.map((d) => ({
+              _key: d.ref.path,
+              id: d.id,
+              ref: d.ref,
+              sourceRefPath: d.ref.path,
+              creatorId: uid,
+              ownerId: uid,
+              ...d.data()
+            }));
+          })
+        );
+        if (cancelled) return;
+        const items = results.flat();
+        items.sort((a, b) => {
+          const tA = a.listedAt?.toDate ? a.listedAt.toDate().getTime() : a.listedAt?.seconds * 1e3 || a.updatedAt?.seconds * 1e3 || 0;
+          const tB = b.listedAt?.toDate ? b.listedAt.toDate().getTime() : b.listedAt?.seconds * 1e3 || b.updatedAt?.seconds * 1e3 || 0;
+          return tB - tA;
+        });
+        setFallbackMarketEffects(items);
+      } catch (e) {
+        console.warn("fallback market load failed:", e);
+        if (!cancelled) setFallbackMarketEffects([]);
+      }
+    };
+    loadFallbackMarket();
+    const timer = setInterval(loadFallbackMarket, 15e3);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [activeTab, activeShopTab, allUsers]);
   const visibleMarketEffects = useMemo(() => {
     const getTime = (v) => {
       if (!v) return 0;
@@ -2585,6 +2609,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     };
     publicMarketEffects.forEach(push);
     marketEffects.forEach(push);
+    fallbackMarketEffects.forEach(push);
     myEffects.forEach((ef) => push({ ...ef, _key: ef?.ref?.path || ef.id }));
     const list = Array.from(map.values());
     list.sort((a, b) => {
@@ -2593,7 +2618,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       return tB - tA;
     });
     return list;
-  }, [marketEffects, myEffects, publicMarketEffects]);
+  }, [marketEffects, myEffects, publicMarketEffects, fallbackMarketEffects]);
   const handleBuyEffect = async (effect) => {
     if (profile?.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     if ((profile.wallet || 0) < effect.price) {
