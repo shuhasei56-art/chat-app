@@ -556,10 +556,17 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData?.callerId === user.uid;
   const getFilterStyle = (effectName) => {
     if (!effectName || effectName === "Normal") return "none";
+    const sanitizeFilter = (filterValue) => {
+      if (typeof filterValue !== "string") return "none";
+      const v = filterValue.trim();
+      // Avoid expensive/unsupported filters that can freeze video rendering on some devices.
+      if (!v || v.length > 120 || /blur\s*\(|drop-shadow\s*\(|url\s*\(/i.test(v)) return "none";
+      return v;
+    };
     const match = (effects || []).find(
       (e) => e?.name === effectName && typeof e?.filter === "string" && e.filter.trim() !== ""
     );
-    if (match?.filter) return match.filter;
+    if (match?.filter) return sanitizeFilter(match.filter);
     switch (effectName) {
       case "Sepia":
         return "sepia(100%)";
@@ -572,15 +579,15 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       case "Contrast":
         return "contrast(200%)";
       case "Blur":
-        return "blur(4px)";
+        return "none";
       case "Bright":
         return "brightness(150%)";
       case "Fire":
-        return "sepia(100%) hue-rotate(-50deg) saturate(300%)";
+        return "sepia(100%) hue-rotate(-35deg) saturate(180%)";
       case "Ice":
-        return "sepia(100%) hue-rotate(180deg) saturate(200%)";
+        return "sepia(40%) hue-rotate(170deg) saturate(160%)";
       case "Rainbow":
-        return "hue-rotate(90deg) saturate(200%)";
+        return "hue-rotate(80deg) saturate(150%)";
       default:
         return "none";
     }
@@ -958,7 +965,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         activeEffect && activeEffect !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/50 text-white text-[8px] px-1 rounded", children: activeEffect })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: "h-24 bg-black/80 flex items-center justify-center gap-8 pb-6 backdrop-blur-lg", children: [
+    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-8 pb-6 backdrop-blur-lg", children: [
       /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `p-4 rounded-full transition-all ${isMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
       /* @__PURE__ */ jsxs("button", { onClick: onEndCall, className: "p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
         /* @__PURE__ */ jsx(PhoneOff, { className: "w-8 h-8" }),
@@ -4732,7 +4739,7 @@ function App() {
             onEndCall: () => endCall(activeCall.chatId, syncedCallData || activeCall.callData, { clearStatus: !activeCall.isGroupCall })
           }
         ),
-        /* @__PURE__ */ jsxs("div", { className: "absolute bottom-24 left-0 right-0 px-4 flex gap-2 overflow-x-auto scrollbar-hide z-[1001]", children: [
+        /* @__PURE__ */ jsxs("div", { className: "absolute top-4 left-0 right-0 px-4 flex gap-2 overflow-x-auto scrollbar-hide z-[1001]", children: [
           /* @__PURE__ */ jsx("button", { onClick: () => setActiveEffect("Normal"), className: `p-2 rounded-xl text-xs font-bold whitespace-nowrap ${activeEffect === "Normal" ? "bg-white text-black" : "bg-black/50 text-white"}`, children: "Normal" }),
           userEffects.map((ef) => /* @__PURE__ */ jsxs("button", { onClick: () => setActiveEffect(ef.name), className: `p-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-1 ${activeEffect === ef.name ? "bg-white text-black" : "bg-black/50 text-white"}`, children: [
             /* @__PURE__ */ jsx(Sparkles, { className: "w-3 h-3" }),
