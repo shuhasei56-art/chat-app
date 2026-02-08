@@ -4657,7 +4657,7 @@ function App() {
     }
     return activeCall.phase || null;
   }, [activeCall, syncedCallData, user?.uid]);
-  return /* @__PURE__ */ jsx("div", { className: "w-full min-h-[100dvh] bg-[#d7dbe1] flex items-center justify-center", children: /* @__PURE__ */ jsxs("div", { className: "w-full h-[100dvh] md:w-[430px] md:h-[92dvh] md:max-h-[960px] bg-[#f3f4f6] border-x border-gray-300 flex flex-col relative overflow-hidden", children: [
+  return /* @__PURE__ */ jsx("div", { className: "w-full min-h-[100dvh] bg-[#d7dbe1] flex items-center justify-center", children: /* @__PURE__ */ jsxs("div", { className: "w-full h-[100dvh] md:w-[430px] md:h-[100dvh] bg-[#f3f4f6] border-x border-gray-300 flex flex-col relative overflow-hidden", children: [
     notification && /* @__PURE__ */ jsx("div", { className: "fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce", children: notification }),
     !user ? /* @__PURE__ */ jsx(AuthView, { onLogin: setUser, showNotification }) : /* @__PURE__ */ jsxs(Fragment, { children: [
       activeCall ? effectiveCallPhase === "incoming" ? /* @__PURE__ */ jsx(
