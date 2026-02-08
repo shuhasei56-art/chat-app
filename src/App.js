@@ -2469,18 +2469,30 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
   useEffect(() => {
     if (!(activeTab === "shop" && activeShopTab === "effects")) return;
     const qMarket = query(collectionGroup(db, "effects"), where("forSale", "==", true));
-    const unsubMarket = onSnapshot(qMarket, (snap) => {
-      const items = snap.docs.map((d) => ({ _key: d.ref.path, id: d.id, ref: d.ref, ...d.data() }));
-      items.sort((a, b) => {
+    const unsubMarket = onSnapshot(
+      qMarket,
+      (snap) => {
+        const items = snap.docs.map((d) => ({ _key: d.ref.path, id: d.id, ref: d.ref, ...d.data() }));
+        items.sort((a, b) => {
+          const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : a.createdAt?.seconds * 1e3 || 0;
+          const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : b.createdAt?.seconds * 1e3 || 0;
+          return tB - tA;
+        });
+        setMarketEffects(items);
+      },
+      (err) => {
+        console.warn("market effects subscribe failed:", err);
+        setMarketEffects([]);
+      }
+    );
+    const qMine = collection(db, "artifacts", appId, "public", "data", "users", user.uid, "effects");
+    const unsubMine = onSnapshot(qMine, (snap) => {
+      const mine = snap.docs.map((d) => ({ id: d.id, ref: d.ref, ...d.data() }));
+      mine.sort((a, b) => {
         const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : a.createdAt?.seconds * 1e3 || 0;
         const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : b.createdAt?.seconds * 1e3 || 0;
         return tB - tA;
       });
-      setMarketEffects(items);
-    });
-    const qMine = query(collection(db, "artifacts", appId, "public", "data", "users", user.uid, "effects"), orderBy("createdAt", "desc"));
-    const unsubMine = onSnapshot(qMine, (snap) => {
-      const mine = snap.docs.map((d) => ({ id: d.id, ref: d.ref, ...d.data() }));
       setMyEffects(mine);
       setPriceDrafts((prev) => {
         const next = { ...prev };
@@ -2495,6 +2507,34 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       unsubMine();
     };
   }, [activeTab, activeShopTab, user.uid]);
+  const visibleMarketEffects = useMemo(() => {
+    const getTime = (v) => {
+      if (!v) return 0;
+      if (v.toDate) return v.toDate().getTime();
+      if (typeof v.seconds === "number") return v.seconds * 1e3;
+      return 0;
+    };
+    const map = /* @__PURE__ */ new Map();
+    const push = (effect) => {
+      if (!effect?.forSale) return;
+      const refPath = effect?.ref?.path;
+      const key = effect?._key || refPath || effect?.id;
+      if (!key) return;
+      const inferredCreatorId = effect?.creatorId || effect?.ownerId || refPath?.split?.("/")?.[6] || "";
+      if (!inferredCreatorId) return;
+      const normalized = { ...effect, _key: key, creatorId: inferredCreatorId };
+      if (!map.has(key)) map.set(key, normalized);
+    };
+    marketEffects.forEach(push);
+    myEffects.forEach((ef) => push({ ...ef, _key: ef?.ref?.path || ef.id }));
+    const list = Array.from(map.values());
+    list.sort((a, b) => {
+      const tA = getTime(a.listedAt) || getTime(a.createdAt);
+      const tB = getTime(b.listedAt) || getTime(b.createdAt);
+      return tB - tA;
+    });
+    return list;
+  }, [marketEffects, myEffects]);
   const handleBuyEffect = async (effect) => {
     if (profile?.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     if ((profile.wallet || 0) < effect.price) {
@@ -2526,7 +2566,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
   const handleBuyMarketEffect = async (effect) => {
     if (profile?.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     const price = Number(effect?.price || 0);
-    const sellerId = effect?.creatorId;
+    const sellerId = effect?.creatorId || effect?.ownerId;
     if (!sellerId) {
       showNotification("\u8CA9\u58F2\u8005\u60C5\u5831\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
       return;
@@ -2791,7 +2831,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
             /* @__PURE__ */ jsx("h3", { className: "text-sm font-black text-gray-800", children: "\u30E6\u30FC\u30B6\u30FC\u51FA\u54C1" }),
             /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold text-gray-400", children: "\u3042\u306A\u305F\u304C\u4F5C\u3063\u305F\u30A8\u30D5\u30A7\u30AF\u30C8\u3082\u51FA\u54C1\u3067\u304D\u307E\u3059" })
           ] }),
-          marketEffects.filter((e) => e?.creatorId && e?.forSale).length === 0 ? /* @__PURE__ */ jsx("div", { className: "text-center py-10 text-gray-400 text-sm border rounded-2xl bg-white", children: "\u51FA\u54C1\u4E2D\u306E\u30A8\u30D5\u30A7\u30AF\u30C8\u304C\u3042\u308A\u307E\u305B\u3093" }) : /* @__PURE__ */ jsx("div", { className: "space-y-4", children: marketEffects.map((effect) => {
+          visibleMarketEffects.length === 0 ? /* @__PURE__ */ jsx("div", { className: "text-center py-10 text-gray-400 text-sm border rounded-2xl bg-white", children: "\u51FA\u54C1\u4E2D\u306E\u30A8\u30D5\u30A7\u30AF\u30C8\u304C\u3042\u308A\u307E\u305B\u3093" }) : /* @__PURE__ */ jsx("div", { className: "space-y-4", children: visibleMarketEffects.map((effect) => {
             const seller = allUsers.find((u) => u.uid === effect.creatorId);
             const isMine = effect.creatorId === user.uid;
             return /* @__PURE__ */ jsxs("div", { className: "border rounded-2xl p-4 shadow-sm bg-white flex items-center gap-4", children: [
