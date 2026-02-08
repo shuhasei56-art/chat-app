@@ -543,6 +543,7 @@ const AuthView = ({ onLogin, showNotification }) => {
 };
 const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerProp, isVideoEnabled = true, activeEffect, backgroundUrl, effects = [] }) => {
   const [remoteStream, setRemoteStream] = useState(null);
+  const [hasRemoteVideoTrack, setHasRemoteVideoTrack] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
   const [callError, setCallError] = useState(null);
@@ -558,6 +559,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const disconnectTimerRef = useRef(null);
   const isMountedRef = useRef(true);
   const startedRef = useRef(false);
+  const hasRemoteVideoTrackRef = useRef(false);
   const sessionId = callData?.sessionId || "";
   const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData?.callerId === user.uid;
   const getFilterStyle = (effectName) => {
@@ -647,6 +649,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     }
     remoteStreamRef.current = new MediaStream();
     setRemoteStream(null);
+    hasRemoteVideoTrackRef.current = false;
+    setHasRemoteVideoTrack(false);
     setNeedsRemotePlay(false);
     pendingCandidatesRef.current = [];
   }, []);
@@ -673,7 +677,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     let videoFailed = false;
     const audioEl = remoteAudioRef.current;
     const videoEl = remoteVideoRef.current;
-    const hasVideoTrack = !!videoEl?.srcObject?.getVideoTracks?.().some((track) => track.readyState === "live");
+    const hasVideoTrack = hasRemoteVideoTrackRef.current || !!videoEl?.srcObject?.getVideoTracks?.().some((track) => track.readyState === "live");
     if (audioEl) {
       audioEl.muted = false;
       audioEl.volume = 1;
@@ -756,6 +760,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           const exists = stream.getTracks().some((track) => track.id === event.track.id);
           if (!exists) stream.addTrack(event.track);
         }
+        const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState === "live");
+        hasRemoteVideoTrackRef.current = hasLiveVideo;
+        setHasRemoteVideoTrack(hasLiveVideo);
         setRemoteStream(stream);
         if (remoteAudioRef.current) {
           remoteAudioRef.current.srcObject = stream;
@@ -922,11 +929,14 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     if (remoteStream && remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = remoteStream;
     }
+    const hasLiveVideo = remoteStream?.getVideoTracks?.().some((track) => track.readyState === "live") || false;
+    hasRemoteVideoTrackRef.current = hasLiveVideo;
+    setHasRemoteVideoTrack(hasLiveVideo);
     if (remoteStream) {
       tryPlayRemoteMedia();
     }
   }, [remoteStream, tryPlayRemoteMedia]);
-  const hasRemoteVideo = remoteStream?.getVideoTracks?.().some((track) => track.readyState === "live");
+  const hasRemoteVideo = hasRemoteVideoTrack || remoteStream?.getVideoTracks?.().some((track) => track.readyState === "live");
   const resumeRemotePlayback = async () => {
     await tryPlayRemoteMedia();
   };
@@ -3578,7 +3588,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         !headerAvatarError && icon ? /* @__PURE__ */ jsx("img", { src: icon, className: "w-9 h-9 rounded-xl object-cover border border-gray-200", onError: () => setHeaderAvatarError(true) }, icon) : /* @__PURE__ */ jsx("div", { className: "w-9 h-9 rounded-xl bg-[#7a54c5] text-white text-base leading-none font-medium flex items-center justify-center", children: (title || "h").trim().charAt(0).toLowerCase() || "h" }),
         !isGroup && partnerData && isTodayBirthday(partnerData.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
       ] }),
-      !isGroup ? /* @__PURE__ */ jsx("div", { className: "font-bold text-[8px] flex-1 truncate text-gray-900 leading-none", children: title }) : /* @__PURE__ */ jsx("div", { className: "flex-1" }),
+      !isGroup ? /* @__PURE__ */ jsx("div", { className: "font-bold text-[12px] flex-1 truncate text-gray-900 leading-none", children: title }) : /* @__PURE__ */ jsx("div", { className: "flex-1" }),
       /* @__PURE__ */ jsxs("div", { className: "flex gap-2 mr-1 items-center", children: [
         /* @__PURE__ */ jsxs("div", { className: "relative", children: [
           /* @__PURE__ */ jsx("button", { onClick: () => setBackgroundMenuOpen(!backgroundMenuOpen), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u80CC\u666F\u3092\u5909\u66F4", children: /* @__PURE__ */ jsx(Palette, { className: "w-5 h-5 text-gray-500" }) }),
