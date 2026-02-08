@@ -545,6 +545,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const remoteStreamRef = useRef(new MediaStream());
   const unsubscribersRef = useRef([]);
   const pendingCandidatesRef = useRef([]);
+  const disconnectTimerRef = useRef(null);
   const isMountedRef = useRef(true);
   const startedRef = useRef(false);
   const sessionId = callData?.sessionId || "";
@@ -610,6 +611,10 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     } catch {
     }
     pcRef.current = null;
+    if (disconnectTimerRef.current) {
+      clearTimeout(disconnectTimerRef.current);
+      disconnectTimerRef.current = null;
+    }
     try {
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -699,7 +704,24 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       pcRef.current = pc;
       pc.onconnectionstatechange = () => {
         const state = pc.connectionState;
-        if (state === "failed" || state === "disconnected" || state === "closed") {
+        if (state === "connected") {
+          if (disconnectTimerRef.current) {
+            clearTimeout(disconnectTimerRef.current);
+            disconnectTimerRef.current = null;
+          }
+          return;
+        }
+        if (state === "disconnected") {
+          if (disconnectTimerRef.current) return;
+          disconnectTimerRef.current = setTimeout(() => {
+            disconnectTimerRef.current = null;
+            if (!pcRef.current || pcRef.current.connectionState === "connected") return;
+            setCallError("\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
+            safeEndCall(1200);
+          }, 5e3);
+          return;
+        }
+        if (state === "failed" || state === "closed") {
           setCallError("\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
           safeEndCall(1200);
         }
@@ -1643,7 +1665,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
     ] }),
     /* @__PURE__ */ jsxs("div", { className: `flex flex-col ${isMe ? "items-end" : "items-start"} max-w-[75%]`, children: [
       !isMe && isGroup && /* @__PURE__ */ jsx("div", { className: "text-[10px] text-gray-600 font-bold mb-1 ml-1 cursor-pointer hover:underline", onClick: () => onShowProfile && onShowProfile(sender), children: sender?.name }),
-      /* @__PURE__ */ jsx("div", { className: "relative", children: /* @__PURE__ */ jsxs("div", { onClick: handleBubbleClick, className: `p-2 px-3 rounded-2xl text-[13px] shadow-sm relative cursor-pointer ${m.type === "sticker" ? "bg-transparent shadow-none p-0" : isMe ? "bg-[#7cfc00] rounded-tr-none" : "bg-white rounded-tl-none"} ${["image", "video", "call_invite"].includes(m.type) ? "p-0 bg-transparent shadow-none" : ""}`, children: [
+      /* @__PURE__ */ jsx("div", { className: "relative", children: /* @__PURE__ */ jsxs("div", { onClick: handleBubbleClick, className: `p-2.5 px-3.5 rounded-[22px] text-[13px] shadow-sm relative cursor-pointer ${m.type === "sticker" ? "bg-transparent shadow-none p-0" : isMe ? "bg-[#76ff03] text-black" : "bg-white text-black"} ${["image", "video", "call_invite"].includes(m.type) ? "p-0 bg-transparent shadow-none" : ""}`, children: [
         m.replyTo && m.type !== "sticker" && /* @__PURE__ */ jsxs("div", { className: `mb-2 p-2 rounded-lg border-l-4 text-xs opacity-70 ${isMe ? "bg-black/5 border-white/50" : "bg-gray-100 border-gray-300"}`, children: [
           /* @__PURE__ */ jsx("div", { className: "font-bold text-[10px] mb-0.5", children: m.replyTo.senderName }),
           /* @__PURE__ */ jsxs("div", { className: "truncate flex items-center gap-1", children: [
@@ -3355,16 +3377,16 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   };
   if (!chatData) return /* @__PURE__ */ jsx("div", { className: "h-full flex items-center justify-center bg-white", children: /* @__PURE__ */ jsx(Loader2, { className: "w-8 h-8 animate-spin text-gray-400" }) });
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full relative", style: { backgroundColor: backgroundSrc ? "transparent" : "#8fb2c9", backgroundImage: backgroundSrc ? `url(${backgroundSrc})` : "none", backgroundSize: "cover", backgroundPosition: "center" }, children: [
-    /* @__PURE__ */ jsxs("div", { className: "p-3 bg-white/95 backdrop-blur border-b flex items-center gap-3 sticky top-0 z-10 shadow-sm", children: [
-      /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("home") }),
+    /* @__PURE__ */ jsxs("div", { className: "px-6 py-5 bg-[#f1f2f4] border-b border-gray-300 flex items-center gap-4 sticky top-0 z-10", children: [
+      /* @__PURE__ */ jsx(ChevronLeft, { className: "w-8 h-8 cursor-pointer text-black", onClick: () => setView("home") }),
       /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-        /* @__PURE__ */ jsx("img", { src: icon, className: "w-10 h-10 rounded-xl object-cover border" }, icon),
+        /* @__PURE__ */ jsx("img", { src: icon, className: "w-14 h-14 rounded-2xl object-cover border border-gray-200" }, icon),
         !isGroup && partnerData && isTodayBirthday(partnerData.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
       ] }),
-      !isGroup ? /* @__PURE__ */ jsx("div", { className: "font-bold text-sm flex-1 truncate", children: title }) : /* @__PURE__ */ jsx("div", { className: "flex-1" }),
-      /* @__PURE__ */ jsxs("div", { className: "flex gap-4 mr-2 items-center", children: [
+      !isGroup ? /* @__PURE__ */ jsx("div", { className: "font-bold text-2xl flex-1 truncate text-gray-900 sm:text-[38px] leading-none", children: title }) : /* @__PURE__ */ jsx("div", { className: "flex-1" }),
+      /* @__PURE__ */ jsxs("div", { className: "flex gap-4 mr-1 items-center", children: [
         /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-          /* @__PURE__ */ jsx("button", { onClick: () => setBackgroundMenuOpen(!backgroundMenuOpen), className: "hover:bg-gray-100 p-1 rounded-full transition-colors", title: "\u80CC\u666F\u3092\u5909\u66F4", children: /* @__PURE__ */ jsx(Palette, { className: "w-6 h-6 text-gray-600" }) }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setBackgroundMenuOpen(!backgroundMenuOpen), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u80CC\u666F\u3092\u5909\u66F4", children: /* @__PURE__ */ jsx(Palette, { className: "w-8 h-8 text-gray-500" }) }),
           backgroundMenuOpen && /* @__PURE__ */ jsxs("div", { className: "absolute top-full right-0 mt-2 bg-white rounded-xl shadow-xl border overflow-hidden w-40 z-20", children: [
             /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 px-4 py-3 hover:bg-gray-50 cursor-pointer text-sm font-bold text-gray-700", children: [
               /* @__PURE__ */ jsx(ImageIcon, { className: "w-4 h-4" }),
@@ -3386,10 +3408,10 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             children: /* @__PURE__ */ jsx(Settings, { className: "w-6 h-6 text-gray-600" })
           }
         ),
-        /* @__PURE__ */ jsx("button", { onClick: () => setAiEffectModalOpen(true), className: "hover:bg-purple-100 p-1 rounded-full transition-colors", title: "AI\u30A8\u30D5\u30A7\u30AF\u30C8\u751F\u6210", children: /* @__PURE__ */ jsx(Wand2, { className: "w-6 h-6 text-purple-600" }) }),
-        /* @__PURE__ */ jsx("button", { onClick: () => handleVideoCallButton(true), className: "hover:bg-gray-100 p-1 rounded-full transition-colors", title: "\u30D3\u30C7\u30AA\u901A\u8A71", children: /* @__PURE__ */ jsx(Video, { className: "w-6 h-6 text-gray-600" }) }),
-        /* @__PURE__ */ jsx("button", { onClick: () => handleVideoCallButton(false), className: "hover:bg-gray-100 p-1 rounded-full transition-colors", title: "\u97F3\u58F0\u901A\u8A71", children: /* @__PURE__ */ jsx(Phone, { className: "w-6 h-6 text-gray-600" }) }),
-        /* @__PURE__ */ jsx("button", { onClick: () => toggleMuteChat(activeChatId), children: mutedChats.includes(activeChatId) ? /* @__PURE__ */ jsx(BellOff, { className: "w-6 h-6 text-gray-400" }) : /* @__PURE__ */ jsx(Bell, { className: "w-6 h-6 text-gray-600" }) })
+        /* @__PURE__ */ jsx("button", { onClick: () => setAiEffectModalOpen(true), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "AI\u30A8\u30D5\u30A7\u30AF\u30C8\u751F\u6210", children: /* @__PURE__ */ jsx(Wand2, { className: "w-8 h-8 text-violet-500" }) }),
+        /* @__PURE__ */ jsx("button", { onClick: () => handleVideoCallButton(true), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u30D3\u30C7\u30AA\u901A\u8A71", children: /* @__PURE__ */ jsx(Video, { className: "w-8 h-8 text-gray-500" }) }),
+        /* @__PURE__ */ jsx("button", { onClick: () => handleVideoCallButton(false), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u97F3\u58F0\u901A\u8A71", children: /* @__PURE__ */ jsx(Phone, { className: "w-8 h-8 text-gray-500" }) }),
+        /* @__PURE__ */ jsx("button", { onClick: () => toggleMuteChat(activeChatId), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", children: mutedChats.includes(activeChatId) ? /* @__PURE__ */ jsx(BellOff, { className: "w-8 h-8 text-gray-400" }) : /* @__PURE__ */ jsx(Bell, { className: "w-8 h-8 text-gray-500" }) })
       ] }),
       groupSettingsOpen && isGroup && /* @__PURE__ */ jsx(
         "div",
@@ -3519,7 +3541,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       ] }),
       /* @__PURE__ */ jsx("button", { onClick: () => setCardModalOpen(true), className: "bg-pink-500 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm", children: "\u30AB\u30FC\u30C9\u3092\u66F8\u304F" })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: `flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide ${backgroundSrc ? "bg-white/40 backdrop-blur-sm" : ""}`, children: [
+    /* @__PURE__ */ jsxs("div", { className: `flex-1 overflow-y-auto px-5 py-4 space-y-4 scrollbar-hide ${backgroundSrc ? "bg-white/40 backdrop-blur-sm" : ""}`, children: [
       messages.length >= messageLimit && /* @__PURE__ */ jsx("div", { className: "flex justify-center py-2", children: /* @__PURE__ */ jsxs("button", { onClick: () => setMessageLimit((prev) => prev + 50), className: "bg-white/50 backdrop-blur-md px-4 py-1 rounded-full text-xs font-bold text-gray-700 shadow-sm flex items-center gap-1 hover:bg-white/70", children: [
         /* @__PURE__ */ jsx(ArrowUpCircle, { className: "w-4 h-4" }),
         " \u4EE5\u524D\u306E\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u8AAD\u307F\u8FBC\u3080"
@@ -3588,7 +3610,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u9001\u91D1" })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: "p-3 bg-white border-t flex flex-col gap-2 relative z-10", children: [
+    /* @__PURE__ */ jsxs("div", { className: "px-5 py-4 bg-[#f1f2f4] border-t border-gray-300 flex flex-col gap-2 relative z-10", children: [
       stickerMenuOpen && myStickerPacks.length > 0 && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-full left-0 right-0 bg-gray-50 border-t h-72 flex flex-col shadow-2xl rounded-t-3xl overflow-hidden animate-in slide-in-from-bottom-2 z-20", children: [
         /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-4 content-start", children: myStickerPacks.find((p) => p.id === selectedPackId)?.stickers.map((s, i) => /* @__PURE__ */ jsxs("div", { className: "relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm", onClick: () => sendMessage(s, "sticker", { packId: selectedPackId }), children: [
           /* @__PURE__ */ jsx("img", { src: typeof s === "string" ? s : s.image, className: "w-full aspect-square object-contain" }),
@@ -3611,11 +3633,11 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         /* @__PURE__ */ jsx("button", { onClick: () => setReplyTo(null), className: "p-1 hover:bg-gray-200 rounded-full", children: /* @__PURE__ */ jsx(X, { className: "w-4 h-4 text-gray-500" }) })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-        /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: `p-2 rounded-full ${plusMenuOpen ? "bg-gray-100 rotate-45" : ""}`, children: /* @__PURE__ */ jsx(Plus, { className: "w-5 h-5 text-gray-400" }) }),
+        /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: `p-2 rounded-full ${plusMenuOpen ? "bg-gray-200 rotate-45" : ""}`, children: /* @__PURE__ */ jsx(Plus, { className: "w-7 h-7 text-gray-400" }) }),
         /* @__PURE__ */ jsxs("div", { className: "flex-1 flex gap-2 relative", children: [
           !isRecording ? /* @__PURE__ */ jsxs("div", { className: "flex-1 flex gap-2", children: [
-            /* @__PURE__ */ jsx("input", { className: "flex-1 bg-gray-100 rounded-2xl px-4 py-2 text-sm focus:outline-none", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }),
-            /* @__PURE__ */ jsx("button", { onClick: () => setStickerMenuOpen(!stickerMenuOpen), className: `p-2 rounded-full hover:bg-gray-100 ${stickerMenuOpen ? "text-green-500 bg-green-50" : "text-gray-400"}`, children: /* @__PURE__ */ jsx(Smile, { className: "w-5 h-5" }) })
+            /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-6 py-3.5 text-base sm:text-lg leading-none focus:outline-none placeholder:text-gray-400", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }),
+            /* @__PURE__ */ jsx("button", { onClick: () => setStickerMenuOpen(!stickerMenuOpen), className: `p-3 rounded-full bg-[#e6e6ea] hover:bg-gray-300 ${stickerMenuOpen ? "text-green-500" : "text-gray-500"}`, children: /* @__PURE__ */ jsx(Smile, { className: "w-6 h-6" }) })
           ] }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-2xl px-4 py-2 flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-xs", children: [
             /* @__PURE__ */ jsx("div", { className: "w-2 h-2 rounded-full bg-red-500 animate-ping" }),
             "\u9332\u97F3\u4E2D... ",
@@ -3623,7 +3645,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             ":",
             (recordingTime % 60).toString().padStart(2, "0")
           ] }) }),
-          !text && !isUploading && /* @__PURE__ */ jsx(Fragment, { children: !isRecording ? /* @__PURE__ */ jsx("button", { onClick: startRecording, className: "p-2 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200", children: /* @__PURE__ */ jsx(Mic, { className: "w-5 h-5" }) }) : /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
+          !text && !isUploading && /* @__PURE__ */ jsx(Fragment, { children: !isRecording ? /* @__PURE__ */ jsx("button", { onClick: startRecording, className: "p-3 rounded-full bg-[#e6e6ea] text-gray-500 hover:bg-gray-300", children: /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }) : /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
             /* @__PURE__ */ jsx("button", { onClick: cancelRecording, className: "p-2 rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300", title: "\u30AD\u30E3\u30F3\u30BB\u30EB", children: /* @__PURE__ */ jsx(Trash2, { className: "w-5 h-5" }) }),
             /* @__PURE__ */ jsx("button", { onClick: stopRecording, className: "p-2 rounded-full bg-red-500 text-white hover:bg-red-600 animate-bounce", title: "\u505C\u6B62\u3057\u3066\u9001\u4FE1", children: /* @__PURE__ */ jsx(StopCircle, { className: "w-5 h-5 fill-current" }) })
           ] }) })
@@ -4572,14 +4594,14 @@ function App() {
     if (!activeCall) return null;
     if (activeCall.isGroupCall) return activeCall.phase;
     const callStatus = syncedCallData?.status;
-    if (!callStatus) return null;
+    if (!callStatus) return activeCall.phase || null;
     if (callStatus === "accepted") return "inCall";
     if (callStatus === "ringing") {
       return syncedCallData?.callerId === user.uid ? "dialing" : "incoming";
     }
-    return null;
+    return activeCall.phase || null;
   }, [activeCall, syncedCallData, user?.uid]);
-  return /* @__PURE__ */ jsx("div", { className: "w-full min-h-[100dvh] bg-[#f3f4f6] flex items-center justify-center", children: /* @__PURE__ */ jsxs("div", { className: "w-full h-[100dvh] bg-[#f3f4f6] flex flex-col relative overflow-hidden", children: [
+  return /* @__PURE__ */ jsx("div", { className: "w-full min-h-[100dvh] bg-[#d7dbe1] flex items-center justify-center", children: /* @__PURE__ */ jsxs("div", { className: "w-full max-w-[760px] h-[100dvh] bg-[#f3f4f6] border-x border-gray-300 flex flex-col relative overflow-hidden", children: [
     notification && /* @__PURE__ */ jsx("div", { className: "fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce", children: notification }),
     !user ? /* @__PURE__ */ jsx(AuthView, { onLogin: setUser, showNotification }) : /* @__PURE__ */ jsxs(Fragment, { children: [
       activeCall ? effectiveCallPhase === "incoming" ? /* @__PURE__ */ jsx(
