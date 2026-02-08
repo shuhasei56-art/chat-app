@@ -1838,6 +1838,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
 });
 const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => {
   const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
+  const [postPreview, setPostPreview] = useState(null);
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
   useEffect(() => {
@@ -1896,7 +1897,13 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
       /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
-    (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsx("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px]", children: isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : post.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black", controls: true, playsInline: true }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover", loading: "lazy" }) }),
+    (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
+      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : post.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
+      !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: post.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
+        /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
+        "\u62E1\u5927"
+      ] })
+    ] }),
     /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-6 py-2 border-y mb-3", children: [
       /* @__PURE__ */ jsxs("button", { onClick: toggleLike, className: "flex items-center gap-1.5", children: [
         /* @__PURE__ */ jsx(Heart, { className: `w-5 h-5 ${isLiked ? "fill-red-500 text-red-500" : "text-gray-400"}` }),
@@ -1914,6 +1921,10 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
     /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 bg-gray-100 rounded-full px-4 py-1", children: [
       /* @__PURE__ */ jsx("input", { className: "flex-1 bg-transparent text-xs py-2 outline-none", placeholder: "\u30B3\u30E1\u30F3\u30C8...", value: commentText, onChange: (e) => setCommentText(e.target.value), onKeyPress: (e) => e.key === "Enter" && submitComment() }),
       /* @__PURE__ */ jsx("button", { onClick: submitComment, className: "text-green-500", children: /* @__PURE__ */ jsx(Send, { className: "w-4 h-4" }) })
+    ] }),
+    postPreview && /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1200] bg-black/95 flex items-center justify-center p-4", onClick: () => setPostPreview(null), children: [
+      /* @__PURE__ */ jsx("button", { className: "absolute top-5 right-5 text-white p-2 rounded-full bg-white/20", onClick: () => setPostPreview(null), children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) }),
+      postPreview.type === "video" ? /* @__PURE__ */ jsx("video", { src: postPreview.src, controls: true, autoPlay: true, className: "max-w-full max-h-[88vh] rounded-xl bg-black", onClick: (e) => e.stopPropagation() }) : /* @__PURE__ */ jsx("img", { src: postPreview.src, className: "max-w-full max-h-[88vh] object-contain rounded-xl", onClick: (e) => e.stopPropagation() })
     ] })
   ] });
 };
@@ -3567,7 +3578,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         !headerAvatarError && icon ? /* @__PURE__ */ jsx("img", { src: icon, className: "w-9 h-9 rounded-xl object-cover border border-gray-200", onError: () => setHeaderAvatarError(true) }, icon) : /* @__PURE__ */ jsx("div", { className: "w-9 h-9 rounded-xl bg-[#7a54c5] text-white text-base leading-none font-medium flex items-center justify-center", children: (title || "h").trim().charAt(0).toLowerCase() || "h" }),
         !isGroup && partnerData && isTodayBirthday(partnerData.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
       ] }),
-      !isGroup ? /* @__PURE__ */ jsx("div", { className: "font-bold text-[22px] flex-1 truncate text-gray-900 leading-none", children: title }) : /* @__PURE__ */ jsx("div", { className: "flex-1" }),
+      !isGroup ? /* @__PURE__ */ jsx("div", { className: "font-bold text-[8px] flex-1 truncate text-gray-900 leading-none", children: title }) : /* @__PURE__ */ jsx("div", { className: "flex-1" }),
       /* @__PURE__ */ jsxs("div", { className: "flex gap-2 mr-1 items-center", children: [
         /* @__PURE__ */ jsxs("div", { className: "relative", children: [
           /* @__PURE__ */ jsx("button", { onClick: () => setBackgroundMenuOpen(!backgroundMenuOpen), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u80CC\u666F\u3092\u5909\u66F4", children: /* @__PURE__ */ jsx(Palette, { className: "w-5 h-5 text-gray-500" }) }),
