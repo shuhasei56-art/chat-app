@@ -2518,7 +2518,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
         setMarketEffects([]);
       }
     );
-    const qPublicMarket = query(collection(db, "artifacts", appId, "public", "data", "effect_market"), where("forSale", "==", true));
+    const qPublicMarket = collection(db, "artifacts", appId, "public", "data", "effect_market");
     const unsubPublicMarket = onSnapshot(
       qPublicMarket,
       (snap) => {
@@ -2529,6 +2529,11 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
           marketRefPath: d.ref.path,
           ...d.data()
         }));
+        items.sort((a, b) => {
+          const tA = a.listedAt?.toDate ? a.listedAt.toDate().getTime() : a.listedAt?.seconds * 1e3 || a.updatedAt?.seconds * 1e3 || 0;
+          const tB = b.listedAt?.toDate ? b.listedAt.toDate().getTime() : b.listedAt?.seconds * 1e3 || b.updatedAt?.seconds * 1e3 || 0;
+          return tB - tA;
+        });
         setPublicMarketEffects(items);
       },
       (err) => {
@@ -2568,7 +2573,8 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     };
     const map = /* @__PURE__ */ new Map();
     const push = (effect) => {
-      if (!effect?.forSale) return;
+      const shouldShow = effect?.forSale !== false && Number(effect?.price || 0) > 0;
+      if (!shouldShow) return;
       const refPath = effect?.ref?.path;
       const key = effect?._key || refPath || effect?.id;
       if (!key) return;
@@ -2756,6 +2762,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
             soldCount: ef.soldCount || 0,
             listedAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
+            marketRefPath: marketRef.path,
             sourceRefPath: ef?.ref?.path || ""
           },
           { merge: true }
