@@ -3470,7 +3470,9 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             children: /* @__PURE__ */ jsx(Settings, { className: "w-5 h-5 text-gray-600" })
           }
         ),
+        /* @__PURE__ */ jsx("button", { onClick: () => handleVideoCallButton(false), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u97F3\u58F0\u901A\u8A71", children: /* @__PURE__ */ jsx(Phone, { className: "w-5 h-5 text-gray-500" }) }),
         /* @__PURE__ */ jsx("button", { onClick: () => handleVideoCallButton(true), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u30D3\u30C7\u30AA\u901A\u8A71", children: /* @__PURE__ */ jsx(Video, { className: "w-5 h-5 text-gray-500" }) }),
+        /* @__PURE__ */ jsx("button", { onClick: () => setAiEffectModalOpen(true), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "AI\u30A8\u30D5\u30A7\u30AF\u30C8", children: /* @__PURE__ */ jsx(Sparkles, { className: "w-5 h-5 text-gray-500" }) }),
         /* @__PURE__ */ jsx("button", { onClick: () => toggleMuteChat(activeChatId), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", children: mutedChats.includes(activeChatId) ? /* @__PURE__ */ jsx(BellOff, { className: "w-5 h-5 text-gray-400" }) : /* @__PURE__ */ jsx(Bell, { className: "w-5 h-5 text-gray-500" }) })
       ] }),
       groupSettingsOpen && isGroup && /* @__PURE__ */ jsx(
