@@ -4034,9 +4034,18 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     setOpenChatMenuId(null);
     if (!window.confirm("\u3053\u306E\u30C8\u30FC\u30AF\u3092\u975E\u8868\u793A\u306B\u3057\u307E\u3059\u304B\uFF1F\n\uFF08\u30C8\u30FC\u30AF\u5C65\u6B74\u306F\u524A\u9664\u3055\u308C\u307E\u305B\u3093\uFF09")) return;
     try {
-      await updateDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), {
+      const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+      const updatePayload = {
         hiddenChats: arrayUnion(chatId)
-      });
+      };
+      const targetChat = (chats || []).find((c) => c?.id === chatId);
+      if (targetChat && !targetChat.isGroup) {
+        const partnerUid = (targetChat.participants || []).find((p) => p && p !== user.uid);
+        if (partnerUid) {
+          updatePayload.hiddenFriends = arrayUnion(partnerUid);
+        }
+      }
+      await updateDoc(userRef, updatePayload);
       showNotification("\u975E\u8868\u793A\u306B\u3057\u307E\u3057\u305F");
     } catch (e2) {
       showNotification("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
@@ -4072,9 +4081,15 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     e.stopPropagation();
     setOpenFriendMenuId(null);
     try {
-      await updateDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), {
+      const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+      const relatedDirectChatIds = (chats || []).filter((c) => !c?.isGroup && (c.participants || []).includes(user.uid) && (c.participants || []).includes(friendUid)).map((c) => c.id);
+      const updatePayload = {
         hiddenFriends: arrayRemove(friendUid)
-      });
+      };
+      if (relatedDirectChatIds.length > 0) {
+        updatePayload.hiddenChats = arrayRemove(...relatedDirectChatIds);
+      }
+      await updateDoc(userRef, updatePayload);
       showNotification("\u975E\u8868\u793A\u3092\u89E3\u9664\u3057\u307E\u3057\u305F");
     } catch (e2) {
       showNotification("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
