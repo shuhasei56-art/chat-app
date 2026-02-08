@@ -147,6 +147,13 @@ const formatDateTime = (timestamp) => {
   const min = String(date.getMinutes()).padStart(2, "0");
   return `${yyyy}/${mm}/${dd} ${hh}:${min}`;
 };
+const getEffectOwnerUidFromRefPath = (refPath) => {
+  if (!refPath || typeof refPath !== "string") return "";
+  const parts = refPath.split("/");
+  const usersIndex = parts.indexOf("users");
+  if (usersIndex < 0) return "";
+  return parts[usersIndex + 1] || "";
+};
 const isTodayBirthday = (birthdayString) => {
   if (!birthdayString) return false;
   const today = /* @__PURE__ */ new Date();
@@ -2545,9 +2552,9 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       const refPath = effect?.ref?.path;
       const key = effect?._key || refPath || effect?.id;
       if (!key) return;
-      const inferredCreatorId = effect?.creatorId || effect?.ownerId || refPath?.split?.("/")?.[6] || "";
-      if (!inferredCreatorId) return;
-      const normalized = { ...effect, _key: key, creatorId: inferredCreatorId };
+      const inferredSellerId = effect?.creatorId || effect?.ownerId || getEffectOwnerUidFromRefPath(refPath);
+      if (!inferredSellerId) return;
+      const normalized = { ...effect, _key: key, creatorId: inferredSellerId, ownerId: effect?.ownerId || inferredSellerId };
       if (!map.has(key)) map.set(key, normalized);
     };
     marketEffects.forEach(push);
@@ -2591,7 +2598,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
   const handleBuyMarketEffect = async (effect) => {
     if (profile?.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     const price = Number(effect?.price || 0);
-    const sellerId = effect?.creatorId || effect?.ownerId;
+    const sellerId = effect?.creatorId || effect?.ownerId || getEffectOwnerUidFromRefPath(effect?.ref?.path);
     if (!sellerId) {
       showNotification("\u8CA9\u58F2\u8005\u60C5\u5831\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
       return;
