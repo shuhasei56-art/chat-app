@@ -4118,14 +4118,14 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
           )
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto scrollbar-hide", children: [
-          /* @__PURE__ */ jsxs("div", { className: "px-6 py-7 flex items-center gap-6 cursor-pointer border-b border-[#d5d9e0]", onClick: () => setView("profile"), children: [
+          /* @__PURE__ */ jsxs("div", { className: "px-6 py-6 flex items-center gap-5 cursor-pointer border-b border-[#d5d9e0] bg-[#f3f4f6]", onClick: () => setView("profile"), children: [
             /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-              /* @__PURE__ */ jsx("img", { src: profile?.avatar, className: "w-24 h-24 rounded-[24px] object-cover" }, profile?.avatar),
+              /* @__PURE__ */ jsx("img", { src: profile?.avatar, className: "w-20 h-20 sm:w-24 sm:h-24 rounded-[24px] object-cover" }, profile?.avatar),
               isTodayBirthday(profile?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-base", children: "\u{1F382}" })
             ] }),
             /* @__PURE__ */ jsxs("div", { className: "flex-1", children: [
-              /* @__PURE__ */ jsx("div", { className: "font-black text-[44px] text-black leading-none truncate", children: profile?.name }),
-              /* @__PURE__ */ jsxs("div", { className: "text-[14px] text-[#8b95a5] font-mono mt-2 leading-none", children: [
+              /* @__PURE__ */ jsx("div", { className: "font-black text-[22px] sm:text-[44px] text-black leading-none tracking-tight truncate", children: profile?.name }),
+              /* @__PURE__ */ jsxs("div", { className: "text-[12px] sm:text-[14px] text-[#8b95a5] font-mono mt-2 leading-none truncate", children: [
                 "ID: ",
                 profile?.id
               ] })
