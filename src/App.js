@@ -2468,6 +2468,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
   const [grantAmount, setGrantAmount] = useState("");
   const [effectsMode, setEffectsMode] = useState("market");
   const [marketEffects, setMarketEffects] = useState([]);
+  const [publicMarketEffects, setPublicMarketEffects] = useState([]);
   const [myEffects, setMyEffects] = useState([]);
   const [priceDrafts, setPriceDrafts] = useState({});
   const [updatingEffectId, setUpdatingEffectId] = useState(null);
@@ -2517,6 +2518,24 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
         setMarketEffects([]);
       }
     );
+    const qPublicMarket = query(collection(db, "artifacts", appId, "public", "data", "effect_market"), where("forSale", "==", true));
+    const unsubPublicMarket = onSnapshot(
+      qPublicMarket,
+      (snap) => {
+        const items = snap.docs.map((d) => ({
+          _key: d.ref.path,
+          id: d.id,
+          ref: d.ref,
+          marketRefPath: d.ref.path,
+          ...d.data()
+        }));
+        setPublicMarketEffects(items);
+      },
+      (err) => {
+        console.warn("public market subscribe failed:", err);
+        setPublicMarketEffects([]);
+      }
+    );
     const qMine = collection(db, "artifacts", appId, "public", "data", "users", user.uid, "effects");
     const unsubMine = onSnapshot(qMine, (snap) => {
       const mine = snap.docs.map((d) => ({ id: d.id, ref: d.ref, ...d.data() }));
@@ -2536,6 +2555,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     });
     return () => {
       unsubMarket();
+      unsubPublicMarket();
       unsubMine();
     };
   }, [activeTab, activeShopTab, user.uid]);
@@ -2557,6 +2577,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       const normalized = { ...effect, _key: key, creatorId: inferredSellerId, ownerId: effect?.ownerId || inferredSellerId };
       if (!map.has(key)) map.set(key, normalized);
     };
+    publicMarketEffects.forEach(push);
     marketEffects.forEach(push);
     myEffects.forEach((ef) => push({ ...ef, _key: ef?.ref?.path || ef.id }));
     const list = Array.from(map.values());
@@ -2566,7 +2587,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       return tB - tA;
     });
     return list;
-  }, [marketEffects, myEffects]);
+  }, [marketEffects, myEffects, publicMarketEffects]);
   const handleBuyEffect = async (effect) => {
     if (profile?.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     if ((profile.wallet || 0) < effect.price) {
@@ -2648,7 +2669,12 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
           purchasedAt: serverTimestamp(),
           createdAt: serverTimestamp()
         });
-        if (effect?.ref) {
+        if (effect?.sourceRefPath) {
+          t.update(doc(db, effect.sourceRefPath), { soldCount: increment(1) });
+        }
+        if (effect?.marketRefPath) {
+          t.update(doc(db, effect.marketRefPath), { soldCount: increment(1) });
+        } else if (effect?.ref) {
           t.update(effect.ref, { soldCount: increment(1) });
         }
       });
@@ -2681,6 +2707,10 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     setUpdatingEffectId(ef.id);
     try {
       await updateDoc(ef.ref, { price, creatorId: ef.creatorId || user.uid, ownerId: ef.ownerId || user.uid });
+      if (ef.forSale) {
+        const marketRef = doc(db, "artifacts", appId, "public", "data", "effect_market", `${user.uid}_${ef.id}`);
+        await setDoc(marketRef, { price, updatedAt: serverTimestamp() }, { merge: true });
+      }
       showNotification("\u4FA1\u683C\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F");
     } catch (e) {
       console.error(e);
@@ -2711,6 +2741,25 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
           ownerId: ef.ownerId || user.uid,
           listedAt: serverTimestamp()
         });
+        const marketRef = doc(db, "artifacts", appId, "public", "data", "effect_market", `${user.uid}_${ef.id}`);
+        await setDoc(
+          marketRef,
+          {
+            effectId: ef.id,
+            name: ef.name,
+            image: ef.image,
+            filter: ef.filter || null,
+            forSale: true,
+            price,
+            creatorId: ef.creatorId || user.uid,
+            ownerId: ef.ownerId || user.uid,
+            soldCount: ef.soldCount || 0,
+            listedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            sourceRefPath: ef?.ref?.path || ""
+          },
+          { merge: true }
+        );
         showNotification("\u30B7\u30E7\u30C3\u30D7\u306B\u51FA\u54C1\u3057\u307E\u3057\u305F");
       } catch (e) {
         console.error(e);
@@ -2722,6 +2771,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       setUpdatingEffectId(ef.id);
       try {
         await updateDoc(ef.ref, { forSale: false });
+        await deleteDoc(doc(db, "artifacts", appId, "public", "data", "effect_market", `${user.uid}_${ef.id}`)).catch(() => null);
         showNotification("\u51FA\u54C1\u3092\u505C\u6B62\u3057\u307E\u3057\u305F");
       } catch (e) {
         console.error(e);
