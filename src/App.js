@@ -3963,7 +3963,6 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
   const [coinModalTarget, setCoinModalTarget] = useState(null);
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
   const [openFriendMenuId, setOpenFriendMenuId] = useState(null);
-  const myFriendUids = useMemo(() => new Set(profile?.friends || []), [profile?.friends]);
   const hiddenFriendUids = useMemo(() => new Set(profile?.hiddenFriends || []), [profile?.hiddenFriends]);
   const talkFriendUids = useMemo(() => {
     const s = /* @__PURE__ */ new Set();
@@ -3984,8 +3983,8 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
   const talkFriendCount = talkFriendUids.size;
   const groupChatCount = useMemo(() => (chats || []).filter((c) => c?.isGroup).length, [chats]);
   const friendsListAll = useMemo(
-    () => allUsers.filter((u) => myFriendUids.has(u.uid)),
-    [allUsers, myFriendUids]
+    () => allUsers.filter((u) => u?.uid && u.uid !== user.uid && directFriendUids.has(u.uid)),
+    [allUsers, directFriendUids, user.uid]
   );
   const directFriendsListAll = useMemo(
     () => allUsers.filter((u) => directFriendUids.has(u.uid)),
