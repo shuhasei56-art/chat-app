@@ -99,7 +99,6 @@ import {
   KeyRound,
   MicOff,
   VideoOff,
-  Wand2,
   Sparkles,
   MoreVertical,
   EyeOff,
@@ -1756,7 +1755,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
             " \u53CB\u3060\u3061\u8FFD\u52A0"
           ] })
         ] }),
-        /* @__PURE__ */ jsx("div", { className: `text-[8px] opacity-50 mt-1 text-right ${m.type === "sticker" ? "text-gray-500 font-bold bg-white/50 px-1 rounded" : ""}`, children: formatDateTime(m.createdAt) }),
+        /* @__PURE__ */ jsx("div", { className: `text-[8px] mt-1 ${m.type === "image" || m.type === "video" ? "mx-auto w-fit px-3 py-0.5 rounded-full bg-white/30 text-[#8ea0ad] font-bold" : "opacity-50 text-right"} ${m.type === "sticker" ? "text-gray-500 font-bold bg-white/50 px-1 rounded" : ""}`, children: formatDateTime(m.createdAt) }),
         showMenu && /* @__PURE__ */ jsxs("div", { className: `absolute top-full ${isMe ? "right-0" : "left-0"} mt-1 z-[100] flex flex-col bg-white rounded-xl shadow-2xl border overflow-hidden min-w-[180px] animate-in slide-in-from-top-2 duration-200`, children: [
           /* @__PURE__ */ jsx("div", { className: "flex justify-between items-center p-2 bg-gray-50 border-b gap-1 overflow-x-auto scrollbar-hide", children: REACTION_EMOJIS.map((emoji) => /* @__PURE__ */ jsx("button", { onClick: (e) => {
             e.stopPropagation();
@@ -3471,9 +3470,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             children: /* @__PURE__ */ jsx(Settings, { className: "w-6 h-6 text-gray-600" })
           }
         ),
-        /* @__PURE__ */ jsx("button", { onClick: () => setAiEffectModalOpen(true), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "AI\u30A8\u30D5\u30A7\u30AF\u30C8\u751F\u6210", children: /* @__PURE__ */ jsx(Wand2, { className: "w-8 h-8 text-violet-500" }) }),
         /* @__PURE__ */ jsx("button", { onClick: () => handleVideoCallButton(true), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u30D3\u30C7\u30AA\u901A\u8A71", children: /* @__PURE__ */ jsx(Video, { className: "w-8 h-8 text-gray-500" }) }),
-        /* @__PURE__ */ jsx("button", { onClick: () => handleVideoCallButton(false), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u97F3\u58F0\u901A\u8A71", children: /* @__PURE__ */ jsx(Phone, { className: "w-8 h-8 text-gray-500" }) }),
         /* @__PURE__ */ jsx("button", { onClick: () => toggleMuteChat(activeChatId), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", children: mutedChats.includes(activeChatId) ? /* @__PURE__ */ jsx(BellOff, { className: "w-8 h-8 text-gray-400" }) : /* @__PURE__ */ jsx(Bell, { className: "w-8 h-8 text-gray-500" }) })
       ] }),
       groupSettingsOpen && isGroup && /* @__PURE__ */ jsx(
@@ -3673,7 +3670,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u9001\u91D1" })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: "px-5 py-3 bg-[#f1f2f4] border-t border-gray-300 flex flex-col gap-2 relative z-10", children: [
+    /* @__PURE__ */ jsxs("div", { className: "px-5 py-4 bg-[#f1f2f4] border-t border-gray-300 flex flex-col gap-2 relative z-10", children: [
       stickerMenuOpen && myStickerPacks.length > 0 && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-full left-0 right-0 bg-gray-50 border-t h-72 flex flex-col shadow-2xl rounded-t-3xl overflow-hidden animate-in slide-in-from-bottom-2 z-20", children: [
         /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-4 content-start", children: myStickerPacks.find((p) => p.id === selectedPackId)?.stickers.map((s, i) => /* @__PURE__ */ jsxs("div", { className: "relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm", onClick: () => sendMessage(s, "sticker", { packId: selectedPackId }), children: [
           /* @__PURE__ */ jsx("img", { src: typeof s === "string" ? s : s.image, className: "w-full aspect-square object-contain" }),
@@ -3695,23 +3692,19 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         ] }),
         /* @__PURE__ */ jsx("button", { onClick: () => setReplyTo(null), className: "p-1 hover:bg-gray-200 rounded-full", children: /* @__PURE__ */ jsx(X, { className: "w-4 h-4 text-gray-500" }) })
       ] }),
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-        /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: `p-2 rounded-full ${plusMenuOpen ? "bg-gray-200 rotate-45" : ""}`, children: /* @__PURE__ */ jsx(Plus, { className: "w-7 h-7 text-gray-400" }) }),
-        /* @__PURE__ */ jsxs("div", { className: "flex-1 flex gap-2 relative", children: [
-          !isRecording ? /* @__PURE__ */ jsxs("div", { className: "flex-1 flex gap-2", children: [
-            /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-6 py-3 text-lg leading-none focus:outline-none placeholder:text-[#9ca3af]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }),
-            /* @__PURE__ */ jsx("button", { onClick: () => setStickerMenuOpen(!stickerMenuOpen), className: `p-3 rounded-full bg-[#e6e6ea] hover:bg-gray-300 ${stickerMenuOpen ? "text-green-500" : "text-gray-500"}`, children: /* @__PURE__ */ jsx(Smile, { className: "w-6 h-6" }) })
-          ] }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-2xl px-4 py-2 flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-xs", children: [
-            /* @__PURE__ */ jsx("div", { className: "w-2 h-2 rounded-full bg-red-500 animate-ping" }),
-            "\u9332\u97F3\u4E2D... ",
-            Math.floor(recordingTime / 60),
-            ":",
-            (recordingTime % 60).toString().padStart(2, "0")
-          ] }) }),
-          !text && !isUploading && /* @__PURE__ */ jsx(Fragment, { children: !isRecording ? /* @__PURE__ */ jsx("button", { onClick: startRecording, className: "p-3 rounded-full bg-[#e6e6ea] text-gray-500 hover:bg-gray-300", children: /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }) : /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
-            /* @__PURE__ */ jsx("button", { onClick: cancelRecording, className: "p-2 rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300", title: "\u30AD\u30E3\u30F3\u30BB\u30EB", children: /* @__PURE__ */ jsx(Trash2, { className: "w-5 h-5" }) }),
-            /* @__PURE__ */ jsx("button", { onClick: stopRecording, className: "p-2 rounded-full bg-red-500 text-white hover:bg-red-600 animate-bounce", title: "\u505C\u6B62\u3057\u3066\u9001\u4FE1", children: /* @__PURE__ */ jsx(StopCircle, { className: "w-5 h-5 fill-current" }) })
-          ] }) })
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+        /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: "p-1", children: /* @__PURE__ */ jsx(Plus, { className: "w-8 h-8 text-gray-400" }) }),
+        !isRecording ? /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-6 py-3 text-lg leading-none focus:outline-none placeholder:text-[#9ca3af]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-full px-4 py-3 flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-xs", children: [
+          /* @__PURE__ */ jsx("div", { className: "w-2 h-2 rounded-full bg-red-500 animate-ping" }),
+          "\u9332\u97F3\u4E2D... ",
+          Math.floor(recordingTime / 60),
+          ":",
+          (recordingTime % 60).toString().padStart(2, "0")
+        ] }) }),
+        /* @__PURE__ */ jsx("button", { onClick: () => setStickerMenuOpen(!stickerMenuOpen), className: `p-3 rounded-full bg-[#e6e6ea] hover:bg-gray-300 ${stickerMenuOpen ? "text-green-500" : "text-gray-500"}`, children: /* @__PURE__ */ jsx(Smile, { className: "w-6 h-6" }) }),
+        !isRecording ? /* @__PURE__ */ jsx("button", { onClick: startRecording, className: "p-3 rounded-full bg-[#e6e6ea] text-gray-500 hover:bg-gray-300", children: /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }) : /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
+          /* @__PURE__ */ jsx("button", { onClick: cancelRecording, className: "p-2 rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300", title: "\u30AD\u30E3\u30F3\u30BB\u30EB", children: /* @__PURE__ */ jsx(Trash2, { className: "w-5 h-5" }) }),
+          /* @__PURE__ */ jsx("button", { onClick: stopRecording, className: "p-2 rounded-full bg-red-500 text-white hover:bg-red-600 animate-bounce", title: "\u505C\u6B62\u3057\u3066\u9001\u4FE1", children: /* @__PURE__ */ jsx(StopCircle, { className: "w-5 h-5 fill-current" }) })
         ] }),
         (text || isUploading) && /* @__PURE__ */ jsx("button", { onClick: () => sendMessage(text), disabled: !text && !isUploading, className: `p-2 rounded-full ${text ? "text-green-500" : "text-gray-300"}`, children: isUploading ? /* @__PURE__ */ jsxs("div", { className: "relative", children: [
           /* @__PURE__ */ jsx(Loader2, { className: "w-6 h-6 animate-spin text-green-500" }),
@@ -3966,355 +3959,91 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
   const [tab, setTab] = useState("chats");
   const [selectedFriend, setSelectedFriend] = useState(null);
   const [coinModalTarget, setCoinModalTarget] = useState(null);
-  const [openChatMenuId, setOpenChatMenuId] = useState(null);
-  const [openFriendMenuId, setOpenFriendMenuId] = useState(null);
-  const myFriendUids = useMemo(() => new Set(profile?.friends || []), [profile?.friends]);
-  const hiddenFriendUids = useMemo(() => new Set(profile?.hiddenFriends || []), [profile?.hiddenFriends]);
-  const talkFriendUids = useMemo(() => {
-    const s = /* @__PURE__ */ new Set();
-    (chats || []).forEach((c) => {
-      if (!c || c.isGroup) return;
-      const parts = c.participants || [];
-      if (!parts.includes(user.uid)) return;
-      const other = parts.find((p) => p && p !== user.uid);
-      if (other) s.add(other);
-    });
-    return s;
-  }, [chats, user.uid]);
-  const directFriendUids = useMemo(() => {
-    const s = new Set(profile?.friends || []);
-    talkFriendUids.forEach((uid) => s.add(uid));
-    return s;
-  }, [profile?.friends, talkFriendUids]);
-  const talkFriendCount = talkFriendUids.size;
-  const groupChatCount = useMemo(() => (chats || []).filter((c) => c?.isGroup).length, [chats]);
-  const friendsListAll = useMemo(
-    () => allUsers.filter((u) => directFriendUids.has(u.uid)),
-    [allUsers, directFriendUids]
+  const friendsList = useMemo(
+    () => allUsers.filter((u) => (profile?.friends || []).includes(u.uid)),
+    [allUsers, profile?.friends]
   );
-  const directFriendsListAll = useMemo(
-    () => allUsers.filter((u) => directFriendUids.has(u.uid)),
-    [allUsers, directFriendUids]
+  const visibleChats = useMemo(
+    () => (chats || []).filter((c) => !(profile?.hiddenChats || []).includes(c.id)).sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)),
+    [chats, profile?.hiddenChats]
   );
-  const visibleFriendsList = useMemo(
-    () => friendsListAll.filter((u) => !hiddenFriendUids.has(u.uid)),
-    [friendsListAll, hiddenFriendUids]
-  );
-  const hiddenFriendsList = useMemo(
-    () => friendsListAll.filter((u) => hiddenFriendUids.has(u.uid)),
-    [friendsListAll, hiddenFriendUids]
-  );
-  const friendsOfFriendsCount = useMemo(() => {
-    const fof = /* @__PURE__ */ new Set();
-    directFriendsListAll.forEach((f) => {
-      const ff = f?.friends || [];
-      ff.forEach((uid) => {
-        if (!uid) return;
-        if (uid === user.uid) return;
-        if (directFriendUids.has(uid)) return;
-        fof.add(uid);
-      });
-    });
-    return fof.size;
-  }, [directFriendsListAll, user.uid, directFriendUids]);
-  const getMutualCount = useCallback((friend) => {
-    const ff = friend?.friends || [];
-    let n = 0;
-    for (const uid of ff) {
-      if (!uid || uid === user.uid) continue;
-      if (directFriendUids.has(uid)) n++;
-    }
-    return n;
-  }, [directFriendUids, user.uid]);
-  const getFofCandidateCount = useCallback((friend) => {
-    const ff = friend?.friends || [];
-    let n = 0;
-    for (const uid of ff) {
-      if (!uid || uid === user.uid) continue;
-      if (!directFriendUids.has(uid)) n++;
-    }
-    return n;
-  }, [directFriendUids, user.uid]);
-  const handleHideChat = async (e, chatId) => {
-    e.stopPropagation();
-    setOpenChatMenuId(null);
-    if (!window.confirm("\u3053\u306E\u30C8\u30FC\u30AF\u3092\u975E\u8868\u793A\u306B\u3057\u307E\u3059\u304B\uFF1F\n\uFF08\u30C8\u30FC\u30AF\u5C65\u6B74\u306F\u524A\u9664\u3055\u308C\u307E\u305B\u3093\uFF09")) return;
-    try {
-      await updateDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), {
-        hiddenChats: arrayUnion(chatId)
-      });
-      showNotification("\u975E\u8868\u793A\u306B\u3057\u307E\u3057\u305F");
-    } catch (e2) {
-      showNotification("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
-    }
-  };
-  const handleDeleteChat = async (e, chatId) => {
-    e.stopPropagation();
-    setOpenChatMenuId(null);
-    if (!window.confirm("\u3053\u306E\u30C8\u30FC\u30AF\u3092\u524A\u9664\uFF08\u9000\u51FA\uFF09\u3057\u307E\u3059\u304B\uFF1F\n\u76F8\u624B\u3068\u306E\u30C8\u30FC\u30AF\u30EA\u30B9\u30C8\u304B\u3089\u3082\u524A\u9664\u3055\u308C\u308B\u53EF\u80FD\u6027\u304C\u3042\u308A\u307E\u3059\u3002")) return;
-    try {
-      await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), {
-        participants: arrayRemove(user.uid)
-      });
-      showNotification("\u524A\u9664\u3057\u307E\u3057\u305F");
-    } catch (e2) {
-      showNotification("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
-    }
-  };
-  const handleHideFriend = async (e, friendUid) => {
-    e.stopPropagation();
-    setOpenFriendMenuId(null);
-    if (!window.confirm("\u3053\u306E\u53CB\u3060\u3061\u3092\u975E\u8868\u793A\u306B\u3057\u307E\u3059\u304B\uFF1F\n\uFF08\u53CB\u3060\u3061\u95A2\u4FC2\u306F\u89E3\u9664\u3055\u308C\u307E\u305B\u3093\uFF09")) return;
-    try {
-      await updateDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), {
-        hiddenFriends: arrayUnion(friendUid)
-      });
-      showNotification("\u975E\u8868\u793A\u306B\u3057\u307E\u3057\u305F");
-    } catch (e2) {
-      showNotification("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
-    }
-  };
-  const handleUnhideFriend = async (e, friendUid) => {
-    e.stopPropagation();
-    setOpenFriendMenuId(null);
-    try {
-      await updateDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), {
-        hiddenFriends: arrayRemove(friendUid)
-      });
-      showNotification("\u975E\u8868\u793A\u3092\u89E3\u9664\u3057\u307E\u3057\u305F");
-    } catch (e2) {
-      showNotification("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
-    }
-  };
-  return /* @__PURE__ */ jsxs(
-    "div",
-    {
-      className: "flex flex-col h-full bg-[#f1f2f4]",
-      onClick: () => {
-        setOpenChatMenuId(null);
-        setOpenFriendMenuId(null);
-      },
-      children: [
-        /* @__PURE__ */ jsxs("div", { className: "h-[92px] px-5 border-b border-[#d5d9e0] flex justify-between items-center bg-[#f1f2f4] shrink-0", children: [
-          /* @__PURE__ */ jsx("h1", { className: "text-[48px] leading-none font-black tracking-tight", children: "\u30DB\u30FC\u30E0" }),
-          /* @__PURE__ */ jsxs("div", { className: "flex gap-5 items-center", children: [
-            /* @__PURE__ */ jsx(Store, { className: "w-7 h-7 cursor-pointer text-orange-500", onClick: () => setView("sticker-store") }),
-            /* @__PURE__ */ jsx(Gift, { className: "w-7 h-7 cursor-pointer text-pink-500", onClick: () => setView("birthday-cards") }),
-            /* @__PURE__ */ jsx(Users, { className: "w-7 h-7 cursor-pointer text-black", onClick: () => setView("group-create") }),
-            /* @__PURE__ */ jsx(Search, { className: "w-7 h-7 cursor-pointer text-black", onClick: () => setSearchModalOpen(true) }),
-            /* @__PURE__ */ jsx(UserPlus, { className: "w-7 h-7 cursor-pointer text-black", onClick: () => setView("qr") }),
-            /* @__PURE__ */ jsx(Settings, { className: "w-7 h-7 cursor-pointer text-black", onClick: () => setView("profile") })
+  return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-gradient-to-br from-indigo-50 to-purple-50 p-3 gap-3", children: [
+    /* @__PURE__ */ jsxs("div", { className: "px-4 py-4 rounded-3xl border border-white/70 bg-white/95 shadow-sm flex justify-between items-center shrink-0 backdrop-blur-sm", children: [
+      /* @__PURE__ */ jsx("h1", { className: "text-xl font-bold", children: "\u30DB\u30FC\u30E0" }),
+      /* @__PURE__ */ jsxs("div", { className: "flex gap-4 items-center", children: [
+        /* @__PURE__ */ jsx(Store, { className: "w-6 h-6 cursor-pointer text-orange-500", onClick: () => setView("sticker-store") }),
+        /* @__PURE__ */ jsx(Gift, { className: "w-6 h-6 cursor-pointer text-pink-500", onClick: () => setView("birthday-cards") }),
+        /* @__PURE__ */ jsx(Users, { className: "w-6 h-6 cursor-pointer text-black", onClick: () => setView("group-create") }),
+        /* @__PURE__ */ jsx(Search, { className: "w-6 h-6 cursor-pointer text-black", onClick: () => setSearchModalOpen(true) }),
+        /* @__PURE__ */ jsx(UserPlus, { className: "w-6 h-6 cursor-pointer text-black", onClick: () => setView("qr") }),
+        /* @__PURE__ */ jsx(Settings, { className: "w-6 h-6 cursor-pointer text-black", onClick: () => setView("profile") })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 p-1 rounded-2xl border border-white/70 bg-white/90 shadow-sm shrink-0", children: [
+      /* @__PURE__ */ jsx("button", { className: `py-3 text-sm font-bold rounded-xl transition-colors ${tab === "friends" ? "bg-white text-gray-900 shadow-sm border border-gray-100" : "text-gray-400"}`, onClick: () => setTab("friends"), children: "\u53CB\u3060\u3061" }),
+      /* @__PURE__ */ jsx("button", { className: `py-3 text-sm font-bold rounded-xl transition-colors ${tab === "chats" ? "bg-white text-gray-900 shadow-sm border border-gray-100" : "text-gray-400"}`, onClick: () => setTab("chats"), children: "\u30C8\u30FC\u30AF" })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto scrollbar-hide rounded-3xl border border-white/70 bg-white shadow-sm", children: [
+      /* @__PURE__ */ jsxs("div", { className: "p-5 flex items-center gap-4 bg-white hover:bg-gray-50 cursor-pointer border-b", onClick: () => setView("profile"), children: [
+        /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+          /* @__PURE__ */ jsx(AvatarWithFallback, { src: profile?.avatar, name: profile?.name, className: "w-16 h-16 rounded-2xl object-cover border", fallbackClassName: "bg-[#7a54c5]" }),
+          isTodayBirthday(profile?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-base", children: "\u{1F382}" })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "flex-1", children: [
+          /* @__PURE__ */ jsx("div", { className: "font-bold text-lg", children: profile?.name }),
+          /* @__PURE__ */ jsxs("div", { className: "text-xs text-gray-400 font-mono", children: [
+            "ID: ",
+            profile?.id
           ] })
+        ] })
+      ] }),
+      tab === "friends" && /* @__PURE__ */ jsx("div", { className: "bg-white", children: friendsList.map((friend) => /* @__PURE__ */ jsxs("div", { className: "px-5 py-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer border-b", onClick: () => setSelectedFriend(friend), children: [
+        /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+          /* @__PURE__ */ jsx(AvatarWithFallback, { src: friend.avatar, name: friend.name, className: "w-12 h-12 rounded-xl object-cover border", fallbackClassName: "bg-[#7a54c5]" }),
+          isTodayBirthday(friend.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
         ] }),
-        /* @__PURE__ */ jsxs("div", { className: "h-[70px] flex border-b border-[#d5d9e0] bg-[#f1f2f4]", children: [
-          /* @__PURE__ */ jsx(
-            "button",
-            {
-              className: `flex-1 py-4 text-[18px] font-bold ${tab === "friends" ? "border-b-[3px] border-black text-black" : "text-[#8b95a5]"}`,
-              onClick: () => setTab("friends"),
-              children: "\u53CB\u3060\u3061"
-            }
-          ),
-          /* @__PURE__ */ jsx(
-            "button",
-            {
-              className: `flex-1 py-4 text-[18px] font-bold ${tab === "hidden" ? "border-b-[3px] border-black text-black" : "text-[#8b95a5]"}`,
-              onClick: () => setTab("hidden"),
-              children: "\u975E\u8868\u793A"
-            }
-          ),
-          /* @__PURE__ */ jsx(
-            "button",
-            {
-              className: `flex-1 py-4 text-[18px] font-bold ${tab === "chats" ? "border-b-[3px] border-black text-black" : "text-[#8b95a5]"}`,
-              onClick: () => setTab("chats"),
-              children: "\u30C8\u30FC\u30AF"
-            }
-          )
-        ] }),
-        /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto scrollbar-hide", children: [
-          /* @__PURE__ */ jsxs("div", { className: "px-5 py-6 flex items-center gap-5 cursor-pointer border-b border-[#d5d9e0] bg-[#f1f2f4]", onClick: () => setView("profile"), children: [
-            /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-              /* @__PURE__ */ jsx(AvatarWithFallback, { src: profile?.avatar, name: profile?.name, className: "w-24 h-24 rounded-[24px] object-cover", fallbackClassName: "bg-[#cf3d0b]" }),
-              isTodayBirthday(profile?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-base", children: "\u{1F382}" })
-            ] }),
-            /* @__PURE__ */ jsxs("div", { className: "flex-1", children: [
-              /* @__PURE__ */ jsx("div", { className: "font-black text-[48px] text-black leading-none tracking-tight truncate", children: profile?.name }),
-              /* @__PURE__ */ jsxs("div", { className: "text-[13px] text-[#8b95a5] font-mono mt-2 leading-none truncate", children: [
-                "ID: ",
-                profile?.id
-              ] })
-            ] })
+        /* @__PURE__ */ jsxs("div", { className: "flex-1 min-w-0", children: [
+          /* @__PURE__ */ jsx("div", { className: "font-bold text-sm truncate", children: friend.name }),
+          /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-400 truncate", children: friend.status })
+        ] })
+      ] }, friend.uid)) }),
+      tab === "chats" && /* @__PURE__ */ jsx("div", { className: "bg-white", children: visibleChats.map((chat) => {
+        let name = chat.name;
+        let icon = chat.icon;
+        let partnerData = null;
+        if (!chat.isGroup) {
+          partnerData = allUsers.find((u) => u.uid === chat.participants.find((p) => p !== user.uid));
+          if (partnerData) {
+            name = partnerData.name;
+            icon = partnerData.avatar;
+          }
+        }
+        return /* @__PURE__ */ jsxs("div", { className: "px-5 py-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer border-b", onClick: () => {
+          setActiveChatId(chat.id);
+          setView("chatroom");
+        }, children: [
+          /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+            /* @__PURE__ */ jsx(AvatarWithFallback, { src: icon, name, className: "w-12 h-12 rounded-xl object-cover border", fallbackClassName: "bg-[#7a54c5]" }),
+            !chat.isGroup && partnerData && isTodayBirthday(partnerData.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
           ] }),
-          (tab === "friends" || tab === "hidden") && /* @__PURE__ */ jsx("div", { className: "px-4 pt-4", children: /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 border rounded-3xl p-4 flex items-center justify-between", children: [
-            /* @__PURE__ */ jsxs("div", { children: [
-              /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-400 uppercase tracking-widest", children: "\u53CB\u3060\u3061\u306E\u53CB\u3060\u3061" }),
-              /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500 font-bold mt-1", children: "\u3042\u306A\u305F\u306E\u53CB\u3060\u3061\u7D4C\u7531\u3067\u3064\u306A\u304C\u308B\u4EBA\u6570\uFF08\u91CD\u8907\u306A\u3057\uFF09" })
+          /* @__PURE__ */ jsxs("div", { className: "flex-1 min-w-0", children: [
+            /* @__PURE__ */ jsxs("div", { className: "font-bold text-sm truncate", children: [
+              name,
+              " ",
+              chat.isGroup ? `(${chat.participants.length})` : ""
             ] }),
-            /* @__PURE__ */ jsx("div", { className: "text-2xl font-black text-gray-800", children: friendsOfFriendsCount })
-          ] }) }),
-          tab === "friends" && /* @__PURE__ */ jsx("div", { className: "pt-2", children: visibleFriendsList.length === 0 ? /* @__PURE__ */ jsx("div", { className: "text-center py-10 text-gray-400 text-sm", children: "\u53CB\u3060\u3061\u304C\u3044\u307E\u305B\u3093" }) : visibleFriendsList.map((friend) => /* @__PURE__ */ jsxs(
-            "div",
-            {
-              className: "p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer relative",
-              onClick: () => setSelectedFriend(friend),
-              children: [
-                /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-                  /* @__PURE__ */ jsx("img", { src: friend.avatar, className: "w-12 h-12 rounded-xl object-cover border" }, friend.avatar),
-                  isTodayBirthday(friend.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
-                ] }),
-                /* @__PURE__ */ jsxs("div", { className: "flex-1 min-w-0", children: [
-                  /* @__PURE__ */ jsx("div", { className: "font-bold text-sm truncate", children: friend.name }),
-                  /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-400 truncate", children: friend.status }),
-                  /* @__PURE__ */ jsxs("div", { className: "text-[10px] text-gray-400 font-bold mt-0.5", children: [
-                    "\u5171\u901A ",
-                    getMutualCount(friend),
-                    " \u30FB \u53CB\u3060\u3061\u306E\u53CB\u3060\u3061 ",
-                    getFofCandidateCount(friend)
-                  ] })
-                ] }),
-                /* @__PURE__ */ jsxs("div", { className: "relative ml-2", onClick: (e) => e.stopPropagation(), children: [
-                  /* @__PURE__ */ jsx("button", { onClick: () => setOpenFriendMenuId(openFriendMenuId === friend.uid ? null : friend.uid), className: "p-2 hover:bg-gray-100 rounded-full text-gray-400", children: /* @__PURE__ */ jsx(MoreVertical, { className: "w-4 h-4" }) }),
-                  openFriendMenuId === friend.uid && /* @__PURE__ */ jsx("div", { className: "absolute right-0 top-8 bg-white shadow-xl border rounded-xl overflow-hidden z-20 min-w-[140px] animate-in fade-in zoom-in-95 duration-100", children: /* @__PURE__ */ jsxs("button", { onClick: (e) => handleHideFriend(e, friend.uid), className: "w-full text-left px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 flex items-center gap-2", children: [
-                    /* @__PURE__ */ jsx(EyeOff, { className: "w-3 h-3" }),
-                    " \u975E\u8868\u793A"
-                  ] }) })
-                ] })
-              ]
-            },
-            friend.uid
-          )) }),
-          tab === "hidden" && /* @__PURE__ */ jsx("div", { className: "pt-2", children: hiddenFriendsList.length === 0 ? /* @__PURE__ */ jsx("div", { className: "text-center py-10 text-gray-400 text-sm", children: "\u975E\u8868\u793A\u306E\u53CB\u3060\u3061\u306F\u3042\u308A\u307E\u305B\u3093" }) : hiddenFriendsList.map((friend) => /* @__PURE__ */ jsxs(
-            "div",
-            {
-              className: "p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer relative",
-              onClick: () => setSelectedFriend(friend),
-              children: [
-                /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-                  /* @__PURE__ */ jsx("img", { src: friend.avatar, className: "w-12 h-12 rounded-xl object-cover border" }, friend.avatar),
-                  isTodayBirthday(friend.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
-                ] }),
-                /* @__PURE__ */ jsxs("div", { className: "flex-1 min-w-0", children: [
-                  /* @__PURE__ */ jsx("div", { className: "font-bold text-sm truncate", children: friend.name }),
-                  /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-400 truncate", children: friend.status })
-                ] }),
-                /* @__PURE__ */ jsxs(
-                  "button",
-                  {
-                    onClick: (e) => handleUnhideFriend(e, friend.uid),
-                    className: "px-3 py-2 bg-white border rounded-2xl text-xs font-bold text-gray-700 hover:bg-gray-50 flex items-center gap-2 shadow-sm",
-                    children: [
-                      /* @__PURE__ */ jsx(Eye, { className: "w-4 h-4" }),
-                      "\u8868\u793A"
-                    ]
-                  }
-                )
-              ]
-            },
-            friend.uid
-          )) }),
-          tab === "chats" && /* @__PURE__ */ jsxs(Fragment, { children: [
-            /* @__PURE__ */ jsx("div", { className: "px-5 pt-5 pb-2", children: /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-4", children: [
-              /* @__PURE__ */ jsxs("div", { className: "bg-[#f1f2f4] border border-[#d5d9e0] rounded-[34px] px-5 py-4 flex items-center justify-between", children: [
-                /* @__PURE__ */ jsxs("div", { children: [
-                  /* @__PURE__ */ jsx("div", { className: "text-[12px] font-bold text-[#8b95a5]", children: "\u30C8\u30FC\u30AF\u53CB\u3060\u3061" }),
-                  /* @__PURE__ */ jsx("div", { className: "text-[14px] text-[#677184] font-bold mt-1", children: "1\u5BFE1\u30C8\u30FC\u30AF\u306E\u4EBA\u6570" })
-                ] }),
-                /* @__PURE__ */ jsx("div", { className: "text-[54px] font-black text-[#1c2433] leading-none", children: talkFriendCount })
-              ] }),
-              /* @__PURE__ */ jsxs("div", { className: "bg-[#f1f2f4] border border-[#d5d9e0] rounded-[34px] px-5 py-4 flex items-center justify-between", children: [
-                /* @__PURE__ */ jsxs("div", { children: [
-                  /* @__PURE__ */ jsx("div", { className: "text-[12px] font-bold text-[#8b95a5]", children: "\u30B0\u30EB\u30FC\u30D7" }),
-                  /* @__PURE__ */ jsx("div", { className: "text-[14px] text-[#677184] font-bold mt-1", children: "\u53C2\u52A0\u4E2D\u306E\u6570" })
-                ] }),
-                /* @__PURE__ */ jsx("div", { className: "text-[54px] font-black text-[#1c2433] leading-none", children: groupChatCount })
-              ] })
-            ] }) }),
-            chats.filter((chat) => !profile?.hiddenChats?.includes(chat.id)).sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)).map((chat) => {
-              let name = chat.name, icon = chat.icon, partnerData = null;
-              if (!chat.isGroup) {
-                partnerData = allUsers.find((u) => u.uid === chat.participants.find((p) => p !== user.uid));
-                if (partnerData) {
-                  name = partnerData.name;
-                  icon = partnerData.avatar;
-                }
-              }
-              const unreadCount = chat.unreadCounts?.[user.uid] || 0;
-              return /* @__PURE__ */ jsxs(
-                "div",
-                {
-                  className: "px-5 py-4 flex items-center gap-4 hover:bg-white/60 cursor-pointer relative group border-b border-[#d5d9e0]",
-                  onClick: () => {
-                    setActiveChatId(chat.id);
-                    setView("chatroom");
-                  },
-                  children: [
-                    /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-                      /* @__PURE__ */ jsx(AvatarWithFallback, { src: icon, name, className: "w-[72px] h-[72px] rounded-[18px] object-cover border border-gray-300", fallbackClassName: "bg-[#7a54c5]" }),
-                      !chat.isGroup && partnerData && isTodayBirthday(partnerData.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
-                    ] }),
-                    /* @__PURE__ */ jsxs("div", { className: "flex-1 min-w-0", children: [
-                      /* @__PURE__ */ jsxs("div", { className: "font-bold text-[18px] truncate", children: [
-                        name,
-                        " ",
-                        chat.isGroup ? `(${chat.participants.length})` : ""
-                      ] }),
-                      /* @__PURE__ */ jsx("div", { className: `text-[14px] truncate ${unreadCount > 0 ? "font-bold text-black" : "text-gray-400"}`, children: chat.lastMessage?.content })
-                    ] }),
-                    /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-end gap-1 min-w-[44px]", children: [
-                      /* @__PURE__ */ jsx("div", { className: "text-[14px] text-[#b0b7c3]", children: formatTime(chat.updatedAt) }),
-                      unreadCount > 0 && /* @__PURE__ */ jsx("div", { className: "bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center flex items-center justify-center h-5 border-2 border-white shadow-sm mb-1", children: unreadCount > 99 ? "99+" : unreadCount })
-                    ] }),
-                    /* @__PURE__ */ jsxs("div", { className: "relative ml-2", onClick: (e) => e.stopPropagation(), children: [
-                      /* @__PURE__ */ jsx("button", { onClick: () => setOpenChatMenuId(openChatMenuId === chat.id ? null : chat.id), className: "p-2 hover:bg-gray-100 rounded-full text-gray-400", children: /* @__PURE__ */ jsx(MoreVertical, { className: "w-4 h-4" }) }),
-                      openChatMenuId === chat.id && /* @__PURE__ */ jsxs("div", { className: "absolute right-0 top-8 bg-white shadow-xl border rounded-xl overflow-hidden z-20 min-w-[120px] animate-in fade-in zoom-in-95 duration-100", children: [
-                        /* @__PURE__ */ jsxs("button", { onClick: (e) => handleHideChat(e, chat.id), className: "w-full text-left px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 flex items-center gap-2", children: [
-                          /* @__PURE__ */ jsx(EyeOff, { className: "w-3 h-3" }),
-                          " \u975E\u8868\u793A"
-                        ] }),
-                        /* @__PURE__ */ jsxs("button", { onClick: (e) => handleDeleteChat(e, chat.id), className: "w-full text-left px-4 py-3 text-xs font-bold text-red-500 hover:bg-red-50 border-t flex items-center gap-2", children: [
-                          /* @__PURE__ */ jsx(Trash2, { className: "w-3 h-3" }),
-                          " \u524A\u9664"
-                        ] })
-                      ] })
-                    ] })
-                  ]
-                },
-                chat.id
-              );
-            })
-          ] })
-        ] }),
-        selectedFriend && /* @__PURE__ */ jsx(
-          FriendProfileModal,
-          {
-            friend: selectedFriend,
-            onClose: () => setSelectedFriend(null),
-            onStartChat: startChatWithUser,
-            onTransfer: () => {
-              setCoinModalTarget(selectedFriend);
-              setSelectedFriend(null);
-            },
-            myUid: user.uid,
-            myProfile: profile,
-            allUsers,
-            showNotification
-          }
-        ),
-        coinModalTarget && /* @__PURE__ */ jsx(
-          CoinTransferModal,
-          {
-            onClose: () => setCoinModalTarget(null),
-            myWallet: profile.wallet,
-            myUid: user.uid,
-            targetUid: coinModalTarget.uid,
-            targetName: coinModalTarget.name,
-            showNotification
-          }
-        )
-      ]
-    }
-  );
+            /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-400 truncate", children: chat.lastMessage?.content })
+          ] }),
+          /* @__PURE__ */ jsx("div", { className: "text-[10px] text-gray-300 self-start mt-1", children: formatTime(chat.updatedAt) })
+        ] }, chat.id);
+      }) })
+    ] }),
+    selectedFriend && /* @__PURE__ */ jsx(FriendProfileModal, { friend: selectedFriend, onClose: () => setSelectedFriend(null), onStartChat: startChatWithUser, onTransfer: () => {
+      setCoinModalTarget(selectedFriend);
+      setSelectedFriend(null);
+    }, myUid: user.uid, myProfile: profile, allUsers, showNotification }),
+    coinModalTarget && /* @__PURE__ */ jsx(CoinTransferModal, { onClose: () => setCoinModalTarget(null), myWallet: profile.wallet, myUid: user.uid, targetUid: coinModalTarget.uid, targetName: coinModalTarget.name, showNotification })
+  ] });
 };
 function App() {
   const [user, setUser] = useState(null);
@@ -4672,7 +4401,7 @@ function App() {
     }
     return activeCall.phase || null;
   }, [activeCall, syncedCallData, user?.uid]);
-  return /* @__PURE__ */ jsx("div", { className: "w-full min-h-[100dvh] bg-[#d7dbe1] flex items-center justify-center", children: /* @__PURE__ */ jsxs("div", { className: "w-full h-[100dvh] md:w-[430px] md:h-[100dvh] bg-[#f3f4f6] border-x border-gray-300 flex flex-col relative overflow-hidden", children: [
+  return /* @__PURE__ */ jsx("div", { className: "w-full h-[100dvh] bg-[#d7dbe1] flex justify-center overflow-hidden", children: /* @__PURE__ */ jsxs("div", { className: "w-[430px] max-w-full h-[100dvh] bg-[#f3f4f6] border-x border-gray-300 flex flex-col relative overflow-hidden", children: [
     notification && /* @__PURE__ */ jsx("div", { className: "fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce", children: notification }),
     !user ? /* @__PURE__ */ jsx(AuthView, { onLogin: setUser, showNotification }) : /* @__PURE__ */ jsxs(Fragment, { children: [
       activeCall ? effectiveCallPhase === "incoming" ? /* @__PURE__ */ jsx(
@@ -4732,14 +4461,14 @@ function App() {
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
       ] }) }),
-      user && !activeCall && ["home", "voom"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "h-24 bg-[#f3f4f6] border-t border-gray-300 flex items-center justify-around z-50 pb-4 shrink-0", children: [
-        /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-[#9aa3b3]"}`, onClick: () => setView("home"), children: [
-          /* @__PURE__ */ jsx(Home, { className: "w-7 h-7" }),
-          /* @__PURE__ */ jsx("span", { className: "text-xs font-bold", children: "\u30DB\u30FC\u30E0" })
+      user && !activeCall && ["home", "voom"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0", children: [
+        /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("home"), children: [
+          /* @__PURE__ */ jsx(Home, { className: "w-6 h-6" }),
+          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u30DB\u30FC\u30E0" })
         ] }),
-        /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "voom" ? "text-green-500" : "text-[#9aa3b3]"}`, onClick: () => setView("voom"), children: [
-          /* @__PURE__ */ jsx(LayoutGrid, { className: "w-7 h-7" }),
-          /* @__PURE__ */ jsx("span", { className: "text-xs font-bold", children: "VOOM" })
+        /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "voom" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("voom"), children: [
+          /* @__PURE__ */ jsx(LayoutGrid, { className: "w-6 h-6" }),
+          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "VOOM" })
         ] })
       ] })
     ] }),
