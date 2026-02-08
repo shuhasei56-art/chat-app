@@ -1896,7 +1896,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
     ] })
   ] });
 };
-const GroupCreateView = ({ user, profile, allUsers, setView, showNotification }) => {
+const GroupCreateView = ({ user, profile, allUsers, chats, setView, showNotification }) => {
   const [groupName, setGroupName] = useState("");
   const [groupIcon, setGroupIcon] = useState("https://api.dicebear.com/7.x/shapes/svg?seed=group");
   const [selectedMembers, setSelectedMembers] = useState([]);
@@ -1904,11 +1904,16 @@ const GroupCreateView = ({ user, profile, allUsers, setView, showNotification })
     const rawFriends = profile?.friends || [];
     const hiddenSet = new Set(profile?.hiddenFriends || []);
     const friendKeySet = new Set(rawFriends);
+    (chats || []).forEach((chat) => {
+      if (chat?.isGroup || !Array.isArray(chat?.participants) || !chat.participants.includes(user.uid)) return;
+      const otherUid = chat.participants.find((p) => p && p !== user.uid);
+      if (otherUid) friendKeySet.add(otherUid);
+    });
     const byUid = allUsers.filter((u) => friendKeySet.has(u.uid));
     const byId = allUsers.filter((u) => friendKeySet.has(u.id));
     const merged = [...byUid, ...byId].filter((u) => u.uid && u.uid !== user.uid && !hiddenSet.has(u.uid));
     return Array.from(new Map(merged.map((u) => [u.uid, u])).values());
-  }, [allUsers, profile?.friends, profile?.hiddenFriends, user.uid]);
+  }, [allUsers, chats, profile?.friends, profile?.hiddenFriends, user.uid]);
   const toggleMember = (uid) => {
     setSelectedMembers((prev) => prev.includes(uid) ? prev.filter((id) => id !== uid) : [...prev, uid]);
   };
@@ -3051,6 +3056,19 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   const [aiEffectModalOpen, setAiEffectModalOpen] = useState(false);
   const [headerAvatarError, setHeaderAvatarError] = useState(false);
   const chatData = chats.find((c) => c.id === activeChatId);
+  const contactCandidates = useMemo(() => {
+    const hiddenSet = new Set(profile?.hiddenFriends || []);
+    const friendKeySet = new Set(profile?.friends || []);
+    (chats || []).forEach((chat) => {
+      if (chat?.isGroup || !Array.isArray(chat?.participants) || !chat.participants.includes(user.uid)) return;
+      const otherUid = chat.participants.find((p) => p && p !== user.uid);
+      if (otherUid) friendKeySet.add(otherUid);
+    });
+    const byUid = allUsers.filter((u) => friendKeySet.has(u.uid));
+    const byId = allUsers.filter((u) => friendKeySet.has(u.id));
+    const merged = [...byUid, ...byId].filter((u) => u.uid && u.uid !== user.uid && !hiddenSet.has(u.uid));
+    return Array.from(new Map(merged.map((u) => [u.uid, u])).values());
+  }, [allUsers, chats, profile?.friends, profile?.hiddenFriends, user.uid]);
   const isGroup = chatData?.isGroup || false;
   let partnerId = null;
   let partnerData = null;
@@ -3630,7 +3648,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     groupEditModalOpen && /* @__PURE__ */ jsx(GroupEditModal, { onClose: () => setGroupEditModalOpen(false), chatId: activeChatId, currentName: chatData.name, currentIcon: chatData.icon, currentMembers: chatData.participants, allUsers, showNotification, user, profile }),
     leaveModalOpen && /* @__PURE__ */ jsx(LeaveGroupConfirmModal, { onClose: () => setLeaveModalOpen(false), onLeave: handleLeaveGroup }),
     cardModalOpen && /* @__PURE__ */ jsx(BirthdayCardModal, { onClose: () => setCardModalOpen(false), onSend: sendBirthdayCard, toName: title }),
-    contactModalOpen && /* @__PURE__ */ jsx(ContactSelectModal, { onClose: () => setContactModalOpen(false), onSend: (c) => sendMessage("", "contact", { contactId: c.uid, contactName: c.name, contactAvatar: c.avatar }), friends: allUsers.filter((u) => (profile?.friends || []).includes(u.uid) && !(profile?.hiddenFriends || []).includes(u.uid)) }),
+    contactModalOpen && /* @__PURE__ */ jsx(ContactSelectModal, { onClose: () => setContactModalOpen(false), onSend: (c) => sendMessage("", "contact", { contactId: c.uid, contactName: c.name, contactAvatar: c.avatar }), friends: contactCandidates }),
     buyStickerModalPackId && /* @__PURE__ */ jsx(StickerBuyModal, { onClose: () => setBuyStickerModalPackId(null), packId: buyStickerModalPackId, onGoToStore: (id) => {
       setView("sticker-store");
       setBuyStickerModalPackId(null);
@@ -4728,7 +4746,7 @@ function App() {
         view === "chatroom" && /* @__PURE__ */ jsx(ChatRoomView, { user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }),
         view === "profile" && /* @__PURE__ */ jsx(ProfileEditView, { user, profile, setView, showNotification, copyToClipboard }),
         view === "qr" && /* @__PURE__ */ jsx(QRScannerView, { user, setView, addFriendById }),
-        view === "group-create" && /* @__PURE__ */ jsx(GroupCreateView, { user, profile, allUsers, setView, showNotification }),
+        view === "group-create" && /* @__PURE__ */ jsx(GroupCreateView, { user, profile, allUsers, chats, setView, showNotification }),
         view === "birthday-cards" && /* @__PURE__ */ jsx(BirthdayCardBox, { user, setView }),
         view === "sticker-create" && /* @__PURE__ */ jsx(StickerEditor, { user, profile, onClose: () => setView("sticker-store"), showNotification }),
         view === "sticker-store" && /* @__PURE__ */ jsx(StickerStoreView, { user, setView, showNotification, profile, allUsers })
