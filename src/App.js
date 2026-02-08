@@ -3654,7 +3654,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       setBuyStickerModalPackId(null);
     } }),
     aiEffectModalOpen && /* @__PURE__ */ jsx(AIEffectGenerator, { user, onClose: () => setAiEffectModalOpen(false), showNotification }),
-    plusMenuOpen && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-16 left-4 right-4 bg-white rounded-3xl p-4 shadow-2xl grid grid-cols-4 gap-4 animate-in slide-in-from-bottom-4 z-20", children: [
+    !groupSettingsOpen && plusMenuOpen && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-16 left-4 right-4 bg-white rounded-3xl p-4 shadow-2xl grid grid-cols-4 gap-4 animate-in slide-in-from-bottom-4 z-20", children: [
       /* @__PURE__ */ jsxs("label", { className: "flex flex-col items-center gap-2 cursor-pointer", children: [
         /* @__PURE__ */ jsx("div", { className: "p-3 bg-green-50 rounded-2xl", children: /* @__PURE__ */ jsx(ImageIcon, { className: "w-6 h-6 text-green-500" }) }),
         /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u753B\u50CF" }),
@@ -3690,7 +3690,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u9001\u91D1" })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: "px-3 py-2 bg-[#f1f2f4] border-t border-gray-300 flex flex-col gap-1.5 relative z-10", children: [
+    !groupSettingsOpen && /* @__PURE__ */ jsxs("div", { className: "px-3 py-2 bg-[#f1f2f4] border-t border-gray-300 flex flex-col gap-1.5 relative z-10", children: [
       stickerMenuOpen && myStickerPacks.length > 0 && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-full left-0 right-0 bg-gray-50 border-t h-72 flex flex-col shadow-2xl rounded-t-3xl overflow-hidden animate-in slide-in-from-bottom-2 z-20", children: [
         /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-4 content-start", children: myStickerPacks.find((p) => p.id === selectedPackId)?.stickers.map((s, i) => /* @__PURE__ */ jsxs("div", { className: "relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm", onClick: () => sendMessage(s, "sticker", { packId: selectedPackId }), children: [
           /* @__PURE__ */ jsx("img", { src: typeof s === "string" ? s : s.image, className: "w-full aspect-square object-contain" }),
