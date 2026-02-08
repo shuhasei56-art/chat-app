@@ -141,7 +141,12 @@ const formatDate = (timestamp) => {
 const formatDateTime = (timestamp) => {
   if (!timestamp) return "";
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-  return date.toLocaleString([], { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}/${mm}/${dd} ${hh}:${min}`;
 };
 const isTodayBirthday = (birthdayString) => {
   if (!birthdayString) return false;
@@ -1515,6 +1520,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
   const [mediaSrc, setMediaSrc] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
   const isInvalidBlob = !isMe && m.content?.startsWith("blob:");
   const setBlobSrcFromBase64 = (base64Data, mimeType) => {
     try {
@@ -1671,12 +1677,12 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
       return u ? u.name : "\u4E0D\u660E\u306A\u30E6\u30FC\u30B6\u30FC";
     }).join(", ");
   };
-  return /* @__PURE__ */ jsxs("div", { className: `flex ${isMe ? "justify-end" : "justify-start"} gap-2 relative group mb-4`, children: [
+  return /* @__PURE__ */ jsxs("div", { className: `flex ${isMe ? "justify-end" : "justify-start"} gap-3 relative group mb-6`, children: [
     !isMe && /* @__PURE__ */ jsxs("div", { className: "relative mt-1 cursor-pointer", onClick: (e) => {
       e.stopPropagation();
       onShowProfile && onShowProfile(sender);
     }, children: [
-      /* @__PURE__ */ jsx("img", { src: sender?.avatar, className: "w-8 h-8 rounded-lg object-cover border", loading: "lazy" }, sender?.avatar),
+      !avatarError && sender?.avatar ? /* @__PURE__ */ jsx("img", { src: sender?.avatar, className: "w-12 h-12 rounded-2xl object-cover border border-gray-200", loading: "lazy", onError: () => setAvatarError(true) }, sender?.avatar) : /* @__PURE__ */ jsx("div", { className: "w-12 h-12 rounded-2xl bg-[#7a54c5] text-white text-2xl leading-none font-medium flex items-center justify-center", children: (sender?.name || sender?.id || "h").trim().charAt(0).toLowerCase() || "h" }),
       isTodayBirthday(sender?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-[8px]", children: "\u{1F382}" })
     ] }),
     /* @__PURE__ */ jsxs("div", { className: `flex flex-col ${isMe ? "items-end" : "items-start"} max-w-[75%]`, children: [
@@ -3044,6 +3050,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   const [viewProfile, setViewProfile] = useState(null);
   const [coinModalTarget, setCoinModalTarget] = useState(null);
   const [aiEffectModalOpen, setAiEffectModalOpen] = useState(false);
+  const [headerAvatarError, setHeaderAvatarError] = useState(false);
   const chatData = chats.find((c) => c.id === activeChatId);
   const isGroup = chatData?.isGroup || false;
   let partnerId = null;
@@ -3436,10 +3443,10 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     /* @__PURE__ */ jsxs("div", { className: "px-6 py-5 bg-[#f1f2f4] border-b border-gray-300 flex items-center gap-4 sticky top-0 z-10", children: [
       /* @__PURE__ */ jsx(ChevronLeft, { className: "w-8 h-8 cursor-pointer text-black", onClick: () => setView("home") }),
       /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-        /* @__PURE__ */ jsx("img", { src: icon, className: "w-14 h-14 rounded-2xl object-cover border border-gray-200" }, icon),
+        !headerAvatarError && icon ? /* @__PURE__ */ jsx("img", { src: icon, className: "w-14 h-14 rounded-2xl object-cover border border-gray-200", onError: () => setHeaderAvatarError(true) }, icon) : /* @__PURE__ */ jsx("div", { className: "w-14 h-14 rounded-2xl bg-[#7a54c5] text-white text-2xl leading-none font-medium flex items-center justify-center", children: (title || "h").trim().charAt(0).toLowerCase() || "h" }),
         !isGroup && partnerData && isTodayBirthday(partnerData.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
       ] }),
-      !isGroup ? /* @__PURE__ */ jsx("div", { className: "font-bold text-2xl flex-1 truncate text-gray-900 sm:text-[38px] leading-none", children: title }) : /* @__PURE__ */ jsx("div", { className: "flex-1" }),
+      !isGroup ? /* @__PURE__ */ jsx("div", { className: "font-bold text-[39px] flex-1 truncate text-gray-900 leading-none", children: title }) : /* @__PURE__ */ jsx("div", { className: "flex-1" }),
       /* @__PURE__ */ jsxs("div", { className: "flex gap-4 mr-1 items-center", children: [
         /* @__PURE__ */ jsxs("div", { className: "relative", children: [
           /* @__PURE__ */ jsx("button", { onClick: () => setBackgroundMenuOpen(!backgroundMenuOpen), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u80CC\u666F\u3092\u5909\u66F4", children: /* @__PURE__ */ jsx(Palette, { className: "w-8 h-8 text-gray-500" }) }),
@@ -3666,7 +3673,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u9001\u91D1" })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: "px-5 py-4 bg-[#f1f2f4] border-t border-gray-300 flex flex-col gap-2 relative z-10", children: [
+    /* @__PURE__ */ jsxs("div", { className: "px-5 py-3 bg-[#f1f2f4] border-t border-gray-300 flex flex-col gap-2 relative z-10", children: [
       stickerMenuOpen && myStickerPacks.length > 0 && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-full left-0 right-0 bg-gray-50 border-t h-72 flex flex-col shadow-2xl rounded-t-3xl overflow-hidden animate-in slide-in-from-bottom-2 z-20", children: [
         /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-4 content-start", children: myStickerPacks.find((p) => p.id === selectedPackId)?.stickers.map((s, i) => /* @__PURE__ */ jsxs("div", { className: "relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm", onClick: () => sendMessage(s, "sticker", { packId: selectedPackId }), children: [
           /* @__PURE__ */ jsx("img", { src: typeof s === "string" ? s : s.image, className: "w-full aspect-square object-contain" }),
@@ -3692,7 +3699,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: `p-2 rounded-full ${plusMenuOpen ? "bg-gray-200 rotate-45" : ""}`, children: /* @__PURE__ */ jsx(Plus, { className: "w-7 h-7 text-gray-400" }) }),
         /* @__PURE__ */ jsxs("div", { className: "flex-1 flex gap-2 relative", children: [
           !isRecording ? /* @__PURE__ */ jsxs("div", { className: "flex-1 flex gap-2", children: [
-            /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-6 py-3.5 text-base sm:text-lg leading-none focus:outline-none placeholder:text-gray-400", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }),
+            /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-6 py-3 text-lg leading-none focus:outline-none placeholder:text-[#9ca3af]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }),
             /* @__PURE__ */ jsx("button", { onClick: () => setStickerMenuOpen(!stickerMenuOpen), className: `p-3 rounded-full bg-[#e6e6ea] hover:bg-gray-300 ${stickerMenuOpen ? "text-green-500" : "text-gray-500"}`, children: /* @__PURE__ */ jsx(Smile, { className: "w-6 h-6" }) })
           ] }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-2xl px-4 py-2 flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-xs", children: [
             /* @__PURE__ */ jsx("div", { className: "w-2 h-2 rounded-full bg-red-500 animate-ping" }),
@@ -3947,6 +3954,14 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
     ] }) })
   ] });
 };
+const AvatarWithFallback = ({ src, name, className, fallbackClassName }) => {
+  const [hasError, setHasError] = useState(false);
+  const initial = (name || "h").trim().charAt(0).toLowerCase() || "h";
+  if (!src || hasError) {
+    return /* @__PURE__ */ jsx("div", { className: `${className} ${fallbackClassName} flex items-center justify-center text-white text-2xl font-medium`, children: initial });
+  }
+  return /* @__PURE__ */ jsx("img", { src, className, loading: "lazy", onError: () => setHasError(true), alt: name || "avatar" });
+};
 const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }) => {
   const [tab, setTab] = useState("chats");
   const [selectedFriend, setSelectedFriend] = useState(null);
@@ -4074,28 +4089,28 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
   return /* @__PURE__ */ jsxs(
     "div",
     {
-      className: "flex flex-col h-full bg-[#f3f4f6]",
+      className: "flex flex-col h-full bg-[#f1f2f4]",
       onClick: () => {
         setOpenChatMenuId(null);
         setOpenFriendMenuId(null);
       },
       children: [
-        /* @__PURE__ */ jsxs("div", { className: "h-[84px] px-5 border-b border-[#d5d9e0] flex justify-between items-center bg-[#f3f4f6] shrink-0", children: [
-          /* @__PURE__ */ jsx("h1", { className: "text-[22px] leading-none font-black tracking-tight", children: "\u30DB\u30FC\u30E0" }),
+        /* @__PURE__ */ jsxs("div", { className: "h-[92px] px-5 border-b border-[#d5d9e0] flex justify-between items-center bg-[#f1f2f4] shrink-0", children: [
+          /* @__PURE__ */ jsx("h1", { className: "text-[48px] leading-none font-black tracking-tight", children: "\u30DB\u30FC\u30E0" }),
           /* @__PURE__ */ jsxs("div", { className: "flex gap-5 items-center", children: [
-            /* @__PURE__ */ jsx(Store, { className: "w-6 h-6 cursor-pointer text-orange-500", onClick: () => setView("sticker-store") }),
-            /* @__PURE__ */ jsx(Gift, { className: "w-6 h-6 cursor-pointer text-pink-500", onClick: () => setView("birthday-cards") }),
-            /* @__PURE__ */ jsx(Users, { className: "w-6 h-6 cursor-pointer text-black", onClick: () => setView("group-create") }),
-            /* @__PURE__ */ jsx(Search, { className: "w-6 h-6 cursor-pointer text-black", onClick: () => setSearchModalOpen(true) }),
-            /* @__PURE__ */ jsx(UserPlus, { className: "w-6 h-6 cursor-pointer text-black", onClick: () => setView("qr") }),
-            /* @__PURE__ */ jsx(Settings, { className: "w-6 h-6 cursor-pointer text-black", onClick: () => setView("profile") })
+            /* @__PURE__ */ jsx(Store, { className: "w-7 h-7 cursor-pointer text-orange-500", onClick: () => setView("sticker-store") }),
+            /* @__PURE__ */ jsx(Gift, { className: "w-7 h-7 cursor-pointer text-pink-500", onClick: () => setView("birthday-cards") }),
+            /* @__PURE__ */ jsx(Users, { className: "w-7 h-7 cursor-pointer text-black", onClick: () => setView("group-create") }),
+            /* @__PURE__ */ jsx(Search, { className: "w-7 h-7 cursor-pointer text-black", onClick: () => setSearchModalOpen(true) }),
+            /* @__PURE__ */ jsx(UserPlus, { className: "w-7 h-7 cursor-pointer text-black", onClick: () => setView("qr") }),
+            /* @__PURE__ */ jsx(Settings, { className: "w-7 h-7 cursor-pointer text-black", onClick: () => setView("profile") })
           ] })
         ] }),
-        /* @__PURE__ */ jsxs("div", { className: "h-[70px] flex border-b border-[#d5d9e0] bg-[#f3f4f6]", children: [
+        /* @__PURE__ */ jsxs("div", { className: "h-[70px] flex border-b border-[#d5d9e0] bg-[#f1f2f4]", children: [
           /* @__PURE__ */ jsx(
             "button",
             {
-              className: `flex-1 py-4 text-sm font-bold ${tab === "friends" ? "border-b-[3px] border-black text-black" : "text-[#8b95a5]"}`,
+              className: `flex-1 py-4 text-[18px] font-bold ${tab === "friends" ? "border-b-[3px] border-black text-black" : "text-[#8b95a5]"}`,
               onClick: () => setTab("friends"),
               children: "\u53CB\u3060\u3061"
             }
@@ -4103,7 +4118,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
           /* @__PURE__ */ jsx(
             "button",
             {
-              className: `flex-1 py-4 text-sm font-bold ${tab === "hidden" ? "border-b-[3px] border-black text-black" : "text-[#8b95a5]"}`,
+              className: `flex-1 py-4 text-[18px] font-bold ${tab === "hidden" ? "border-b-[3px] border-black text-black" : "text-[#8b95a5]"}`,
               onClick: () => setTab("hidden"),
               children: "\u975E\u8868\u793A"
             }
@@ -4111,21 +4126,21 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
           /* @__PURE__ */ jsx(
             "button",
             {
-              className: `flex-1 py-4 text-sm font-bold ${tab === "chats" ? "border-b-[3px] border-black text-black" : "text-[#8b95a5]"}`,
+              className: `flex-1 py-4 text-[18px] font-bold ${tab === "chats" ? "border-b-[3px] border-black text-black" : "text-[#8b95a5]"}`,
               onClick: () => setTab("chats"),
               children: "\u30C8\u30FC\u30AF"
             }
           )
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto scrollbar-hide", children: [
-          /* @__PURE__ */ jsxs("div", { className: "px-6 py-6 flex items-center gap-5 cursor-pointer border-b border-[#d5d9e0] bg-[#f3f4f6]", onClick: () => setView("profile"), children: [
+          /* @__PURE__ */ jsxs("div", { className: "px-5 py-6 flex items-center gap-5 cursor-pointer border-b border-[#d5d9e0] bg-[#f1f2f4]", onClick: () => setView("profile"), children: [
             /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-              /* @__PURE__ */ jsx("img", { src: profile?.avatar, className: "w-20 h-20 sm:w-24 sm:h-24 rounded-[24px] object-cover" }, profile?.avatar),
+              /* @__PURE__ */ jsx(AvatarWithFallback, { src: profile?.avatar, name: profile?.name, className: "w-24 h-24 rounded-[24px] object-cover", fallbackClassName: "bg-[#cf3d0b]" }),
               isTodayBirthday(profile?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-base", children: "\u{1F382}" })
             ] }),
             /* @__PURE__ */ jsxs("div", { className: "flex-1", children: [
-              /* @__PURE__ */ jsx("div", { className: "font-black text-[22px] sm:text-[44px] text-black leading-none tracking-tight truncate", children: profile?.name }),
-              /* @__PURE__ */ jsxs("div", { className: "text-[12px] sm:text-[14px] text-[#8b95a5] font-mono mt-2 leading-none truncate", children: [
+              /* @__PURE__ */ jsx("div", { className: "font-black text-[48px] text-black leading-none tracking-tight truncate", children: profile?.name }),
+              /* @__PURE__ */ jsxs("div", { className: "text-[13px] text-[#8b95a5] font-mono mt-2 leading-none truncate", children: [
                 "ID: ",
                 profile?.id
               ] })
@@ -4199,20 +4214,20 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
             friend.uid
           )) }),
           tab === "chats" && /* @__PURE__ */ jsxs(Fragment, { children: [
-            /* @__PURE__ */ jsx("div", { className: "px-5 pt-5 pb-1", children: /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
-              /* @__PURE__ */ jsxs("div", { className: "bg-[#f3f4f6] border border-[#d5d9e0] rounded-[28px] px-5 py-4 flex items-center justify-between", children: [
+            /* @__PURE__ */ jsx("div", { className: "px-5 pt-5 pb-2", children: /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-4", children: [
+              /* @__PURE__ */ jsxs("div", { className: "bg-[#f1f2f4] border border-[#d5d9e0] rounded-[34px] px-5 py-4 flex items-center justify-between", children: [
                 /* @__PURE__ */ jsxs("div", { children: [
-                  /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-[#8b95a5]", children: "\u30C8\u30FC\u30AF\u53CB\u3060\u3061" }),
-                  /* @__PURE__ */ jsx("div", { className: "text-xs text-[#677184] font-bold mt-1", children: "1\u5BFE1\u30C8\u30FC\u30AF\u306E\u4EBA\u6570" })
+                  /* @__PURE__ */ jsx("div", { className: "text-[12px] font-bold text-[#8b95a5]", children: "\u30C8\u30FC\u30AF\u53CB\u3060\u3061" }),
+                  /* @__PURE__ */ jsx("div", { className: "text-[14px] text-[#677184] font-bold mt-1", children: "1\u5BFE1\u30C8\u30FC\u30AF\u306E\u4EBA\u6570" })
                 ] }),
-                /* @__PURE__ */ jsx("div", { className: "text-2xl font-black text-[#1c2433]", children: talkFriendCount })
+                /* @__PURE__ */ jsx("div", { className: "text-[54px] font-black text-[#1c2433] leading-none", children: talkFriendCount })
               ] }),
-              /* @__PURE__ */ jsxs("div", { className: "bg-[#f3f4f6] border border-[#d5d9e0] rounded-[28px] px-5 py-4 flex items-center justify-between", children: [
+              /* @__PURE__ */ jsxs("div", { className: "bg-[#f1f2f4] border border-[#d5d9e0] rounded-[34px] px-5 py-4 flex items-center justify-between", children: [
                 /* @__PURE__ */ jsxs("div", { children: [
-                  /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-[#8b95a5]", children: "\u30B0\u30EB\u30FC\u30D7" }),
-                  /* @__PURE__ */ jsx("div", { className: "text-xs text-[#677184] font-bold mt-1", children: "\u53C2\u52A0\u4E2D\u306E\u6570" })
+                  /* @__PURE__ */ jsx("div", { className: "text-[12px] font-bold text-[#8b95a5]", children: "\u30B0\u30EB\u30FC\u30D7" }),
+                  /* @__PURE__ */ jsx("div", { className: "text-[14px] text-[#677184] font-bold mt-1", children: "\u53C2\u52A0\u4E2D\u306E\u6570" })
                 ] }),
-                /* @__PURE__ */ jsx("div", { className: "text-2xl font-black text-[#1c2433]", children: groupChatCount })
+                /* @__PURE__ */ jsx("div", { className: "text-[54px] font-black text-[#1c2433] leading-none", children: groupChatCount })
               ] })
             ] }) }),
             chats.filter((chat) => !profile?.hiddenChats?.includes(chat.id)).sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)).map((chat) => {
@@ -4235,19 +4250,19 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
                   },
                   children: [
                     /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-                      /* @__PURE__ */ jsx("img", { src: icon, className: "w-12 h-12 rounded-xl object-cover border border-gray-300" }, icon),
+                      /* @__PURE__ */ jsx(AvatarWithFallback, { src: icon, name, className: "w-[72px] h-[72px] rounded-[18px] object-cover border border-gray-300", fallbackClassName: "bg-[#7a54c5]" }),
                       !chat.isGroup && partnerData && isTodayBirthday(partnerData.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
                     ] }),
                     /* @__PURE__ */ jsxs("div", { className: "flex-1 min-w-0", children: [
-                      /* @__PURE__ */ jsxs("div", { className: "font-bold text-sm truncate", children: [
+                      /* @__PURE__ */ jsxs("div", { className: "font-bold text-[18px] truncate", children: [
                         name,
                         " ",
                         chat.isGroup ? `(${chat.participants.length})` : ""
                       ] }),
-                      /* @__PURE__ */ jsx("div", { className: `text-xs truncate ${unreadCount > 0 ? "font-bold text-black" : "text-gray-400"}`, children: chat.lastMessage?.content })
+                      /* @__PURE__ */ jsx("div", { className: `text-[14px] truncate ${unreadCount > 0 ? "font-bold text-black" : "text-gray-400"}`, children: chat.lastMessage?.content })
                     ] }),
                     /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-end gap-1 min-w-[44px]", children: [
-                      /* @__PURE__ */ jsx("div", { className: "text-[11px] text-[#b0b7c3]", children: formatTime(chat.updatedAt) }),
+                      /* @__PURE__ */ jsx("div", { className: "text-[14px] text-[#b0b7c3]", children: formatTime(chat.updatedAt) }),
                       unreadCount > 0 && /* @__PURE__ */ jsx("div", { className: "bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center flex items-center justify-center h-5 border-2 border-white shadow-sm mb-1", children: unreadCount > 99 ? "99+" : unreadCount })
                     ] }),
                     /* @__PURE__ */ jsxs("div", { className: "relative ml-2", onClick: (e) => e.stopPropagation(), children: [
