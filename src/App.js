@@ -1174,9 +1174,17 @@ const StickerBuyModal = ({ onClose, onGoToStore, packId }) => {
     ] })
   ] }) });
 };
-const GroupAddMemberModal = ({ onClose, currentMembers, chatId, allUsers, profile, user, showNotification }) => {
+const GroupAddMemberModal = ({ onClose, currentMembers, chatId, allUsers, profile, user, chats, showNotification }) => {
   const [selected, setSelected] = useState([]);
-  const inviteableFriends = allUsers.filter((u) => (profile?.friends || []).includes(u.uid) && !currentMembers.includes(u.uid));
+  const inviteableFriends = useMemo(() => {
+    const candidateUids = new Set(profile?.friends || []);
+    (chats || []).forEach((chat) => {
+      if (chat?.isGroup || !Array.isArray(chat?.participants) || !chat.participants.includes(user.uid)) return;
+      const otherUid = chat.participants.find((p) => p && p !== user.uid);
+      if (otherUid) candidateUids.add(otherUid);
+    });
+    return allUsers.filter((u) => u?.uid && candidateUids.has(u.uid) && !currentMembers.includes(u.uid));
+  }, [allUsers, chats, currentMembers, profile?.friends, user.uid]);
   const toggle = (uid) => setSelected((prev) => prev.includes(uid) ? prev.filter((i) => i !== uid) : [...prev, uid]);
   const handleInvite = async () => {
     if (selected.length === 0) return;
@@ -3651,7 +3659,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         /* @__PURE__ */ jsx("button", { onClick: submitEditMessage, className: "flex-1 py-2 bg-green-500 rounded-xl font-bold text-white", children: "\u66F4\u65B0" })
       ] })
     ] }) }),
-    addMemberModalOpen && /* @__PURE__ */ jsx(GroupAddMemberModal, { onClose: () => setAddMemberModalOpen(false), currentMembers: chatData?.participants || [], chatId: activeChatId, allUsers, profile, user, showNotification }),
+    addMemberModalOpen && /* @__PURE__ */ jsx(GroupAddMemberModal, { onClose: () => setAddMemberModalOpen(false), currentMembers: chatData?.participants || [], chatId: activeChatId, allUsers, profile, user, chats, showNotification }),
     groupEditModalOpen && /* @__PURE__ */ jsx(GroupEditModal, { onClose: () => setGroupEditModalOpen(false), chatId: activeChatId, currentName: chatData.name, currentIcon: chatData.icon, currentMembers: chatData.participants, allUsers, showNotification, user, profile }),
     leaveModalOpen && /* @__PURE__ */ jsx(LeaveGroupConfirmModal, { onClose: () => setLeaveModalOpen(false), onLeave: handleLeaveGroup }),
     cardModalOpen && /* @__PURE__ */ jsx(BirthdayCardModal, { onClose: () => setCardModalOpen(false), onSend: sendBirthdayCard, toName: title }),
