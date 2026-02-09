@@ -129,6 +129,15 @@ const getUploadConcurrency = () => {
   const hwBoost = Math.max(1, Math.min(10, Math.floor(hw / 2)));
   return Math.max(4, Math.min(28, base + hwBoost));
 };
+const bytesToBase64 = (bytes) => {
+  let binary = "";
+  const step = 32768;
+  for (let i = 0; i < bytes.length; i += step) {
+    const chunk = bytes.subarray(i, i + step);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+};
 const MAX_MEDIA_CACHE_SIZE = 180;
 const messageMediaUrlCache = /* @__PURE__ */ new Map();
 const messageMediaPromiseCache = /* @__PURE__ */ new Map();
@@ -1217,6 +1226,53 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       }
     };
   }, [autoSnapshotSec, hasRemoteVideoTrack, remoteStream]);
+  const tryPlayRemoteMedia = useCallback(async () => {
+    let audioFailed = false;
+    let videoFailed = false;
+    const audioEl = remoteAudioRef.current;
+    const videoEl = remoteVideoRef.current;
+    const mediaStream = videoEl?.srcObject || audioEl?.srcObject || remoteStreamRef.current;
+    const hasVideoTrack = hasRemoteVideoTrackRef.current || !!mediaStream?.getVideoTracks?.().some((track) => track.readyState === "live");
+    const hasAudioTrack = !!mediaStream?.getAudioTracks?.().some((track) => track.readyState === "live");
+    if (audioEl) {
+      audioEl.muted = false;
+      audioEl.volume = remoteMutedRef.current ? 0 : remoteVolumeRef.current;
+      if (hasAudioTrack) {
+        try {
+          await audioEl.play();
+        } catch {
+          audioFailed = true;
+        }
+      } else {
+        audioEl.pause();
+      }
+    }
+    if (videoEl) {
+      // Keep video muted so autoplay succeeds across browsers; audio is handled by remoteAudioRef.
+      videoEl.muted = true;
+      if (hasVideoTrack) {
+        try {
+          await videoEl.play();
+        } catch {
+          videoFailed = true;
+        }
+      } else {
+        videoEl.pause();
+      }
+    }
+    // Fallback: if audio element playback fails, try routing audio through video element.
+    if (audioFailed && hasAudioTrack && hasVideoTrack && videoEl) {
+      try {
+        videoEl.muted = false;
+        await videoEl.play();
+        audioFailed = false;
+      } catch {
+        videoFailed = true;
+      }
+    }
+    setNeedsRemotePlay(audioFailed || videoFailed);
+    return !(audioFailed || videoFailed);
+  }, []);
   useEffect(() => {
     const becameConnected = isConnected && !prevConnectedRef.current;
     if (becameConnected) {
@@ -1455,53 +1511,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       }
     }
   };
-  const tryPlayRemoteMedia = useCallback(async () => {
-    let audioFailed = false;
-    let videoFailed = false;
-    const audioEl = remoteAudioRef.current;
-    const videoEl = remoteVideoRef.current;
-    const mediaStream = videoEl?.srcObject || audioEl?.srcObject || remoteStreamRef.current;
-    const hasVideoTrack = hasRemoteVideoTrackRef.current || !!mediaStream?.getVideoTracks?.().some((track) => track.readyState === "live");
-    const hasAudioTrack = !!mediaStream?.getAudioTracks?.().some((track) => track.readyState === "live");
-    if (audioEl) {
-      audioEl.muted = false;
-      audioEl.volume = remoteMutedRef.current ? 0 : remoteVolumeRef.current;
-      if (hasAudioTrack) {
-        try {
-          await audioEl.play();
-        } catch {
-          audioFailed = true;
-        }
-      } else {
-        audioEl.pause();
-      }
-    }
-    if (videoEl) {
-      // Keep video muted so autoplay succeeds across browsers; audio is handled by remoteAudioRef.
-      videoEl.muted = true;
-      if (hasVideoTrack) {
-        try {
-          await videoEl.play();
-        } catch {
-          videoFailed = true;
-        }
-      } else {
-        videoEl.pause();
-      }
-    }
-    // Fallback: if audio element playback fails, try routing audio through video element.
-    if (audioFailed && hasAudioTrack && hasVideoTrack && videoEl) {
-      try {
-        videoEl.muted = false;
-        await videoEl.play();
-        audioFailed = false;
-      } catch {
-        videoFailed = true;
-      }
-    }
-    setNeedsRemotePlay(audioFailed || videoFailed);
-    return !(audioFailed || videoFailed);
-  }, []);
   useEffect(() => {
     isMountedRef.current = true;
     initAudioContext();
@@ -2435,7 +2444,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
         "\u97F3\u58F0\u3092\u518D\u751F"
       ] }),
-      /* @__PURE__ */ jsxs("button", { onClick: openAdvancedSettingsPanel, className: "absolute top-4 right-4 z-30 flex items-center gap-2 bg-black/60 hover:bg-black/70 text-white text-xs font-bold px-3 py-2 rounded-full shadow-lg backdrop-blur", children: [
+      /* @__PURE__ */ jsxs("button", { onClick: openAdvancedSettingsPanel, className: "fixed top-4 right-4 z-[1015] flex items-center gap-2 bg-black/70 hover:bg-black/80 text-white text-xs font-bold px-3 py-2 rounded-full shadow-xl backdrop-blur", children: [
         /* @__PURE__ */ jsx(Settings, { className: "w-4 h-4" }),
         "\u8A2D\u5B9A"
       ] }),
@@ -5682,27 +5691,38 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   ] });
 };
 const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, appId: appId2 }) => {
-  const [content, setContent] = useState(""), [media, setMedia] = useState(null), [mediaType, setMediaType] = useState("image"), [isUploading, setIsUploading] = useState(false);
+  const [content, setContent] = useState(""), [media, setMedia] = useState(null), [mediaFile, setMediaFile] = useState(null), [mediaType, setMediaType] = useState("image"), [isUploading, setIsUploading] = useState(false);
+  useEffect(() => {
+    return () => {
+      if (media && media.startsWith("blob:")) {
+        URL.revokeObjectURL(media);
+      }
+    };
+  }, [media]);
   const postMessage = async () => {
     if (profile?.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
-    if (!content && !media || isUploading) return;
+    if (!content && !mediaFile || isUploading) return;
     setIsUploading(true);
     try {
-      let hasChunks = false, chunkCount = 0, storedMedia = media;
-      if (media && media.length > CHUNK_SIZE) {
-        hasChunks = true;
-        chunkCount = Math.ceil(media.length / CHUNK_SIZE);
-        storedMedia = null;
-      }
+      let hasChunks = false;
+      let chunkCount = 0;
+      let storedMedia = null;
+      let mimeType = null;
       const newPostRef = doc(collection(db2, "artifacts", appId2, "public", "data", "posts"));
-      if (hasChunks && media) {
+      if (mediaFile) {
+        hasChunks = true;
+        chunkCount = Math.ceil(mediaFile.size / CHUNK_SIZE);
+        mimeType = mediaFile.type || null;
         const CONCURRENCY = getUploadConcurrency();
         const executing = /* @__PURE__ */ new Set();
         for (let i = 0; i < chunkCount; i++) {
           const start = i * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, media.length);
-          const chunkData = media.slice(start, end);
-          const p = setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: chunkData, index: i });
+          const end = Math.min(start + CHUNK_SIZE, mediaFile.size);
+          const blobSlice = mediaFile.slice(start, end);
+          const p = blobSlice.arrayBuffer().then(async (buf) => {
+            const base64Data = bytesToBase64(new Uint8Array(buf));
+            await setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: base64Data, index: i });
+          });
           const pWrapper = p.then(() => executing.delete(pWrapper));
           executing.add(pWrapper);
           if (executing.size >= CONCURRENCY) {
@@ -5711,27 +5731,31 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
         }
         await Promise.all(executing);
       }
-      let mimeType = null;
-      if (media && media.startsWith("data:")) {
-        mimeType = media.split(";")[0].split(":")[1];
-      }
       await setDoc(newPostRef, { userId: user.uid, content, media: storedMedia, mediaType, mimeType, hasChunks, chunkCount, likes: [], comments: [], createdAt: serverTimestamp() });
       setContent("");
+      if (media && media.startsWith("blob:")) {
+        URL.revokeObjectURL(media);
+      }
       setMedia(null);
+      setMediaFile(null);
       showNotification("\u6295\u7A3F\u3057\u307E\u3057\u305F");
     } finally {
       setIsUploading(false);
     }
   };
-  const handleVoomFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setMedia(ev.target.result);
-      setMediaType(file.type.startsWith("video") ? "video" : "image");
-    };
-    reader.readAsDataURL(file);
+  const handleVoomFileUpload = async (e) => {
+    const inputFile = e.target.files[0];
+    if (!inputFile) return;
+    e.target.value = "";
+    const processed = await processFileBeforeUpload(inputFile);
+    const file = processed instanceof File ? processed : new File([processed], inputFile.name, { type: processed?.type || inputFile.type || "application/octet-stream", lastModified: Date.now() });
+    if (media && media.startsWith("blob:")) {
+      URL.revokeObjectURL(media);
+    }
+    const objectUrl = URL.createObjectURL(file);
+    setMedia(objectUrl);
+    setMediaFile(file);
+    setMediaType(file.type.startsWith("video") ? "video" : "image");
   };
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-gray-50", children: [
     /* @__PURE__ */ jsx("div", { className: "bg-white p-4 border-b shrink-0", children: /* @__PURE__ */ jsx("h1", { className: "text-xl font-bold", children: "VOOM" }) }),
@@ -5740,14 +5764,20 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
         /* @__PURE__ */ jsx("textarea", { className: "w-full text-sm outline-none resize-none min-h-[60px]", placeholder: "\u4F55\u3092\u3057\u3066\u3044\u307E\u3059\u304B\uFF1F", value: content, onChange: (e) => setContent(e.target.value) }),
         media && /* @__PURE__ */ jsxs("div", { className: "relative mt-2", children: [
           mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: media, className: "w-full rounded-xl bg-black", controls: true }) : /* @__PURE__ */ jsx("img", { src: media, className: "max-h-60 rounded-xl" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setMedia(null), className: "absolute top-1 right-1 bg-black/50 text-white rounded-full p-1", children: /* @__PURE__ */ jsx(X, { className: "w-3 h-3" }) })
+          /* @__PURE__ */ jsx("button", { onClick: () => {
+            if (media && media.startsWith("blob:")) {
+              URL.revokeObjectURL(media);
+            }
+            setMedia(null);
+            setMediaFile(null);
+          }, className: "absolute top-1 right-1 bg-black/50 text-white rounded-full p-1", children: /* @__PURE__ */ jsx(X, { className: "w-3 h-3" }) })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "flex justify-between items-center pt-2 border-t mt-2", children: [
           /* @__PURE__ */ jsxs("label", { className: "cursor-pointer p-2 flex items-center gap-2", children: [
             /* @__PURE__ */ jsx(ImageIcon, { className: "w-5 h-5 text-gray-400" }),
             /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*,video/*", onChange: handleVoomFileUpload })
           ] }),
-          /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || media ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: "\u6295\u7A3F" })
+          /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || mediaFile ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: "\u6295\u7A3F" })
         ] })
       ] }),
       posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id))
