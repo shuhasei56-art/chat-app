@@ -1202,6 +1202,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       autoSnapshotTimerRef.current = null;
     }
     if (autoSnapshotSec <= 0) return;
+    const hasRemoteVideoNow = hasRemoteVideoTrack || remoteStream?.getVideoTracks?.().some((track) => track.readyState === "live");
+    if (!hasRemoteVideoNow) return;
     autoSnapshotTimerRef.current = setInterval(() => {
       captureCallSnapshot();
     }, autoSnapshotSec * 1e3);
@@ -1211,7 +1213,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         autoSnapshotTimerRef.current = null;
       }
     };
-  }, [autoSnapshotSec, hasRemoteVideo]);
+  }, [autoSnapshotSec, hasRemoteVideoTrack, remoteStream]);
   useEffect(() => {
     const becameConnected = isConnected && !prevConnectedRef.current;
     if (becameConnected) {
