@@ -1153,6 +1153,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     };
   }, [autoHideControls]);
   useEffect(() => {
+    if (showAdvancedPanel) setControlsVisible(true);
+  }, [showAdvancedPanel]);
+  useEffect(() => {
     let cancelled = false;
     const applyWakeLock = async () => {
       if (!("wakeLock" in navigator)) return;
@@ -1219,9 +1222,10 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     if (becameConnected) {
       if (playConnectSound) playNotificationSound();
       if (vibrateOnConnect && navigator.vibrate) navigator.vibrate([120, 60, 120]);
+      tryPlayRemoteMedia();
     }
     prevConnectedRef.current = isConnected;
-  }, [isConnected, playConnectSound, vibrateOnConnect]);
+  }, [isConnected, playConnectSound, vibrateOnConnect, tryPlayRemoteMedia]);
   const recoverLocalPreviewPlayback = useCallback(() => {
     const videoEl = localVideoRef.current;
     const stream = localStreamRef.current;
@@ -1526,6 +1530,11 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
       const pc = new RTCPeerConnection(buildRtcConfig(false));
       pcRef.current = pc;
+      try {
+        pc.addTransceiver("audio", { direction: "sendrecv" });
+        if (isVideoEnabled) pc.addTransceiver("video", { direction: "sendrecv" });
+      } catch {
+      }
       const applyAdaptiveProfile = async (profile) => {
         if (!pcRef.current) return;
         const key = `${profile.videoBitrate}-${profile.videoScale}-${profile.videoFps}-${profile.audioBitrate}`;
@@ -1724,6 +1733,13 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           const exists = stream.getTracks().some((track) => track.id === event.track.id);
           if (!exists) stream.addTrack(event.track);
         }
+        remoteStreamRef.current = stream;
+        if (event.track) {
+          event.track.onunmute = () => {
+            if (!isMountedRef.current) return;
+            tryPlayRemoteMedia();
+          };
+        }
         const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState === "live");
         hasRemoteVideoTrackRef.current = hasLiveVideo;
         setHasRemoteVideoTrack(hasLiveVideo);
@@ -1734,7 +1750,12 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = stream;
         }
-        await tryPlayRemoteMedia();
+        const played = await tryPlayRemoteMedia();
+        if (!played) {
+          setTimeout(() => {
+            if (isMountedRef.current) tryPlayRemoteMedia();
+          }, 800);
+        }
       };
       pc.onicecandidate = async (event) => {
         if (!event.candidate) return;
@@ -2107,6 +2128,10 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const resumeRemotePlayback = async () => {
     await tryPlayRemoteMedia();
   };
+  const openAdvancedSettingsPanel = () => {
+    setControlsVisible(true);
+    setShowAdvancedPanel(true);
+  };
   const toggleMute = () => {
     const stream = localStreamRef.current;
     if (!stream) return;
@@ -2298,6 +2323,40 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       console.warn("PiP toggle failed:", e);
     }
   };
+  const rawParticipantCount = Array.isArray(callData?.participants) ? callData.participants.length : Number(callData?.participantCount) || (callData?.isGroupCall ? 4 : 2);
+  const participantCount = Math.max(2, Math.min(4, rawParticipantCount));
+  const tileCount = participantCount <= 2 ? 2 : 4;
+  const tileGridClass = tileCount === 2 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-2";
+  const tileMinHeightClass = tileCount === 2 ? "min-h-[200px] md:min-h-[420px]" : "min-h-[140px] md:min-h-[220px]";
+  const memberRows = [
+    {
+      key: "self",
+      label: "あなた",
+      status: isHold ? "保留中" : isMuted ? "ミュート中" : "参加中",
+      icon: User
+    },
+    {
+      key: "remote",
+      label: "相手",
+      status: isConnected ? "接続済み" : "接続中...",
+      icon: User
+    },
+    ...Array.from({ length: Math.max(0, participantCount - 2) }, (_, idx) => ({
+      key: `member-waiting-${idx}`,
+      label: `参加者${idx + 3}`,
+      status: "待機中",
+      icon: Users
+    }))
+  ];
+  const callTiles = [
+    { key: "remote", type: "remote", label: "相手" },
+    { key: "local", type: "local", label: "あなた" },
+    ...Array.from({ length: Math.max(0, tileCount - 2) }, (_, idx) => ({
+      key: `placeholder-${idx}`,
+      type: "placeholder",
+      label: `参加者${idx + 3}`
+    }))
+  ];
   if (callError) {
     return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center text-white flex-col gap-4", children: [
       /* @__PURE__ */ jsx(AlertCircle, { className: "w-16 h-16 text-red-500" }),
@@ -2305,7 +2364,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       /* @__PURE__ */ jsx("p", { className: "text-sm text-gray-400", children: "\u901A\u8A71\u3092\u7D42\u4E86\u3057\u307E\u3059..." })
     ] });
   }
-  return /* @__PURE__ */ jsxs("div", { ref: callStageRef, className: "fixed inset-0 z-[1000] bg-[#f4c534] flex flex-col animate-in fade-in", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : "radial-gradient(circle at 20% 20%, #ffd95e 0%, #f4c534 45%, #eab308 100%)", backgroundSize: "cover" }, children: [
+  return /* @__PURE__ */ jsxs("div", { ref: callStageRef, className: "fixed inset-0 z-[1000] bg-slate-100 flex flex-col animate-in fade-in", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : "radial-gradient(circle at 15% 15%, #e2e8f0 0%, #cbd5e1 45%, #94a3b8 100%)", backgroundSize: "cover" }, children: [
     /* @__PURE__ */ jsxs("div", { className: "relative flex-1 flex items-center justify-center p-3 md:p-8", children: [
       /* @__PURE__ */ jsxs("div", { className: "absolute top-4 left-4 z-20 flex items-center gap-2", children: [
         /* @__PURE__ */ jsx("div", { className: "bg-black/50 text-white text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur", children: formatCallDuration(callDurationSec) }),
@@ -2322,54 +2381,63 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "absolute w-0 h-0 opacity-0 pointer-events-none" }),
       /* @__PURE__ */ jsxs("div", { className: "w-full max-w-6xl h-full max-h-[760px] grid grid-cols-1 md:grid-cols-[260px_1fr] gap-3 md:gap-4", children: [
         /* @__PURE__ */ jsxs("div", { className: "bg-zinc-900/90 text-white rounded-[28px] p-4 md:p-5 shadow-2xl backdrop-blur-sm border border-white/20", children: [
-          /* @__PURE__ */ jsx("div", { className: "text-xs font-bold tracking-wide text-white/70 mb-3", children: "通話メンバー" }),
-          /* @__PURE__ */ jsxs("div", { className: "space-y-3", children: [
-            /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2.5", children: [
-              /* @__PURE__ */ jsx("div", { className: "w-9 h-9 rounded-full bg-white/20 overflow-hidden flex items-center justify-center", children: /* @__PURE__ */ jsx(User, { className: "w-4 h-4 text-white/80" }) }),
+          /* @__PURE__ */ jsxs("div", { className: "text-xs font-bold tracking-wide text-white/70 mb-3", children: [
+            "通話メンバー (",
+            participantCount,
+            ")"
+          ] }),
+          /* @__PURE__ */ jsx("div", { className: "space-y-3", children: memberRows.map((member) => {
+            const MemberIcon = member.icon;
+            return /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2.5", children: [
+              /* @__PURE__ */ jsx("div", { className: "w-9 h-9 rounded-full bg-white/20 overflow-hidden flex items-center justify-center", children: /* @__PURE__ */ jsx(MemberIcon, { className: "w-4 h-4 text-white/80" }) }),
               /* @__PURE__ */ jsxs("div", { className: "text-xs", children: [
-                /* @__PURE__ */ jsx("div", { className: "font-bold", children: "あなた" }),
-                /* @__PURE__ */ jsx("div", { className: "text-white/60", children: isMuted ? "ミュート中" : "参加中" })
+                /* @__PURE__ */ jsx("div", { className: "font-bold", children: member.label }),
+                /* @__PURE__ */ jsx("div", { className: "text-white/60", children: member.status })
               ] })
-            ] }),
-            /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2.5", children: [
-              /* @__PURE__ */ jsx("div", { className: "w-9 h-9 rounded-full bg-white/20 overflow-hidden flex items-center justify-center", children: /* @__PURE__ */ jsx(User, { className: "w-4 h-4 text-white/80" }) }),
-              /* @__PURE__ */ jsxs("div", { className: "text-xs", children: [
-                /* @__PURE__ */ jsx("div", { className: "font-bold", children: "相手" }),
-                /* @__PURE__ */ jsx("div", { className: "text-white/60", children: isConnected ? "接続済み" : "接続中..." })
-              ] })
-            ] })
-          ] })
+            ] }, member.key);
+          }) })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "bg-black/20 rounded-[28px] p-2.5 md:p-3 border border-white/30 shadow-2xl", children: [
-          /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-2.5 md:gap-3 h-full", children: [
-            /* @__PURE__ */ jsx("div", { className: "relative rounded-2xl overflow-hidden bg-black min-h-[180px] md:min-h-[260px]", children: remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }) : /* @__PURE__ */ jsxs("div", { className: "w-full h-full text-white flex flex-col items-center justify-center gap-2", children: [
-              /* @__PURE__ */ jsx(User, { className: "w-8 h-8 opacity-80" }),
-              /* @__PURE__ */ jsx("p", { className: "text-xs font-bold", children: remoteStream ? isVideoEnabled ? "ビデオ受信中..." : "音声通話中..." : "接続中..." })
-            ] }) }),
-            /* @__PURE__ */ jsx("div", { className: "relative rounded-2xl overflow-hidden bg-black min-h-[180px] md:min-h-[260px]", children: isVideoEnabled ? /* @__PURE__ */ jsx(
-              "video",
-              {
-                ref: localVideoRef,
-                autoPlay: true,
-                playsInline: true,
-                muted: true,
-                className: "w-full h-full object-cover",
-                style: { filter: localFilter, transform: localVideoTransform || "none" },
-                onError: handleLocalVideoRenderIssue,
-                onStalled: handleLocalVideoRenderIssue,
-                onEmptied: handleLocalVideoRenderIssue,
-                onAbort: handleLocalVideoRenderIssue
-              }
-            ) : /* @__PURE__ */ jsx("div", { className: "w-full h-full text-white flex items-center justify-center", children: /* @__PURE__ */ jsx(VideoOff, { className: "w-8 h-8 opacity-70" }) }) }),
-            /* @__PURE__ */ jsx("div", { className: "rounded-2xl bg-white/25 min-h-[120px] md:min-h-[180px]" }),
-            /* @__PURE__ */ jsx("div", { className: "rounded-2xl bg-white/25 min-h-[120px] md:min-h-[180px]" })
-          ] }),
+          /* @__PURE__ */ jsx("div", { className: `grid ${tileGridClass} gap-2.5 md:gap-3 h-full`, children: callTiles.map((tile) => {
+            if (tile.type === "remote") {
+              return /* @__PURE__ */ jsx("div", { className: `relative rounded-2xl overflow-hidden bg-black ${tileMinHeightClass}`, children: remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }) : /* @__PURE__ */ jsxs("div", { className: "w-full h-full text-white flex flex-col items-center justify-center gap-2", children: [
+                /* @__PURE__ */ jsx(User, { className: "w-8 h-8 opacity-80" }),
+                /* @__PURE__ */ jsx("p", { className: "text-xs font-bold", children: remoteStream ? isVideoEnabled ? "ビデオ受信中..." : "音声通話中..." : "接続中..." })
+              ] }) }, tile.key);
+            }
+            if (tile.type === "local") {
+              return /* @__PURE__ */ jsx("div", { className: `relative rounded-2xl overflow-hidden bg-black ${tileMinHeightClass}`, children: isVideoEnabled ? /* @__PURE__ */ jsx(
+                "video",
+                {
+                  ref: localVideoRef,
+                  autoPlay: true,
+                  playsInline: true,
+                  muted: true,
+                  className: "w-full h-full object-cover",
+                  style: { filter: localFilter, transform: localVideoTransform || "none" },
+                  onError: handleLocalVideoRenderIssue,
+                  onStalled: handleLocalVideoRenderIssue,
+                  onEmptied: handleLocalVideoRenderIssue,
+                  onAbort: handleLocalVideoRenderIssue
+                }
+              ) : /* @__PURE__ */ jsx("div", { className: "w-full h-full text-white flex items-center justify-center", children: /* @__PURE__ */ jsx(VideoOff, { className: "w-8 h-8 opacity-70" }) }) }, tile.key);
+            }
+            return /* @__PURE__ */ jsxs("div", { className: `rounded-2xl bg-white/20 border border-white/30 ${tileMinHeightClass} text-white flex flex-col items-center justify-center gap-2`, children: [
+              /* @__PURE__ */ jsx(Users, { className: "w-7 h-7 opacity-70" }),
+              /* @__PURE__ */ jsx("p", { className: "text-xs font-bold opacity-80", children: tile.label }),
+              /* @__PURE__ */ jsx("p", { className: "text-[10px] opacity-60", children: "参加待機中" })
+            ] }, tile.key);
+          }) }),
           isEffectSuppressed && /* @__PURE__ */ jsx("div", { className: "mt-2 bg-yellow-500/85 text-black text-[10px] px-2 py-1 rounded font-bold text-center", children: "\u5B89\u5B9A\u512A\u5148\u30E2\u30FC\u30C9" })
         ] })
       ] }),
       needsRemotePlay && /* @__PURE__ */ jsxs("button", { onClick: resumeRemotePlayback, className: "absolute top-4 left-1/2 -translate-x-1/2 bg-white/90 text-gray-800 text-xs font-bold px-4 py-2 rounded-full shadow-lg", children: [
         /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
         "\u97F3\u58F0\u3092\u518D\u751F"
+      ] }),
+      /* @__PURE__ */ jsxs("button", { onClick: openAdvancedSettingsPanel, className: "absolute top-4 right-4 z-30 flex items-center gap-2 bg-black/60 hover:bg-black/70 text-white text-xs font-bold px-3 py-2 rounded-full shadow-lg backdrop-blur", children: [
+        /* @__PURE__ */ jsx(Settings, { className: "w-4 h-4" }),
+        "\u8A2D\u5B9A"
       ] }),
       /* @__PURE__ */ jsxs("button", { onClick: handleEndCallRequest, className: "hidden md:flex absolute right-4 bottom-4 z-30 items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-4 py-2 rounded-full shadow-xl", children: [
         /* @__PURE__ */ jsx(PhoneOff, { className: "w-4 h-4" }),
