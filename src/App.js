@@ -1231,12 +1231,14 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     let videoFailed = false;
     const audioEl = remoteAudioRef.current;
     const videoEl = remoteVideoRef.current;
-    const mediaStream = videoEl?.srcObject || audioEl?.srcObject || remoteStreamRef.current;
+    const mediaStream = videoEl?.srcObject || audioEl?.srcObject || remoteStreamRef.current || remoteStream;
     const hasVideoTrack = hasRemoteVideoTrackRef.current || !!mediaStream?.getVideoTracks?.().some((track) => track.readyState === "live");
     const hasAudioTrack = !!mediaStream?.getAudioTracks?.().some((track) => track.readyState === "live");
     if (audioEl) {
       audioEl.muted = false;
       audioEl.volume = remoteMutedRef.current ? 0 : remoteVolumeRef.current;
+      audioEl.autoplay = true;
+      audioEl.playsInline = true;
       if (hasAudioTrack) {
         try {
           await audioEl.play();
@@ -1250,6 +1252,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     if (videoEl) {
       // Keep video muted so autoplay succeeds across browsers; audio is handled by remoteAudioRef.
       videoEl.muted = true;
+      videoEl.autoplay = true;
+      videoEl.playsInline = true;
       if (hasVideoTrack) {
         try {
           await videoEl.play();
@@ -1272,7 +1276,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     }
     setNeedsRemotePlay(audioFailed || videoFailed);
     return !(audioFailed || videoFailed);
-  }, []);
+  }, [remoteStream]);
   useEffect(() => {
     const becameConnected = isConnected && !prevConnectedRef.current;
     if (becameConnected) {
@@ -1539,11 +1543,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
       const pc = new RTCPeerConnection(buildRtcConfig(false));
       pcRef.current = pc;
-      try {
-        pc.addTransceiver("audio", { direction: "sendrecv" });
-        if (isVideoEnabled) pc.addTransceiver("video", { direction: "sendrecv" });
-      } catch {
-      }
       const applyAdaptiveProfile = async (profile) => {
         if (!pcRef.current) return;
         const key = `${profile.videoBitrate}-${profile.videoScale}-${profile.videoFps}-${profile.audioBitrate}`;
@@ -1747,6 +1746,16 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           event.track.onunmute = () => {
             if (!isMountedRef.current) return;
             tryPlayRemoteMedia();
+          };
+          event.track.onmute = () => {
+            const hasLiveVideo2 = stream.getVideoTracks().some((track) => track.readyState === "live");
+            hasRemoteVideoTrackRef.current = hasLiveVideo2;
+            setHasRemoteVideoTrack(hasLiveVideo2);
+          };
+          event.track.onended = () => {
+            const hasLiveVideo2 = stream.getVideoTracks().some((track) => track.readyState === "live");
+            hasRemoteVideoTrackRef.current = hasLiveVideo2;
+            setHasRemoteVideoTrack(hasLiveVideo2);
           };
         }
         const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState === "live");
@@ -1957,6 +1966,24 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     }
   }, [remoteStream, tryPlayRemoteMedia]);
   useEffect(() => {
+    const audioEl = remoteAudioRef.current;
+    const videoEl = remoteVideoRef.current;
+    if (!audioEl && !videoEl) return;
+    const resume = () => {
+      tryPlayRemoteMedia();
+    };
+    audioEl?.addEventListener("loadedmetadata", resume);
+    audioEl?.addEventListener("canplay", resume);
+    videoEl?.addEventListener("loadedmetadata", resume);
+    videoEl?.addEventListener("canplay", resume);
+    return () => {
+      audioEl?.removeEventListener("loadedmetadata", resume);
+      audioEl?.removeEventListener("canplay", resume);
+      videoEl?.removeEventListener("loadedmetadata", resume);
+      videoEl?.removeEventListener("canplay", resume);
+    };
+  }, [remoteStream, tryPlayRemoteMedia]);
+  useEffect(() => {
     const tryResume = () => {
       if (!needsRemotePlay) return;
       tryPlayRemoteMedia();
@@ -2137,7 +2164,19 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const resumeRemotePlayback = async () => {
     await tryPlayRemoteMedia();
   };
-  const openAdvancedSettingsPanel = () => {
+  const openAdvancedSettingsPanel = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        const el = callStageRef.current || document.documentElement;
+        if (el?.requestFullscreen) {
+          await el.requestFullscreen();
+        } else if (el?.webkitRequestFullscreen) {
+          el.webkitRequestFullscreen();
+        }
+      }
+    } catch (e) {
+      console.warn("Fullscreen request from settings failed:", e);
+    }
     if (controlsTimerRef.current) {
       clearTimeout(controlsTimerRef.current);
       controlsTimerRef.current = null;
@@ -2373,28 +2412,14 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const rawParticipantCount = resolveCallParticipantCount(callData);
   const participantCount = Math.max(2, Math.min(12, rawParticipantCount));
   const tileCount = participantCount;
-  const tileColumns = tileCount <= 2 ? 2 : tileCount <= 4 ? 2 : tileCount <= 9 ? 3 : 4;
-  const tileMinHeightClass = tileCount <= 2 ? "min-h-[200px] md:min-h-[420px]" : tileCount <= 4 ? "min-h-[140px] md:min-h-[220px]" : tileCount <= 6 ? "min-h-[120px] md:min-h-[180px]" : "min-h-[100px] md:min-h-[150px]";
-  const memberRows = [
-    {
-      key: "self",
-      label: "あなた",
-      status: isHold ? "保留中" : isMuted ? "ミュート中" : "参加中",
-      icon: User
-    },
-    {
-      key: "remote",
-      label: "相手",
-      status: isConnected ? "接続済み" : "接続中...",
-      icon: User
-    },
-    ...Array.from({ length: Math.max(0, participantCount - 2) }, (_, idx) => ({
-      key: `member-waiting-${idx}`,
-      label: `参加者${idx + 3}`,
-      status: "待機中",
-      icon: Users
-    }))
-  ];
+  const tileMinHeightClass = tileCount <= 2 ? "min-h-[240px] md:min-h-[420px]" : tileCount <= 4 ? "min-h-[180px] md:min-h-[230px]" : "min-h-[130px] md:min-h-[165px]";
+  const tileGridStyle = (() => {
+    if (tileCount <= 2) return { gridTemplateColumns: "repeat(2, minmax(0, 1fr))" };
+    if (tileCount <= 4) return { gridTemplateColumns: "repeat(2, minmax(0, 1fr))" };
+    if (tileCount <= 9) return { gridTemplateColumns: "repeat(3, minmax(0, 1fr))" };
+    const cols = 4;
+    return { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` };
+  })();
   const callTiles = [
     { key: "remote", type: "remote", label: "相手" },
     { key: "local", type: "local", label: "あなた" },
@@ -2411,99 +2436,66 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       /* @__PURE__ */ jsx("p", { className: "text-sm text-gray-400", children: "\u901A\u8A71\u3092\u7D42\u4E86\u3057\u307E\u3059..." })
     ] });
   }
-  return /* @__PURE__ */ jsxs("div", { ref: callStageRef, className: "fixed inset-0 z-[1000] bg-slate-100 flex flex-col animate-in fade-in", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : "radial-gradient(circle at 15% 15%, #e2e8f0 0%, #cbd5e1 45%, #94a3b8 100%)", backgroundSize: "cover" }, children: [
-    /* @__PURE__ */ jsxs("div", { className: "relative flex-1 flex items-center justify-center p-2 md:p-4", children: [
-      /* @__PURE__ */ jsxs("div", { className: "absolute top-4 left-4 z-20 flex items-center gap-2", children: [
-        /* @__PURE__ */ jsx("div", { className: "bg-black/50 text-white text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur", children: formatCallDuration(callDurationSec) }),
-        isRecordingCall && /* @__PURE__ */ jsxs("div", { className: "bg-red-600/90 text-white text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur flex items-center gap-1", children: [
-          /* @__PURE__ */ jsx(Disc, { className: "w-3 h-3 animate-pulse" }),
-          "REC ",
-          formatCallDuration(recordingDurationSec)
-        ] }),
-        /* @__PURE__ */ jsx("div", { className: `text-[10px] font-bold px-2 py-1 rounded-full backdrop-blur ${isConnected ? "bg-green-500/80 text-white" : "bg-yellow-500/80 text-black"}`, children: isConnected ? "\u63A5\u7D9A\u4E2D" : "\u63A5\u7D9A\u78BA\u8A8D\u4E2D" }),
-        /* @__PURE__ */ jsx("div", { className: `text-[10px] font-bold px-2 py-1 rounded-full backdrop-blur ${networkQualityClass}`, children: networkQualityLabel }),
-        /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold px-2 py-1 rounded-full backdrop-blur bg-indigo-500/80 text-white", children: qualityModeLabel }),
-        showClock && /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold px-2 py-1 rounded-full backdrop-blur bg-black/60 text-white", children: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })
+  return /* @__PURE__ */ jsxs("div", { ref: callStageRef, className: "fixed inset-0 z-[1000] bg-[#1f2329] flex flex-col animate-in fade-in", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : "linear-gradient(180deg, #262b33 0%, #1b1f25 100%)", backgroundSize: "cover" }, children: [
+    /* @__PURE__ */ jsxs("div", { className: "h-10 md:h-11 px-3 md:px-4 border-b border-white/10 bg-black/35 text-white flex items-center justify-between", children: [
+      /* @__PURE__ */ jsxs("div", { className: "text-xs md:text-sm font-bold truncate", children: [
+        "Group Call (",
+        participantCount,
+        ")"
       ] }),
+      /* @__PURE__ */ jsx("div", { className: "text-[11px] text-white/70 font-medium", children: formatCallDuration(callDurationSec) })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "relative flex-1 flex items-center justify-center p-1.5 md:p-2", children: [
       /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "absolute w-0 h-0 opacity-0 pointer-events-none" }),
-      /* @__PURE__ */ jsxs("div", { className: "w-full h-full grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)] gap-2 md:gap-3", children: [
-        /* @__PURE__ */ jsxs("div", { className: "bg-zinc-900/90 text-white rounded-[28px] p-4 md:p-5 shadow-2xl backdrop-blur-sm border border-white/20", children: [
-          /* @__PURE__ */ jsxs("div", { className: "text-xs font-bold tracking-wide text-white/70 mb-3", children: [
-            "通話メンバー (",
-            participantCount,
-            ")"
-          ] }),
-          /* @__PURE__ */ jsx("div", { className: "space-y-3", children: memberRows.map((member) => {
-            const MemberIcon = member.icon;
-            return /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2.5", children: [
-              /* @__PURE__ */ jsx("div", { className: "w-9 h-9 rounded-full bg-white/20 overflow-hidden flex items-center justify-center", children: /* @__PURE__ */ jsx(MemberIcon, { className: "w-4 h-4 text-white/80" }) }),
-              /* @__PURE__ */ jsxs("div", { className: "text-xs", children: [
-                /* @__PURE__ */ jsx("div", { className: "font-bold", children: member.label }),
-                /* @__PURE__ */ jsx("div", { className: "text-white/60", children: member.status })
-              ] })
-            ] }, member.key);
-          }) })
-        ] }),
-        /* @__PURE__ */ jsxs("div", { className: "bg-black/20 rounded-[28px] p-2.5 md:p-3 border border-white/30 shadow-2xl", children: [
-          /* @__PURE__ */ jsx("div", { className: "grid gap-2.5 md:gap-3 h-full", style: { gridTemplateColumns: `repeat(${tileColumns}, minmax(0, 1fr))` }, children: callTiles.map((tile) => {
-            if (tile.type === "remote") {
-              return /* @__PURE__ */ jsx("div", { className: `relative rounded-2xl overflow-hidden bg-black ${tileMinHeightClass}`, children: remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }) : /* @__PURE__ */ jsxs("div", { className: "w-full h-full text-white flex flex-col items-center justify-center gap-2", children: [
+      /* @__PURE__ */ jsx("div", { className: "w-full h-full pb-20", children: /* @__PURE__ */ jsx("div", { className: "grid gap-1.5 h-full", style: tileGridStyle, children: callTiles.map((tile) => {
+          if (tile.type === "remote") {
+            return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden bg-black border border-white/15 rounded-sm ${tileMinHeightClass}`, children: [
+              /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "absolute inset-0 w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }),
+              (!remoteStream || !hasRemoteVideo) && /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 w-full h-full text-white flex flex-col items-center justify-center gap-2 bg-black/45 backdrop-blur-sm", children: [
                 /* @__PURE__ */ jsx(User, { className: "w-8 h-8 opacity-80" }),
                 /* @__PURE__ */ jsx("p", { className: "text-xs font-bold", children: remoteStream ? isVideoEnabled ? "ビデオ受信中..." : "音声通話中..." : "接続中..." })
-              ] }) }, tile.key);
-            }
-            if (tile.type === "local") {
-              return /* @__PURE__ */ jsx("div", { className: `relative rounded-2xl overflow-hidden bg-black ${tileMinHeightClass}`, children: isVideoEnabled ? /* @__PURE__ */ jsx(
+              ] }),
+              /* @__PURE__ */ jsx("div", { className: "absolute left-1.5 bottom-1.5 text-[10px] font-medium px-1.5 py-0.5 bg-black/50 text-white", children: "相手" })
+            ] }, tile.key);
+          }
+          if (tile.type === "local") {
+            return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden bg-black border border-white/15 rounded-sm ${tileMinHeightClass}`, children: [
+              /* @__PURE__ */ jsx(
                 "video",
                 {
                   ref: localVideoRef,
                   autoPlay: true,
                   playsInline: true,
                   muted: true,
-                  className: "w-full h-full object-cover",
+                  className: "absolute inset-0 w-full h-full object-cover",
                   style: { filter: localFilter, transform: localVideoTransform || "none" },
                   onError: handleLocalVideoRenderIssue,
                   onStalled: handleLocalVideoRenderIssue,
                   onEmptied: handleLocalVideoRenderIssue,
                   onAbort: handleLocalVideoRenderIssue
                 }
-              ) : /* @__PURE__ */ jsx("div", { className: "w-full h-full text-white flex items-center justify-center", children: /* @__PURE__ */ jsx(VideoOff, { className: "w-8 h-8 opacity-70" }) }) }, tile.key);
-            }
-            return /* @__PURE__ */ jsxs("div", { className: `rounded-2xl bg-white/20 border border-white/30 ${tileMinHeightClass} text-white flex flex-col items-center justify-center gap-2`, children: [
-              /* @__PURE__ */ jsx(Users, { className: "w-7 h-7 opacity-70" }),
-              /* @__PURE__ */ jsx("p", { className: "text-xs font-bold opacity-80", children: tile.label }),
-              /* @__PURE__ */ jsx("p", { className: "text-[10px] opacity-60", children: "参加待機中" })
+              ),
+              (!isVideoEnabled || isVideoOff) && /* @__PURE__ */ jsx("div", { className: "absolute inset-0 w-full h-full text-white flex items-center justify-center bg-black/55 backdrop-blur-sm", children: /* @__PURE__ */ jsx(VideoOff, { className: "w-8 h-8 opacity-70" }) }),
+              /* @__PURE__ */ jsx("div", { className: "absolute left-1.5 bottom-1.5 text-[10px] font-medium px-1.5 py-0.5 bg-black/50 text-white", children: "あなた" })
             ] }, tile.key);
-          }) }),
-          isEffectSuppressed && /* @__PURE__ */ jsx("div", { className: "mt-2 bg-yellow-500/85 text-black text-[10px] px-2 py-1 rounded font-bold text-center", children: "\u5B89\u5B9A\u512A\u5148\u30E2\u30FC\u30C9" })
-        ] })
-      ] }),
+          }
+          return /* @__PURE__ */ jsxs("div", { className: `bg-[#2b3038] border border-white/15 rounded-sm ${tileMinHeightClass} text-white flex flex-col items-center justify-center gap-2`, children: [
+            /* @__PURE__ */ jsx(Users, { className: "w-7 h-7 opacity-75" }),
+            /* @__PURE__ */ jsx("p", { className: "text-xs font-bold opacity-90", children: tile.label }),
+            /* @__PURE__ */ jsx("p", { className: "text-[10px] opacity-70", children: "参加待機中" })
+          ] }, tile.key);
+        }) }) }),
       needsRemotePlay && /* @__PURE__ */ jsxs("button", { onClick: resumeRemotePlayback, className: "absolute top-4 left-1/2 -translate-x-1/2 bg-white/90 text-gray-800 text-xs font-bold px-4 py-2 rounded-full shadow-lg", children: [
         /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
         "\u97F3\u58F0\u3092\u518D\u751F"
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "fixed right-4 bottom-4 md:right-6 md:bottom-6 z-[1015] flex items-center gap-2 md:gap-3", children: [
-        /* @__PURE__ */ jsxs("button", { onClick: openAdvancedSettingsPanel, className: "flex items-center gap-2 bg-black/75 hover:bg-black/85 text-white text-sm font-bold px-4 py-2.5 rounded-full shadow-2xl backdrop-blur", children: [
-          /* @__PURE__ */ jsx(Settings, { className: "w-4 h-4" }),
-          "\u8A2D\u5B9A"
-        ] }),
-        /* @__PURE__ */ jsxs("button", { onClick: handleEndCallRequest, className: "flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold px-5 py-2.5 rounded-full shadow-2xl", children: [
-          /* @__PURE__ */ jsx(PhoneOff, { className: "w-4 h-4" }),
-          "\u901A\u8A71\u7D42\u4E86"
-        ] })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: `relative z-[1003] bg-black/80 backdrop-blur-lg px-4 pb-6 pt-2 transition-all duration-200 ${controlsVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6 pointer-events-none"}`, children: [
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 mb-3", children: [
-        /* @__PURE__ */ jsx("button", { onClick: () => setIsRemoteMuted((v) => !v), className: `p-2 rounded-full transition-all ${isRemoteMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, title: "\u76F8\u624B\u97F3\u91CF\u30DF\u30E5\u30FC\u30C8", children: isRemoteMuted ? /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 opacity-40" }) : /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4" }) }),
-        /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 1, step: 0.05, value: isRemoteMuted ? 0 : remoteVolume, onChange: (e) => {
-          const v = Number(e.target.value);
-          setRemoteVolume(v);
-          if (v > 0 && isRemoteMuted) setIsRemoteMuted(false);
-        }, className: "w-40 md:w-64 lg:w-72 accent-green-500" }),
-        /* @__PURE__ */ jsx("button", { onClick: () => setShowAdvancedPanel((v) => !v), className: `p-2 rounded-full text-white ${showAdvancedPanel ? "bg-indigo-600 hover:bg-indigo-500" : "bg-gray-700 hover:bg-gray-600"}`, title: "\u8A73\u7D30\u8A2D\u5B9A", children: /* @__PURE__ */ jsx(Settings, { className: "w-4 h-4" }) })
-      ] }),
-      showAdvancedPanel && /* @__PURE__ */ jsxs("div", { className: "mb-3 rounded-2xl border border-white/10 bg-black/40 p-3 text-white space-y-3", children: [
+    /* @__PURE__ */ jsxs("div", { className: `relative z-[1003] bg-gradient-to-t from-black/85 to-transparent px-4 pb-4 pt-2 transition-all duration-200 ${controlsVisible || showAdvancedPanel ? "opacity-100" : "opacity-0 pointer-events-none"}`, children: [
+      showAdvancedPanel && /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1020] bg-black/95 backdrop-blur-xl p-4 md:p-6 text-white space-y-3 overflow-y-auto", children: [
+        /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between", children: [
+          /* @__PURE__ */ jsx("div", { className: "text-sm md:text-base font-black tracking-wide", children: "\u8A2D\u5B9A\u30D1\u30CD\u30EB" }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setShowAdvancedPanel(false), className: "px-3 py-2 rounded-full bg-white/15 hover:bg-white/25 text-xs font-bold", children: "\u9589\u3058\u308B" })
+        ] }),
         /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 flex-wrap", children: [
           /* @__PURE__ */ jsx("button", { onClick: retryRemotePlayback, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u518D\u751F" }),
           /* @__PURE__ */ jsx("button", { onClick: captureCallSnapshot, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u30B9\u30AF\u30B7\u30E7" }),
@@ -2556,14 +2548,12 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         bookmarks.length > 0 && /* @__PURE__ */ jsx("div", { className: "flex flex-wrap gap-2", children: bookmarks.map((b) => /* @__PURE__ */ jsxs("button", { onClick: () => removeBookmark(b.id), className: "px-2 py-1 rounded-full bg-white/10 text-[10px] font-bold", children: [formatCallDuration(b.sec), " x"] }, b.id)) }),
         /* @__PURE__ */ jsx("button", { onClick: resetAdvancedSettings, className: "w-full bg-red-600/80 hover:bg-red-500 text-white py-2 rounded-xl text-xs font-bold", children: "\u8A2D\u5B9A\u30EA\u30BB\u30C3\u30C8" })
       ] }),
-      showShortcutHelp && /* @__PURE__ */ jsx("div", { className: "mb-3 rounded-2xl border border-white/10 bg-black/40 p-3 text-white text-xs font-bold", children: "Shortcut: M=Mic / V=Video / H=Hold / S=Snapshot / F=Fullscreen / P=PiP / ?=Help" }),
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-center gap-8", children: [
-        /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `p-4 rounded-full transition-all ${isMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
-        /* @__PURE__ */ jsxs("button", { onClick: handleEndCallRequest, className: "p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
-          /* @__PURE__ */ jsx(PhoneOff, { className: "w-8 h-8" }),
-          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u7D42\u4E86" })
-        ] }),
-        isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `p-4 rounded-full transition-all ${isVideoOff ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }) })
+      showShortcutHelp && /* @__PURE__ */ jsx("div", { className: "mb-2 border border-white/10 bg-black/40 p-2 text-white text-xs font-bold", children: "Shortcut: M / V / H / S / F / P / ?" }),
+      /* @__PURE__ */ jsxs("div", { className: "mx-auto w-full max-w-[340px] flex items-center justify-center gap-6", children: [
+        /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `w-11 h-11 rounded-full border border-white/25 transition-all flex items-center justify-center ${isMuted ? "bg-white text-black" : "bg-white/15 text-white hover:bg-white/25"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-5 h-5" }) : /* @__PURE__ */ jsx(Mic, { className: "w-5 h-5" }) }),
+        isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `w-11 h-11 rounded-full border border-white/25 transition-all flex items-center justify-center ${isVideoOff ? "bg-white text-black" : "bg-white/15 text-white hover:bg-white/25"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-5 h-5" }) : /* @__PURE__ */ jsx(Video, { className: "w-5 h-5" }) }),
+        /* @__PURE__ */ jsx("button", { onClick: handleEndCallRequest, className: "w-14 h-14 rounded-full bg-red-500 text-white shadow-2xl hover:bg-red-600 transition-all flex items-center justify-center", children: /* @__PURE__ */ jsx(PhoneOff, { className: "w-6 h-6" }) }),
+        /* @__PURE__ */ jsx("button", { onClick: openAdvancedSettingsPanel, className: `w-11 h-11 rounded-full border border-white/25 transition-all flex items-center justify-center ${showAdvancedPanel ? "bg-white text-black" : "bg-white/15 text-white hover:bg-white/25"}`, children: /* @__PURE__ */ jsx(MoreVertical, { className: "w-5 h-5" }) })
       ] })
     ] })
   ] });
