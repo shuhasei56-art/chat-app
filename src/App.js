@@ -2360,7 +2360,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           const v = Number(e.target.value);
           setRemoteVolume(v);
           if (v > 0 && isRemoteMuted) setIsRemoteMuted(false);
-        }, className: "flex-1 accent-green-500" }),
+        }, className: "w-40 md:w-64 lg:w-72 accent-green-500" }),
         /* @__PURE__ */ jsx("button", { onClick: () => setShowAdvancedPanel((v) => !v), className: `p-2 rounded-full text-white ${showAdvancedPanel ? "bg-indigo-600 hover:bg-indigo-500" : "bg-gray-700 hover:bg-gray-600"}`, title: "\u8A73\u7D30\u8A2D\u5B9A", children: /* @__PURE__ */ jsx(Settings, { className: "w-4 h-4" }) })
       ] }),
       showAdvancedPanel && /* @__PURE__ */ jsxs("div", { className: "mb-3 rounded-2xl border border-white/10 bg-black/40 p-3 text-white space-y-3", children: [
