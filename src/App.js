@@ -689,32 +689,32 @@ const AuthView = ({ onLogin, showNotification }) => {
   };
   const getAuthErrorMessage = (error, mode = "login") => {
     const code = error?.code || "";
-    if (code === "auth/invalid-email") return "ID形式が不正です。英数字と . _ - のみ使用できます。";
-    if (code === "auth/user-not-found") return "このIDは登録されていません。";
-    if (code === "auth/wrong-password" || code === "auth/invalid-credential" || code === "auth/invalid-login-credentials") return "IDまたはパスワードが違います。";
-    if (code === "auth/account-exists-with-different-credential") return "このIDはパスワードログインではなく、別のログイン方法（Google等）で作成されています。";
-    if (code === "auth/email-already-in-use") return "このIDは既に使われています。";
-    if (code === "auth/weak-password") return "パスワードは6文字以上で入力してください。";
-    if (code === "auth/too-many-requests") return "試行回数が多すぎます。しばらく待ってから再試行してください。";
-    if (code === "auth/network-request-failed") return "ネットワークエラーです。接続を確認して再試行してください。";
-    if (code === "auth/operation-not-allowed") return "Firebase Authenticationでこのログイン方法が無効です。Sign-in method を有効化してください。";
-    return `${mode === "signup" ? "登録" : "ログイン"}に失敗しました: ${error?.message || "不明なエラー"}`;
+    if (code === "auth/invalid-email") return "ID\u5F62\u5F0F\u304C\u4E0D\u6B63\u3067\u3059\u3002\u82F1\u6570\u5B57\u3068 . _ - \u306E\u307F\u4F7F\u7528\u3067\u304D\u307E\u3059\u3002";
+    if (code === "auth/user-not-found") return "\u3053\u306EID\u306F\u767B\u9332\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002";
+    if (code === "auth/wrong-password" || code === "auth/invalid-credential" || code === "auth/invalid-login-credentials") return "ID\u307E\u305F\u306F\u30D1\u30B9\u30EF\u30FC\u30C9\u304C\u9055\u3044\u307E\u3059\u3002";
+    if (code === "auth/account-exists-with-different-credential") return "\u3053\u306EID\u306F\u30D1\u30B9\u30EF\u30FC\u30C9\u30ED\u30B0\u30A4\u30F3\u3067\u306F\u306A\u304F\u3001\u5225\u306E\u30ED\u30B0\u30A4\u30F3\u65B9\u6CD5\uFF08Google\u7B49\uFF09\u3067\u4F5C\u6210\u3055\u308C\u3066\u3044\u307E\u3059\u3002";
+    if (code === "auth/email-already-in-use") return "\u3053\u306EID\u306F\u65E2\u306B\u4F7F\u308F\u308C\u3066\u3044\u307E\u3059\u3002";
+    if (code === "auth/weak-password") return "\u30D1\u30B9\u30EF\u30FC\u30C9\u306F6\u6587\u5B57\u4EE5\u4E0A\u3067\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
+    if (code === "auth/too-many-requests") return "\u8A66\u884C\u56DE\u6570\u304C\u591A\u3059\u304E\u307E\u3059\u3002\u3057\u3070\u3089\u304F\u5F85\u3063\u3066\u304B\u3089\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
+    if (code === "auth/network-request-failed") return "\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u30A8\u30E9\u30FC\u3067\u3059\u3002\u63A5\u7D9A\u3092\u78BA\u8A8D\u3057\u3066\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
+    if (code === "auth/operation-not-allowed") return "Firebase Authentication\u3067\u3053\u306E\u30ED\u30B0\u30A4\u30F3\u65B9\u6CD5\u304C\u7121\u52B9\u3067\u3059\u3002Sign-in method \u3092\u6709\u52B9\u5316\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
+    return `${mode === "signup" ? "\u767B\u9332" : "\u30ED\u30B0\u30A4\u30F3"}\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${error?.message || "\u4E0D\u660E\u306A\u30A8\u30E9\u30FC"}`;
   };
   const getGoogleLoginErrorMessage = (error) => {
     const code = error?.code || "";
     if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
-      return "ポップアップがブロックされたため、リダイレクトでログインします。";
+      return "\u30DD\u30C3\u30D7\u30A2\u30C3\u30D7\u304C\u30D6\u30ED\u30C3\u30AF\u3055\u308C\u305F\u305F\u3081\u3001\u30EA\u30C0\u30A4\u30EC\u30AF\u30C8\u3067\u30ED\u30B0\u30A4\u30F3\u3057\u307E\u3059\u3002";
     }
     if (code === "auth/popup-closed-by-user") {
-      return "Googleログインがキャンセルされました。";
+      return "Google\u30ED\u30B0\u30A4\u30F3\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002";
     }
     if (code === "auth/unauthorized-domain") {
-      return "このドメインはFirebase Authenticationで許可されていません。Firebaseコンソールで承認済みドメインを追加してください。";
+      return "\u3053\u306E\u30C9\u30E1\u30A4\u30F3\u306FFirebase Authentication\u3067\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002Firebase\u30B3\u30F3\u30BD\u30FC\u30EB\u3067\u627F\u8A8D\u6E08\u307F\u30C9\u30E1\u30A4\u30F3\u3092\u8FFD\u52A0\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
     }
     if (code === "auth/operation-not-allowed") {
-      return "FirebaseでGoogleログインが有効化されていません。Authentication > Sign-in method で有効にしてください。";
+      return "Firebase\u3067Google\u30ED\u30B0\u30A4\u30F3\u304C\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002Authentication > Sign-in method \u3067\u6709\u52B9\u306B\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
     }
-    return `Googleログインに失敗しました: ${error?.message || "不明なエラー"}`;
+    return `Google\u30ED\u30B0\u30A4\u30F3\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${error?.message || "\u4E0D\u660E\u306A\u30A8\u30E9\u30FC"}`;
   };
   const handleGoogleLogin = async () => {
     const googleProvider = new GoogleAuthProvider();
@@ -727,7 +727,7 @@ const AuthView = ({ onLogin, showNotification }) => {
       const code = error?.code || "";
       if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request" || code === "auth/operation-not-supported-in-this-environment") {
         try {
-          showNotification("ポップアップが使えないため、リダイレクトでログインします。");
+          showNotification("\u30DD\u30C3\u30D7\u30A2\u30C3\u30D7\u304C\u4F7F\u3048\u306A\u3044\u305F\u3081\u3001\u30EA\u30C0\u30A4\u30EC\u30AF\u30C8\u3067\u30ED\u30B0\u30A4\u30F3\u3057\u307E\u3059\u3002");
           await signInWithRedirect(auth, googleProvider);
           return;
         } catch (redirectError) {
@@ -1132,7 +1132,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     if (remoteAudioRef.current) remoteAudioRef.current.volume = effectiveVolume;
   }, [remoteVolume, remoteBoost, isRemoteMuted]);
   useEffect(() => {
-    if (!autoHideControls) {
+    if (!autoHideControls || showAdvancedPanel) {
       setControlsVisible(true);
       if (controlsTimerRef.current) {
         clearTimeout(controlsTimerRef.current);
@@ -1144,7 +1144,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       setControlsVisible(true);
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
       controlsTimerRef.current = setTimeout(() => {
-        if (isMountedRef.current) setControlsVisible(false);
+        if (isMountedRef.current && !showAdvancedPanel) setControlsVisible(false);
       }, 2800);
     };
     showTemporarily();
@@ -1160,7 +1160,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         controlsTimerRef.current = null;
       }
     };
-  }, [autoHideControls]);
+  }, [autoHideControls, showAdvancedPanel]);
   useEffect(() => {
     if (showAdvancedPanel) setControlsVisible(true);
   }, [showAdvancedPanel]);
@@ -1970,7 +1970,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   }, [needsRemotePlay, tryPlayRemoteMedia]);
   const networkQualityLabel = networkQuality === "good" ? "\u56DE\u7DDA: \u826F\u597D" : networkQuality === "medium" ? "\u56DE\u7DDA: \u666E\u901A" : networkQuality === "poor" ? "\u56DE\u7DDA: \u4E0D\u5B89\u5B9A" : "\u56DE\u7DDA: \u78BA\u8A8D\u4E2D";
   const networkQualityClass = networkQuality === "good" ? "bg-emerald-500/80 text-white" : networkQuality === "medium" ? "bg-yellow-500/80 text-black" : networkQuality === "poor" ? "bg-red-500/80 text-white" : "bg-gray-500/80 text-white";
-  const qualityModeLabel = qualityMode === "auto" ? "画質: 自動" : qualityMode === "low" ? "画質: 低" : qualityMode === "medium" ? "画質: 中" : "画質: 高";
+  const qualityModeLabel = qualityMode === "auto" ? "\u753B\u8CEA: \u81EA\u52D5" : qualityMode === "low" ? "\u753B\u8CEA: \u4F4E" : qualityMode === "medium" ? "\u753B\u8CEA: \u4E2D" : "\u753B\u8CEA: \u9AD8";
   const remoteVideoTransform = `${isRemoteMirror ? "scaleX(-1) " : ""}scale(${remoteZoom})`.trim();
   const remoteVideoFilter = `brightness(${remoteBrightness}%) contrast(${remoteContrast}%) saturate(${remoteSaturation}%)`;
   const localVideoTransform = `${isLocalMirror ? "scaleX(-1) " : ""}scale(${localZoom})`.trim();
@@ -2138,6 +2138,11 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     await tryPlayRemoteMedia();
   };
   const openAdvancedSettingsPanel = () => {
+    if (controlsTimerRef.current) {
+      clearTimeout(controlsTimerRef.current);
+      controlsTimerRef.current = null;
+    }
+    setAutoHideControls(false);
     setControlsVisible(true);
     setShowAdvancedPanel(true);
   };
@@ -2178,7 +2183,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   };
   const handleEndCallRequest = () => {
     if (confirmBeforeHangup) {
-      const ok = window.confirm("通話を終了しますか？");
+      const ok = window.confirm("\u901A\u8A71\u3092\u7D42\u4E86\u3057\u307E\u3059\u304B\uFF1F");
       if (!ok) return;
     }
     onEndCall?.();
@@ -2333,37 +2338,37 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     }
   };
   const rawParticipantCount = Array.isArray(callData?.participants) ? callData.participants.length : Number(callData?.participantCount) || (callData?.isGroupCall ? 4 : 2);
-  const participantCount = Math.max(2, Math.min(4, rawParticipantCount));
-  const tileCount = participantCount <= 2 ? 2 : 4;
-  const tileGridClass = tileCount === 2 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-2";
-  const tileMinHeightClass = tileCount === 2 ? "min-h-[200px] md:min-h-[420px]" : "min-h-[140px] md:min-h-[220px]";
+  const participantCount = Math.max(2, Math.min(12, rawParticipantCount));
+  const tileCount = participantCount;
+  const tileColumns = tileCount <= 2 ? 2 : tileCount <= 4 ? 2 : tileCount <= 9 ? 3 : 4;
+  const tileMinHeightClass = tileCount <= 2 ? "min-h-[200px] md:min-h-[420px]" : tileCount <= 4 ? "min-h-[140px] md:min-h-[220px]" : tileCount <= 6 ? "min-h-[120px] md:min-h-[180px]" : "min-h-[100px] md:min-h-[150px]";
   const memberRows = [
     {
       key: "self",
-      label: "あなた",
-      status: isHold ? "保留中" : isMuted ? "ミュート中" : "参加中",
+      label: "\u3042\u306A\u305F",
+      status: isHold ? "\u4FDD\u7559\u4E2D" : isMuted ? "\u30DF\u30E5\u30FC\u30C8\u4E2D" : "\u53C2\u52A0\u4E2D",
       icon: User
     },
     {
       key: "remote",
-      label: "相手",
-      status: isConnected ? "接続済み" : "接続中...",
+      label: "\u76F8\u624B",
+      status: isConnected ? "\u63A5\u7D9A\u6E08\u307F" : "\u63A5\u7D9A\u4E2D...",
       icon: User
     },
     ...Array.from({ length: Math.max(0, participantCount - 2) }, (_, idx) => ({
       key: `member-waiting-${idx}`,
-      label: `参加者${idx + 3}`,
-      status: "待機中",
+      label: `\u53C2\u52A0\u8005${idx + 3}`,
+      status: "\u5F85\u6A5F\u4E2D",
       icon: Users
     }))
   ];
   const callTiles = [
-    { key: "remote", type: "remote", label: "相手" },
-    { key: "local", type: "local", label: "あなた" },
+    { key: "remote", type: "remote", label: "\u76F8\u624B" },
+    { key: "local", type: "local", label: "\u3042\u306A\u305F" },
     ...Array.from({ length: Math.max(0, tileCount - 2) }, (_, idx) => ({
       key: `placeholder-${idx}`,
       type: "placeholder",
-      label: `参加者${idx + 3}`
+      label: `\u53C2\u52A0\u8005${idx + 3}`
     }))
   ];
   if (callError) {
@@ -2391,7 +2396,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       /* @__PURE__ */ jsxs("div", { className: "w-full max-w-6xl h-full max-h-[760px] grid grid-cols-1 md:grid-cols-[260px_1fr] gap-3 md:gap-4", children: [
         /* @__PURE__ */ jsxs("div", { className: "bg-zinc-900/90 text-white rounded-[28px] p-4 md:p-5 shadow-2xl backdrop-blur-sm border border-white/20", children: [
           /* @__PURE__ */ jsxs("div", { className: "text-xs font-bold tracking-wide text-white/70 mb-3", children: [
-            "通話メンバー (",
+            "\u901A\u8A71\u30E1\u30F3\u30D0\u30FC (",
             participantCount,
             ")"
           ] }),
@@ -2407,11 +2412,11 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           }) })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "bg-black/20 rounded-[28px] p-2.5 md:p-3 border border-white/30 shadow-2xl", children: [
-          /* @__PURE__ */ jsx("div", { className: `grid ${tileGridClass} gap-2.5 md:gap-3 h-full`, children: callTiles.map((tile) => {
+          /* @__PURE__ */ jsx("div", { className: "grid gap-2.5 md:gap-3 h-full", style: { gridTemplateColumns: `repeat(${tileColumns}, minmax(0, 1fr))` }, children: callTiles.map((tile) => {
             if (tile.type === "remote") {
               return /* @__PURE__ */ jsx("div", { className: `relative rounded-2xl overflow-hidden bg-black ${tileMinHeightClass}`, children: remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }) : /* @__PURE__ */ jsxs("div", { className: "w-full h-full text-white flex flex-col items-center justify-center gap-2", children: [
                 /* @__PURE__ */ jsx(User, { className: "w-8 h-8 opacity-80" }),
-                /* @__PURE__ */ jsx("p", { className: "text-xs font-bold", children: remoteStream ? isVideoEnabled ? "ビデオ受信中..." : "音声通話中..." : "接続中..." })
+                /* @__PURE__ */ jsx("p", { className: "text-xs font-bold", children: remoteStream ? isVideoEnabled ? "\u30D3\u30C7\u30AA\u53D7\u4FE1\u4E2D..." : "\u97F3\u58F0\u901A\u8A71\u4E2D..." : "\u63A5\u7D9A\u4E2D..." })
               ] }) }, tile.key);
             }
             if (tile.type === "local") {
@@ -2434,7 +2439,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
             return /* @__PURE__ */ jsxs("div", { className: `rounded-2xl bg-white/20 border border-white/30 ${tileMinHeightClass} text-white flex flex-col items-center justify-center gap-2`, children: [
               /* @__PURE__ */ jsx(Users, { className: "w-7 h-7 opacity-70" }),
               /* @__PURE__ */ jsx("p", { className: "text-xs font-bold opacity-80", children: tile.label }),
-              /* @__PURE__ */ jsx("p", { className: "text-[10px] opacity-60", children: "参加待機中" })
+              /* @__PURE__ */ jsx("p", { className: "text-[10px] opacity-60", children: "\u53C2\u52A0\u5F85\u6A5F\u4E2D" })
             ] }, tile.key);
           }) }),
           isEffectSuppressed && /* @__PURE__ */ jsx("div", { className: "mt-2 bg-yellow-500/85 text-black text-[10px] px-2 py-1 rounded font-bold text-center", children: "\u5B89\u5B9A\u512A\u5148\u30E2\u30FC\u30C9" })
@@ -2477,7 +2482,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           /* @__PURE__ */ jsx("button", { onClick: toggleHold, className: `px-3 py-2 rounded-full text-xs font-bold ${isHold ? "bg-yellow-500 text-black hover:bg-yellow-400" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isHold ? "\u4FDD\u7559\u4E2D" : "\u4FDD\u7559" }),
           /* @__PURE__ */ jsx("button", { onClick: addBookmark, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u3057\u304A\u308A" }),
           /* @__PURE__ */ jsx("button", { onClick: () => setShowShortcutHelp((v) => !v), className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "?" }),
-          canSelectAudioOutput && audioOutputs.length > 0 && /* @__PURE__ */ jsx("select", { value: selectedAudioOutput, onChange: (e) => setSelectedAudioOutput(e.target.value), className: "bg-gray-700 text-white text-xs font-bold px-3 py-2 rounded-full outline-none max-w-[150px]", children: audioOutputs.map((d, i) => /* @__PURE__ */ jsx("option", { value: d.deviceId, children: d.label || `\u51FA\u529B${i + 1}` }, d.deviceId || i)) })
+          canSelectAudioOutput && audioOutputs.length > 0 && /* @__PURE__ */ jsx("select", { value: selectedAudioOutput, onChange: (e) => setSelectedAudioOutput(e.target.value), className: "bg-gray-700 text-white text-xs font-bold px-3 py-2 rounded-full outline-none max-w-[150px]", children: audioOutputs.map((d, i) => /* @__PURE__ */ jsx("option", { value: d.deviceId, children: d.label || `\u51FA\u529B${i + 1}` }, `${d.deviceId || "default"}-${i}`)) })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 flex-wrap", children: [
           /* @__PURE__ */ jsx("label", { className: "text-[11px] font-bold opacity-80", children: "\u753B\u8CEA" }),
@@ -4987,8 +4992,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             reader.onerror = reject;
             reader.readAsDataURL(blobSlice);
           });
-          const pWrapper = p.then(() => executing.delete(pWrapper));
-          executing.add(pWrapper);
+          executing.add(p);
+          p.finally(() => executing.delete(p));
           if (executing.size >= CONCURRENCY) {
             await Promise.race(executing);
           }
@@ -5723,8 +5728,8 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
             const base64Data = bytesToBase64(new Uint8Array(buf));
             await setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: base64Data, index: i });
           });
-          const pWrapper = p.then(() => executing.delete(pWrapper));
-          executing.add(pWrapper);
+          executing.add(p);
+          p.finally(() => executing.delete(p));
           if (executing.size >= CONCURRENCY) {
             await Promise.race(executing);
           }
@@ -6851,6 +6856,8 @@ var App_13_default = App;
 export {
   App_13_default as default
 };
+
+
 
 
 
