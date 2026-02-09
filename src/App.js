@@ -2337,7 +2337,40 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       console.warn("PiP toggle failed:", e);
     }
   };
-  const rawParticipantCount = Array.isArray(callData?.participants) ? callData.participants.length : Number(callData?.participantCount) || (callData?.isGroupCall ? 4 : 2);
+  const resolveCallParticipantCount = (data) => {
+    if (!data) return 2;
+    let inferred = 0;
+    const shapeCandidates = [
+      data.participants,
+      data.participantIds,
+      data.participantUids,
+      data.memberIds,
+      data.members,
+      data.attendees
+    ];
+    shapeCandidates.forEach((v) => {
+      if (Array.isArray(v)) {
+        inferred = Math.max(inferred, v.length);
+        return;
+      }
+      if (v && typeof v === "object") {
+        inferred = Math.max(inferred, Object.keys(v).length);
+      }
+    });
+    const numericCandidates = [
+      data.participantCount,
+      data.membersCount,
+      data.groupSize,
+      data.attendeeCount
+    ];
+    numericCandidates.forEach((v) => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) inferred = Math.max(inferred, Math.floor(n));
+    });
+    if (inferred > 0) return inferred;
+    return data.isGroupCall ? 4 : 2;
+  };
+  const rawParticipantCount = resolveCallParticipantCount(callData);
   const participantCount = Math.max(2, Math.min(12, rawParticipantCount));
   const tileCount = participantCount;
   const tileColumns = tileCount <= 2 ? 2 : tileCount <= 4 ? 2 : tileCount <= 9 ? 3 : 4;
