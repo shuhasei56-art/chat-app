@@ -2445,7 +2445,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
               ] }, tile.key);
             }
             if (tile.type === "local") {
-              return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden ${oneOnOneCall ? "absolute left-4 top-4 w-[120px] h-[160px] rounded-2xl shadow-2xl border-white/30 z-30" : "rounded-3xl"} border border-emerald-300/35 bg-black ${tileMinHeightClass}`, children: [
+              return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden ${oneOnOneCall ? "absolute right-4 top-4 w-[128px] h-[170px] sm:w-[150px] sm:h-[200px] rounded-2xl shadow-2xl border-white/30 z-30" : "rounded-3xl"} border border-emerald-300/35 bg-black ${tileMinHeightClass}`, children: [
                 /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "absolute inset-0 w-full h-full object-cover", style: { filter: localFilter, transform: localVideoTransform || "none" }, onError: handleLocalVideoRenderIssue, onStalled: handleLocalVideoRenderIssue, onEmptied: handleLocalVideoRenderIssue, onAbort: handleLocalVideoRenderIssue }),
                 (!isVideoEnabled || isVideoOff) && /* @__PURE__ */ jsx("div", { className: "absolute inset-0 flex items-center justify-center bg-black/65", children: /* @__PURE__ */ jsx(VideoOff, { className: "w-8 h-8 opacity-80" }) }),
                 /* @__PURE__ */ jsx("div", { className: "absolute left-2.5 bottom-2.5 text-[10px] font-black bg-black/45 px-2 py-1 rounded-full", children: "あなた" })
