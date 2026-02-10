@@ -72,6 +72,7 @@ import {
   PhoneOff,
   LogOut,
   RefreshCcw,
+  MonitorUp,
   ArrowUpCircle,
   Reply,
   Smile,
@@ -912,6 +913,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
   const pcRef = useRef(null);
+  const currentVideoDeviceIdRef = useRef(null);
+  const availableVideoDevicesRef = useRef([]);
   const localStreamRef = useRef(null);
   const remoteStreamRef = useRef(new MediaStream());
   const unsubscribersRef = useRef([]);
@@ -2296,12 +2299,12 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     if (!isVideoEnabled || isScreenSharing) return;
     if (!navigator.mediaDevices?.getUserMedia) return;
     setIsSwitchingCamera(true);
-    const nextFacingMode = currentFacingMode === "user" ? "environment" : "user";
-    try {
+
+    const tryWithFacingMode = async (facingMode) => {
       const cameraStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
-          facingMode: { ideal: nextFacingMode },
+          facingMode: { ideal: facingMode },
           width: { ideal: 480, max: 960 },
           height: { ideal: 270, max: 540 },
           frameRate: { ideal: 20, max: 24 }
@@ -2309,8 +2312,64 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       });
       const newTrack = cameraStream.getVideoTracks()[0];
       if (!newTrack) throw new Error("No camera track");
+      return newTrack;
+    };
+
+    const tryWithDeviceId = async (deviceId) => {
+      const cameraStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          deviceId: { exact: deviceId },
+          width: { ideal: 480, max: 960 },
+          height: { ideal: 270, max: 540 },
+          frameRate: { ideal: 20, max: 24 }
+        }
+      });
+      const newTrack = cameraStream.getVideoTracks()[0];
+      if (!newTrack) throw new Error("No camera track");
+      return newTrack;
+    };
+
+    const nextFacingMode = currentFacingMode === "user" ? "environment" : "user";
+
+    try {
+      // 1) まずはスマホ向け: facingMode で切替を試す
+      let newTrack = null;
+      try {
+        newTrack = await tryWithFacingMode(nextFacingMode);
+      } catch (e) {
+        newTrack = null;
+      }
+
+      // facingMode が効かない（PC等で1カメラ/同一deviceId）場合に、deviceId でフォールバック
+      const currentDeviceId = currentVideoDeviceIdRef.current;
+      const newDeviceId = newTrack?.getSettings?.().deviceId || null;
+      const facingModeLikelyWorked = !!newTrack && (!currentDeviceId || !newDeviceId || newDeviceId !== currentDeviceId);
+
+      if (!facingModeLikelyWorked) {
+        // enumerateDevices は「getUserMedia 後」にラベルが出るので、ここで呼ぶ
+        const devices = navigator.mediaDevices?.enumerateDevices ? await navigator.mediaDevices.enumerateDevices() : [];
+        const cams = devices.filter((d) => d.kind === "videoinput");
+        availableVideoDevicesRef.current = cams;
+
+        if (cams.length >= 2) {
+          const idx = Math.max(0, cams.findIndex((d) => d.deviceId === currentDeviceId));
+          const next = cams[(idx + 1) % cams.length];
+          if (next?.deviceId) {
+            newTrack = await tryWithDeviceId(next.deviceId);
+          }
+        }
+      }
+
+      if (!newTrack) throw new Error("Camera switch failed");
+
       await replaceOutgoingVideoTrack(newTrack);
       await attachLocalVideoTrack(newTrack);
+
+      const finalDeviceId = newTrack?.getSettings?.().deviceId || null;
+      if (finalDeviceId) currentVideoDeviceIdRef.current = finalDeviceId;
+
+      // facingMode が効く環境なら state を更新（UI表示用）
       setCurrentFacingMode(nextFacingMode);
       setIsVideoOff(false);
     } catch (e) {
@@ -2320,16 +2379,28 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     }
   };
   const restoreCameraAfterShare = async () => {
+    const preferredDeviceId = currentVideoDeviceIdRef.current;
+    const videoConstraints = preferredDeviceId ? {
+      deviceId: { exact: preferredDeviceId },
+      width: { ideal: 480, max: 960 },
+      height: { ideal: 270, max: 540 },
+      frameRate: { ideal: 20, max: 24 }
+    } : {
+      facingMode: { ideal: currentFacingMode },
+      width: { ideal: 480, max: 960 },
+      height: { ideal: 270, max: 540 },
+      frameRate: { ideal: 20, max: 24 }
+    };
+
     const cameraStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: {
-        facingMode: { ideal: currentFacingMode },
-        width: { ideal: 480, max: 960 },
-        height: { ideal: 270, max: 540 },
-        frameRate: { ideal: 20, max: 24 }
-      }
+      video: videoConstraints
     });
     const cameraTrack = cameraStream.getVideoTracks()[0];
+    if (cameraTrack?.getSettings) {
+      const did = cameraTrack.getSettings().deviceId;
+      if (did) currentVideoDeviceIdRef.current = did;
+    }
     if (!cameraTrack) throw new Error("No camera track");
     await replaceOutgoingVideoTrack(cameraTrack);
     await attachLocalVideoTrack(cameraTrack);
@@ -2509,7 +2580,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     },
     children: [
       /* 相手音声 */
-      /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true }),
+      /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "absolute w-0 h-0 opacity-0 pointer-events-none" }),
       /* 相手映像（全画面） */
       /* @__PURE__ */ jsxs("div", {
         className: "absolute inset-0",
@@ -2589,6 +2660,14 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
               title: "カメラ切替",
               children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" })
             }),
+            /* 画面共有（追加） */
+            isVideoEnabled && navigator.mediaDevices?.getDisplayMedia && /* @__PURE__ */ jsx("button", {
+              onClick: toggleScreenShare,
+              className: `w-14 h-14 rounded-full flex items-center justify-center transition active:scale-95 ${isScreenSharing ? "bg-blue-600 hover:bg-blue-500" : "bg-white/20 hover:bg-white/25"}`,
+              title: isScreenSharing ? "画面共有停止" : "画面共有",
+              children: isScreenSharing ? /* @__PURE__ */ jsx(StopCircle, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(MonitorUp, { className: "w-6 h-6" })
+            }),
+
             /* 終了（赤） */
             /* @__PURE__ */ jsx("button", {
               onClick: handleEndCallRequest,
