@@ -2402,7 +2402,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     return best > 0 ? best : data.isGroupCall ? 4 : 2;
   };
   const participantCount = Math.max(2, Math.min(12, resolveCallParticipantCount(callData)));
-  const oneOnOneCall = participantCount === 2 && !callData.isGroupCall;
   const tileColumns = participantCount <= 2 ? 1 : participantCount <= 4 ? 2 : participantCount <= 9 ? 3 : 4;
   const tileMinHeightClass = participantCount <= 2 ? "" : participantCount <= 4 ? "min-h-[150px] md:min-h-[220px]" : "min-h-[110px] md:min-h-[160px]";
   const callTiles = [
@@ -2414,7 +2413,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       label: `参加者${idx + 3}`
     }))
   ];
-  const showModernGroupLayout = true;
+  const showModernGroupLayout = !!(callData == null ? void 0 : callData.isGroupCall);
   if (callError) {
     return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center text-white flex-col gap-4", children: [
       /* @__PURE__ */ jsx(AlertCircle, { className: "w-16 h-16 text-red-500" }),
@@ -2433,9 +2432,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         /* @__PURE__ */ jsxs("div", { className: "bg-indigo-500 text-white rounded-full px-3 py-1 text-[10px] font-black", children: ["参加: ", participantCount] }),
         /* @__PURE__ */ jsx("button", { onClick: openAdvancedSettingsPanel, className: "ml-auto bg-white/10 hover:bg-white/20 border border-white/20 rounded-full px-4 py-2 text-xs font-black", children: "設定" })
       ] }),
-      /* @__PURE__ */ jsx("div", { className: "relative z-10 flex-1 p-3 md:p-5 pb-28", children: /* @__PURE__ */ jsx("div", { className: "relative grid gap-2.5 md:gap-3 h-full", style: { gridTemplateColumns: `repeat(${tileColumns}, minmax(0, 1fr))`, ...(participantCount <= 2 && callData.isGroupCall ? { gridTemplateRows: "repeat(2, minmax(0, 1fr))" } : {}) }, children: callTiles.map((tile) => {
+      /* @__PURE__ */ jsx("div", { className: "relative z-10 flex-1 p-3 md:p-5 pb-28", children: /* @__PURE__ */ jsx("div", { className: "grid gap-2.5 md:gap-3 h-full", style: { gridTemplateColumns: `repeat(${tileColumns}, minmax(0, 1fr))`, ...(participantCount <= 2 ? { gridTemplateRows: "repeat(2, minmax(0, 1fr))" } : {}) }, children: callTiles.map((tile) => {
             if (tile.type === "remote") {
-              return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden ${oneOnOneCall ? "rounded-none md:rounded-3xl" : "rounded-3xl"} border border-cyan-300/30 bg-black ${tileMinHeightClass} ${oneOnOneCall ? "col-span-full row-span-full" : ""}`, children: [
+              return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden rounded-3xl border border-cyan-300/30 bg-black ${tileMinHeightClass}`, children: [
                 /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "absolute inset-0 w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }),
                 (!remoteStream || !hasRemoteVideo) && /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55", children: [
                   /* @__PURE__ */ jsx(User, { className: "w-8 h-8 opacity-80" }),
@@ -2445,7 +2444,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
               ] }, tile.key);
             }
             if (tile.type === "local") {
-              return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden ${oneOnOneCall ? "absolute right-4 top-4 w-[128px] h-[170px] sm:w-[150px] sm:h-[200px] rounded-2xl shadow-2xl border-white/30 z-30" : "rounded-3xl"} border border-emerald-300/35 bg-black ${tileMinHeightClass}`, children: [
+              return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden rounded-3xl border border-emerald-300/35 bg-black ${tileMinHeightClass}`, children: [
                 /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "absolute inset-0 w-full h-full object-cover", style: { filter: localFilter, transform: localVideoTransform || "none" }, onError: handleLocalVideoRenderIssue, onStalled: handleLocalVideoRenderIssue, onEmptied: handleLocalVideoRenderIssue, onAbort: handleLocalVideoRenderIssue }),
                 (!isVideoEnabled || isVideoOff) && /* @__PURE__ */ jsx("div", { className: "absolute inset-0 flex items-center justify-center bg-black/65", children: /* @__PURE__ */ jsx(VideoOff, { className: "w-8 h-8 opacity-80" }) }),
                 /* @__PURE__ */ jsx("div", { className: "absolute left-2.5 bottom-2.5 text-[10px] font-black bg-black/45 px-2 py-1 rounded-full", children: "あなた" })
@@ -2499,23 +2498,43 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       ] })
     ] });
   }
-  return /* @__PURE__ */ jsxs("div", { ref: callStageRef, className: "fixed inset-0 z-[1000] bg-[#1f2329] flex flex-col animate-in fade-in", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : "linear-gradient(180deg, #262b33 0%, #1b1f25 100%)", backgroundSize: "cover" }, children: [
-    /* @__PURE__ */ jsxs("div", { className: "relative flex-1 overflow-hidden", children: [
-      /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "absolute w-0 h-0 opacity-0 pointer-events-none" }),
-      /* @__PURE__ */ jsx("div", { className: "absolute inset-0 bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-[#164e63]" }),
-      /* @__PURE__ */ jsx("div", { className: "absolute inset-0 p-2 md:p-4", children: /* @__PURE__ */ jsxs("div", { className: "relative w-full h-full rounded-[26px] overflow-hidden border border-white/15 bg-black shadow-2xl", children: [
-        /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "absolute inset-0 w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }),
-        (!remoteStream || !hasRemoteVideo) && /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 flex flex-col items-center justify-center gap-3 text-white bg-black/60 backdrop-blur-sm", children: [
-          /* @__PURE__ */ jsx(User, { className: "w-12 h-12 opacity-80" }),
-          /* @__PURE__ */ jsx("p", { className: "text-sm font-bold", children: remoteStream ? isVideoEnabled ? "ビデオ受信中..." : "音声通話中..." : "接続中..." })
-        ] }),
-        /* @__PURE__ */ jsx("div", { className: "absolute left-4 bottom-4 text-white text-xs font-bold px-3 py-1 rounded-full bg-black/45 border border-white/15 backdrop-blur-md", children: "相手" }),
-        isEffectSuppressed && /* @__PURE__ */ jsx("div", { className: "absolute right-4 bottom-4 bg-yellow-400/90 text-black text-[10px] font-black px-3 py-1 rounded-full", children: "\u5B89\u5B9A\u30E2\u30FC\u30C9" })
-      ] }) }),
-      /* @__PURE__ */ jsxs("div", { className: localPreviewClass, children: [
-        /* @__PURE__ */ jsx(
-          "video",
-          {
+  return /* @__PURE__ */ jsxs("div", {
+    ref: callStageRef,
+    className: "fixed inset-0 z-[1000] bg-black text-white overflow-hidden",
+    onMouseMove: () => {
+      if (!autoHideControls) return;
+      setControlsVisible(true);
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+      controlsTimerRef.current = setTimeout(() => setControlsVisible(false), 2500);
+    },
+    children: [
+      /* 相手音声 */
+      /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true }),
+      /* 相手映像（全画面） */
+      /* @__PURE__ */ jsxs("div", {
+        className: "absolute inset-0",
+        children: [
+          /* @__PURE__ */ jsx("video", {
+            ref: remoteVideoRef,
+            autoPlay: true,
+            playsInline: true,
+            className: "absolute inset-0 w-full h-full object-cover",
+            style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter }
+          }),
+          (!remoteStream || !hasRemoteVideo) && /* @__PURE__ */ jsxs("div", {
+            className: "absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55",
+            children: [
+              /* @__PURE__ */ jsx(User, { className: "w-10 h-10 opacity-80" }),
+              /* @__PURE__ */ jsx("div", { className: "text-sm font-bold opacity-90", children: remoteStream ? "接続中..." : "相手を待っています..." })
+            ]
+          })
+        ]
+      }),
+      /* 自分映像（左上小窓） */
+      /* @__PURE__ */ jsxs("div", {
+        className: `absolute left-4 top-4 w-[110px] h-[160px] rounded-2xl overflow-hidden border border-white/35 shadow-lg bg-black ${controlsVisible ? "opacity-100" : "opacity-90"}`,
+        children: [
+          /* @__PURE__ */ jsx("video", {
             ref: localVideoRef,
             autoPlay: true,
             playsInline: true,
@@ -2526,99 +2545,62 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
             onStalled: handleLocalVideoRenderIssue,
             onEmptied: handleLocalVideoRenderIssue,
             onAbort: handleLocalVideoRenderIssue
-          }
-        ),
-        (!isVideoEnabled || isVideoOff) && /* @__PURE__ */ jsx("div", { className: "absolute inset-0 w-full h-full text-white flex items-center justify-center bg-black/60 backdrop-blur-sm", children: /* @__PURE__ */ jsx(VideoOff, { className: "w-7 h-7 opacity-80" }) }),
-        /* @__PURE__ */ jsx("div", { className: "absolute left-2 bottom-2 text-[10px] font-bold px-2 py-1 rounded-full bg-black/50 text-white", children: "あなた" })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "absolute top-4 left-4 z-20 flex flex-wrap items-center gap-2 max-w-[80vw]", children: [
-        /* @__PURE__ */ jsx("div", { className: "bg-black/55 text-white text-xs font-black px-3 py-1.5 rounded-full backdrop-blur-md", children: formatCallDuration(callDurationSec) }),
-        isRecordingCall && /* @__PURE__ */ jsxs("div", { className: "bg-red-600/90 text-white text-xs font-black px-3 py-1.5 rounded-full backdrop-blur-md flex items-center gap-1", children: [
-          /* @__PURE__ */ jsx(Disc, { className: "w-3 h-3 animate-pulse" }),
-          "REC ",
-          formatCallDuration(recordingDurationSec)
-        ] }),
-        /* @__PURE__ */ jsx("div", { className: `text-[10px] font-black px-2.5 py-1 rounded-full backdrop-blur ${isConnected ? "bg-emerald-500/85 text-white" : "bg-amber-400/90 text-black"}`, children: isConnected ? "\u63A5\u7D9A\u4E2D" : "\u63A5\u7D9A\u78BA\u8A8D\u4E2D" }),
-        /* @__PURE__ */ jsx("div", { className: `text-[10px] font-black px-2.5 py-1 rounded-full backdrop-blur ${networkQualityClass}`, children: networkQualityLabel }),
-        /* @__PURE__ */ jsx("div", { className: "text-[10px] font-black px-2.5 py-1 rounded-full backdrop-blur bg-indigo-500/85 text-white", children: qualityModeLabel }),
-        showClock && /* @__PURE__ */ jsx("div", { className: "text-[10px] font-black px-2.5 py-1 rounded-full backdrop-blur bg-black/60 text-white", children: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })
-      ] }),
-      needsRemotePlay && /* @__PURE__ */ jsxs("button", { onClick: resumeRemotePlayback, className: "absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-white text-gray-900 text-xs font-black px-4 py-2 rounded-full shadow-lg", children: [
-        /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
-        "\u97F3\u58F0\u3092\u518D\u751F"
-      ] }),
-      /* @__PURE__ */ jsxs("button", { onClick: openAdvancedSettingsPanel, className: "fixed top-4 right-4 md:top-5 md:right-6 z-[1016] flex items-center gap-2 bg-black/55 text-white border border-white/25 hover:bg-black/70 text-sm font-black px-4 py-2.5 rounded-full shadow-2xl backdrop-blur-md", children: [
-        /* @__PURE__ */ jsx(Settings, { className: "w-4 h-4" }),
-        "\u8A2D\u5B9A"
-      ] })
-    ] }),
-    /* @__PURE__ */ jsxs("div", { className: `relative z-[1003] bg-gradient-to-t from-black/85 to-transparent px-4 pb-4 pt-2 transition-all duration-200 ${controlsVisible || showAdvancedPanel ? "opacity-100" : "opacity-0 pointer-events-none"}`, children: [
-      showAdvancedPanel && /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1020] bg-black/95 backdrop-blur-xl p-4 md:p-6 text-white space-y-3 overflow-y-auto", children: [
-        /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between", children: [
-          /* @__PURE__ */ jsx("div", { className: "text-sm md:text-base font-black tracking-wide", children: "\u8A2D\u5B9A\u30D1\u30CD\u30EB" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setShowAdvancedPanel(false), className: "px-3 py-2 rounded-full bg-white/15 hover:bg-white/25 text-xs font-bold", children: "\u9589\u3058\u308B" })
-        ] }),
-        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 flex-wrap", children: [
-          /* @__PURE__ */ jsx("button", { onClick: retryRemotePlayback, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u518D\u751F" }),
-          /* @__PURE__ */ jsx("button", { onClick: captureCallSnapshot, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u30B9\u30AF\u30B7\u30E7" }),
-          /* @__PURE__ */ jsx("button", { onClick: toggleFullscreen, className: `p-2 rounded-full text-white ${isFullscreen ? "bg-green-600 hover:bg-green-500" : "bg-gray-700 hover:bg-gray-600"}`, title: isFullscreen ? "\u5168\u753B\u9762\u89E3\u9664" : "\u5168\u753B\u9762", children: /* @__PURE__ */ jsx(Maximize, { className: "w-4 h-4" }) }),
-          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: switchCameraFacing, disabled: isSwitchingCamera || isScreenSharing, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600 disabled:bg-gray-500", children: isSwitchingCamera ? "\u5207\u66FF\u4E2D..." : "\u30AB\u30E1\u30E9\u5207\u66FF" }),
-          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: () => setIsLocalMirror((v) => !v), className: `px-3 py-2 rounded-full text-xs font-bold ${isLocalMirror ? "bg-gray-700 text-white hover:bg-gray-600" : "bg-white text-black hover:bg-gray-200"}`, children: isLocalMirror ? "\u30DF\u30E9\u30FCON" : "\u30DF\u30E9\u30FCOFF" }),
-          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, className: `px-3 py-2 rounded-full text-xs font-bold ${isScreenSharing ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isScreenSharing ? "\u5171\u6709\u505C\u6B62" : "\u753B\u9762\u5171\u6709" }),
-          /* @__PURE__ */ jsx("button", { onClick: toggleCallRecording, className: `px-3 py-2 rounded-full text-xs font-bold ${isRecordingCall ? "bg-red-600 text-white hover:bg-red-500" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isRecordingCall ? "\u9332\u753B\u505C\u6B62" : "\u9332\u753B" }),
-          /* @__PURE__ */ jsx("button", { onClick: togglePictureInPicture, disabled: !hasRemoteVideo, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600 disabled:bg-gray-500", children: isRemotePip ? "PiP\u7D42\u4E86" : "PiP" }),
-          /* @__PURE__ */ jsx("button", { onClick: copyCallDebugInfo, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u60C5\u5831\u30B3\u30D4\u30FC" }),
-          /* @__PURE__ */ jsx("button", { onClick: toggleHold, className: `px-3 py-2 rounded-full text-xs font-bold ${isHold ? "bg-yellow-500 text-black hover:bg-yellow-400" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isHold ? "\u4FDD\u7559\u4E2D" : "\u4FDD\u7559" }),
-          /* @__PURE__ */ jsx("button", { onClick: addBookmark, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u3057\u304A\u308A" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setShowShortcutHelp((v) => !v), className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "?" }),
-          canSelectAudioOutput && audioOutputs.length > 0 && /* @__PURE__ */ jsx("select", { value: selectedAudioOutput, onChange: (e) => setSelectedAudioOutput(e.target.value), className: "bg-gray-700 text-white text-xs font-bold px-3 py-2 rounded-full outline-none max-w-[150px]", children: audioOutputs.map((d, i) => /* @__PURE__ */ jsx("option", { value: d.deviceId, children: d.label || `\u51FA\u529B${i + 1}` }, `${d.deviceId || "default"}-${i}`)) })
-        ] }),
-        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 flex-wrap", children: [
-          /* @__PURE__ */ jsx("label", { className: "text-[11px] font-bold opacity-80", children: "\u753B\u8CEA" }),
-          /* @__PURE__ */ jsx("select", { value: qualityMode, onChange: (e) => setQualityMode(e.target.value), className: "bg-gray-700 text-white text-xs font-bold px-2 py-1 rounded-lg outline-none", children: [
-            /* @__PURE__ */ jsx("option", { value: "auto", children: "\u81EA\u52D5" }),
-            /* @__PURE__ */ jsx("option", { value: "low", children: "\u4F4E" }),
-            /* @__PURE__ */ jsx("option", { value: "medium", children: "\u4E2D" }),
-            /* @__PURE__ */ jsx("option", { value: "high", children: "\u9AD8" })
-          ] }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setAutoHideControls((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${autoHideControls ? "bg-blue-600" : "bg-gray-700"}`, children: autoHideControls ? "\u64CD\u4F5C\u81EA\u52D5\u975E\u8868\u793AON" : "\u64CD\u4F5C\u81EA\u52D5\u975E\u8868\u793AOFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setKeepAwake((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${keepAwake ? "bg-blue-600" : "bg-gray-700"}`, children: keepAwake ? "\u30B9\u30EA\u30FC\u30D7\u6291\u5236ON" : "\u30B9\u30EA\u30FC\u30D7\u6291\u5236OFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setShowClock((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${showClock ? "bg-blue-600" : "bg-gray-700"}`, children: showClock ? "\u6642\u8A08ON" : "\u6642\u8A08OFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setConfirmBeforeHangup((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${confirmBeforeHangup ? "bg-blue-600" : "bg-gray-700"}`, children: confirmBeforeHangup ? "\u7D42\u4E86\u78BA\u8A8DON" : "\u7D42\u4E86\u78BA\u8A8DOFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setPlayConnectSound((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${playConnectSound ? "bg-blue-600" : "bg-gray-700"}`, children: playConnectSound ? "\u63A5\u7D9A\u97F3ON" : "\u63A5\u7D9A\u97F3OFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setVibrateOnConnect((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${vibrateOnConnect ? "bg-blue-600" : "bg-gray-700"}`, children: vibrateOnConnect ? "\u30D0\u30A4\u30D6ON" : "\u30D0\u30A4\u30D6OFF" })
-        ] }),
-        /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30CE\u30A4\u30BA\u6291\u5236 ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: noiseSuppressionEnabled, onChange: (e) => setNoiseSuppressionEnabled(e.target.checked), className: "ml-2" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30A8\u30B3\u30FC\u30AD\u30E3\u30F3\u30BB\u30EB ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: echoCancellationEnabled, onChange: (e) => setEchoCancellationEnabled(e.target.checked), className: "ml-2" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u81EA\u52D5\u30B2\u30A4\u30F3 ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: autoGainControlEnabled, onChange: (e) => setAutoGainControlEnabled(e.target.checked), className: "ml-2" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30EA\u30E2\u30FC\u30C8\u955C\u50CF ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: isRemoteMirror, onChange: (e) => setIsRemoteMirror(e.target.checked), className: "ml-2" })] })
-        ] }),
-        /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30DE\u30A4\u30AF\u611F\u5EA6 ", micGain.toFixed(1), /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 2, step: 0.1, value: micGain, onChange: (e) => setMicGain(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u97F3\u91CF\u30D6\u30FC\u30B9\u30C8 ", remoteBoost.toFixed(1), /* @__PURE__ */ jsx("input", { type: "range", min: 1, max: 2, step: 0.1, value: remoteBoost, onChange: (e) => setRemoteBoost(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u660E\u308B\u3055 ", remoteBrightness, "%", /* @__PURE__ */ jsx("input", { type: "range", min: 70, max: 150, step: 5, value: remoteBrightness, onChange: (e) => setRemoteBrightness(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30B3\u30F3\u30C8\u30E9\u30B9\u30C8 ", remoteContrast, "%", /* @__PURE__ */ jsx("input", { type: "range", min: 70, max: 170, step: 5, value: remoteContrast, onChange: (e) => setRemoteContrast(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u5F69\u5EA6 ", remoteSaturation, "%", /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 200, step: 5, value: remoteSaturation, onChange: (e) => setRemoteSaturation(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30ED\u30FC\u30AB\u30EB\u30BA\u30FC\u30E0 ", localZoom.toFixed(2), /* @__PURE__ */ jsx("input", { type: "range", min: 1, max: 1.6, step: 0.05, value: localZoom, onChange: (e) => setLocalZoom(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30EA\u30E2\u30FC\u30C8\u30BA\u30FC\u30E0 ", remoteZoom.toFixed(2), /* @__PURE__ */ jsx("input", { type: "range", min: 1, max: 1.6, step: 0.05, value: remoteZoom, onChange: (e) => setRemoteZoom(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30B9\u30AF\u30B7\u30E7\u30AB\u30A6\u30F3\u30C8 ", snapshotCountdownSec, "s", /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 10, step: 1, value: snapshotCountdownSec, onChange: (e) => setSnapshotCountdownSec(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u81EA\u52D5\u30B9\u30AF\u30B7\u30E7 ", autoSnapshotSec, "s", /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 60, step: 5, value: autoSnapshotSec, onChange: (e) => setAutoSnapshotSec(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30B9\u30AF\u30B7\u30E7\u6642\u523B ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: snapshotTimestampEnabled, onChange: (e) => setSnapshotTimestampEnabled(e.target.checked), className: "ml-2" })] })
-        ] }),
-        /* @__PURE__ */ jsx("textarea", { value: callNotes, onChange: (e) => setCallNotes(e.target.value), className: "w-full bg-black/50 border border-white/10 rounded-xl p-2 text-xs text-white outline-none", placeholder: "\u901A\u8A71\u30E1\u30E2..." }),
-        bookmarks.length > 0 && /* @__PURE__ */ jsx("div", { className: "flex flex-wrap gap-2", children: bookmarks.map((b) => /* @__PURE__ */ jsxs("button", { onClick: () => removeBookmark(b.id), className: "px-2 py-1 rounded-full bg-white/10 text-[10px] font-bold", children: [formatCallDuration(b.sec), " x"] }, b.id)) }),
-        /* @__PURE__ */ jsx("button", { onClick: resetAdvancedSettings, className: "w-full bg-red-600/80 hover:bg-red-500 text-white py-2 rounded-xl text-xs font-bold", children: "\u8A2D\u5B9A\u30EA\u30BB\u30C3\u30C8" })
-      ] }),
-      showShortcutHelp && /* @__PURE__ */ jsx("div", { className: "mb-2 border border-white/10 bg-black/40 p-2 text-white text-xs font-bold", children: "Shortcut: M / V / H / S / F / P / ?" }),
-      /* @__PURE__ */ jsxs("div", { className: "mx-auto w-full max-w-[340px] flex items-center justify-center gap-6", children: [
-        /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `w-11 h-11 rounded-full border border-white/25 transition-all flex items-center justify-center ${isMuted ? "bg-white text-black" : "bg-white/15 text-white hover:bg-white/25"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-5 h-5" }) : /* @__PURE__ */ jsx(Mic, { className: "w-5 h-5" }) }),
-        isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `w-11 h-11 rounded-full border border-white/25 transition-all flex items-center justify-center ${isVideoOff ? "bg-white text-black" : "bg-white/15 text-white hover:bg-white/25"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-5 h-5" }) : /* @__PURE__ */ jsx(Video, { className: "w-5 h-5" }) }),
-        /* @__PURE__ */ jsx("button", { onClick: handleEndCallRequest, className: "w-14 h-14 rounded-full bg-red-500 text-white shadow-2xl hover:bg-red-600 transition-all flex items-center justify-center", children: /* @__PURE__ */ jsx(PhoneOff, { className: "w-6 h-6" }) }),
-        /* @__PURE__ */ jsx("button", { onClick: openAdvancedSettingsPanel, className: `w-11 h-11 rounded-full border border-white/25 transition-all flex items-center justify-center ${showAdvancedPanel ? "bg-white text-black" : "bg-white/15 text-white hover:bg-white/25"}`, children: /* @__PURE__ */ jsx(MoreVertical, { className: "w-5 h-5" }) })
-      ] })
-    ] })
-  ] });
+          }),
+          isVideoOff && /* @__PURE__ */ jsxs("div", {
+            className: "absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/55",
+            children: [
+              /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6 opacity-80" }),
+              /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold opacity-90", children: "カメラOFF" })
+            ]
+          })
+        ]
+      }),
+      /* iOSなどで「再生許可」が必要な時のボタン */
+      needsRemotePlay && /* @__PURE__ */ jsx("button", {
+        onClick: resumeRemotePlayback,
+        className: "absolute top-4 left-1/2 -translate-x-1/2 bg-white text-black font-black px-4 py-2 rounded-full shadow",
+        children: "再生を開始"
+      }),
+      /* 下部コントロール（画像風：丸ボタン） */
+      /* @__PURE__ */ jsx("div", {
+        className: `absolute left-0 right-0 bottom-0 pb-6 flex justify-center transition-opacity duration-200 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`,
+        children: /* @__PURE__ */ jsxs("div", {
+          className: "flex items-center gap-6 bg-black/35 backdrop-blur-md px-6 py-3 rounded-full border border-white/10 shadow-xl",
+          children: [
+            /* マイク */
+            /* @__PURE__ */ jsx("button", {
+              onClick: toggleMute,
+              className: `w-14 h-14 rounded-full flex items-center justify-center transition active:scale-95 ${isMuted ? "bg-white/15" : "bg-white/20 hover:bg-white/25"}`,
+              title: isMuted ? "ミュート解除" : "ミュート",
+              children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" })
+            }),
+            /* ビデオ */
+            isVideoEnabled && /* @__PURE__ */ jsx("button", {
+              onClick: toggleVideo,
+              className: `w-14 h-14 rounded-full flex items-center justify-center transition active:scale-95 ${isVideoOff ? "bg-white/15" : "bg-white/20 hover:bg-white/25"}`,
+              title: isVideoOff ? "カメラON" : "カメラOFF",
+              children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Video, { className: "w-6 h-6" })
+            }),
+            /* カメラ切替（追加：常設） */
+            isVideoEnabled && /* @__PURE__ */ jsx("button", {
+              onClick: switchCameraFacing,
+              disabled: isSwitchingCamera || isScreenSharing,
+              className: `w-14 h-14 rounded-full flex items-center justify-center transition active:scale-95 ${(isSwitchingCamera || isScreenSharing) ? "bg-white/10 opacity-60" : "bg-white/20 hover:bg-white/25"}`,
+              title: "カメラ切替",
+              children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" })
+            }),
+            /* 終了（赤） */
+            /* @__PURE__ */ jsx("button", {
+              onClick: handleEndCallRequest,
+              className: "w-16 h-16 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center shadow-lg transition active:scale-95",
+              title: "通話終了",
+              children: /* @__PURE__ */ jsx(PhoneOff, { className: "w-7 h-7" })
+            })
+          ]
+        })
+      })
+    ]
+  });
 };
 const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) => {
   const [sourceImage, setSourceImage] = useState(null);
@@ -6955,6 +6937,7 @@ var App_13_default = App;
 export {
   App_13_default as default
 };
+
 
 
 
