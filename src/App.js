@@ -858,7 +858,7 @@ const AuthView = ({ onLogin, showNotification }) => {
     ] })
   ] }) }) });
 };
-const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerProp, isVideoEnabled = true, activeEffect, backgroundUrl, effects = [] }) => {
+const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerProp, isVideoEnabled = true, activeEffect, backgroundUrl, effects = [], showNotification = () => {} }) => {
   const [remoteStream, setRemoteStream] = useState(null);
   const [hasRemoteVideoTrack, setHasRemoteVideoTrack] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -7019,6 +7019,7 @@ function App() {
           VideoCallView,
           {
             user,
+            showNotification,
             chatId: activeCall.chatId,
             callData: syncedCallData || activeCall.callData,
             isCaller: activeCall.isCaller,
