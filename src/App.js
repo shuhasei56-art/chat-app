@@ -104,6 +104,18 @@ import {
   Eye,
   AlertCircle
 } from "lucide-react";
+// ---- Media helper: prevents flicker by only assigning srcObject when changed ----
+function MediaVideo({ stream, className, style, muted = false }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el || !stream) return;
+    if (el.srcObject !== stream) el.srcObject = stream;
+    (async () => { try { await el.play(); } catch {} })();
+  }, [stream]);
+  return /* @__PURE__ */ jsx("video", { ref, autoPlay: true, playsInline: true, muted, className, style });
+}
+
 const firebaseConfig = {
   apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
   authDomain: "chat-app-c17bf.firebaseapp.com",
@@ -859,6 +871,13 @@ const AuthView = ({ onLogin, showNotification }) => {
 };
 const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerProp, isVideoEnabled = true, activeEffect, backgroundUrl, effects = [] }) => {
   const [remoteStream, setRemoteStream] = useState(null);
+  const [remoteStreams, setRemoteStreams] = useState([]);
+  const remoteStreamsMapRef = useRef(new Map());
+  const updateRemoteStreamsState = useCallback(() => {
+    const list = Array.from(remoteStreamsMapRef.current.values());
+    setRemoteStreams(list);
+    setRemoteStream(list[0] || null);
+  }, []);
   const [hasRemoteVideoTrack, setHasRemoteVideoTrack] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
@@ -872,6 +891,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
   const [currentFacingMode, setCurrentFacingMode] = useState("user");
+  const [videoInputs, setVideoInputs] = useState([]);
+  const [currentVideoDeviceId, setCurrentVideoDeviceId] = useState(null);
   const [audioOutputs, setAudioOutputs] = useState([]);
   const [selectedAudioOutput, setSelectedAudioOutput] = useState("default");
   const [isRecordingCall, setIsRecordingCall] = useState(false);
@@ -1065,6 +1086,13 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         if (cancelled) return;
         const outputs = devices.filter((d) => d.kind === "audiooutput");
         setAudioOutputs(outputs);
+        const vids = devices.filter((d) => d.kind === "videoinput");
+        setVideoInputs(vids);
+        if (vids.length > 0) {
+          if (!currentVideoDeviceId || !vids.some((d) => d.deviceId === currentVideoDeviceId)) {
+            setCurrentVideoDeviceId(vids[0].deviceId || null);
+          }
+        }
         if (outputs.length > 0 && !outputs.some((d) => d.deviceId === selectedAudioOutput)) {
           setSelectedAudioOutput(outputs[0].deviceId || "default");
         }
@@ -1078,7 +1106,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       cancelled = true;
       md.removeEventListener?.("devicechange", loadOutputs);
     };
-  }, [selectedAudioOutput]);
+  }, [selectedAudioOutput, currentVideoDeviceId]);
   useEffect(() => {
     if (!canSelectAudioOutput) return;
     const applySink = async (el) => {
@@ -1739,32 +1767,41 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         }
       };
       pc.ontrack = async (event) => {
-        // Keep a single remote MediaStream instance to avoid srcObject churn (flicker)
-        const stream = remoteStreamRef.current || new MediaStream();
-        const track = event.track;
-        if (track) {
-          const exists = stream.getTracks().some((t) => t.id === track.id);
-          if (!exists) stream.addTrack(track);
-          track.onunmute = () => {
+        const incomingStream = event.streams && event.streams[0] ? event.streams[0] : null;
+        let stream = incomingStream || remoteStreamRef.current;
+        if (!stream) stream = new MediaStream();
+        if (!incomingStream && event.track) {
+          const exists = stream.getTracks().some((track) => track.id === event.track.id);
+          if (!exists) stream.addTrack(event.track);
+        }
+        const key = incomingStream ? incomingStream.id : "default";
+        const map = remoteStreamsMapRef.current;
+        map.set(key, incomingStream || stream);
+        const list = Array.from(map.values());
+        const primary = list[0] || stream;
+        remoteStreamRef.current = primary;
+
+        if (event.track) {
+          event.track.onunmute = () => {
             if (!isMountedRef.current) return;
             tryPlayRemoteMedia();
           };
-          track.onmute = () => {
-            const hasLiveVideo2 = stream.getVideoTracks().some((t) => t.readyState === "live");
+          const refreshFlags = () => {
+            const first = remoteStreamsMapRef.current.values().next().value || primary;
+            const hasLiveVideo2 = first.getVideoTracks().some((t) => t.readyState === "live");
             hasRemoteVideoTrackRef.current = hasLiveVideo2;
             setHasRemoteVideoTrack(hasLiveVideo2);
           };
-          track.onended = () => {
-            const hasLiveVideo2 = stream.getVideoTracks().some((t) => t.readyState === "live");
-            hasRemoteVideoTrackRef.current = hasLiveVideo2;
-            setHasRemoteVideoTrack(hasLiveVideo2);
-          };
+          event.track.onmute = refreshFlags;
+          event.track.onended = refreshFlags;
         }
-        remoteStreamRef.current = stream;
-const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState === "live");
+
+        const hasLiveVideo = primary.getVideoTracks().some((t) => t.readyState === "live");
         hasRemoteVideoTrackRef.current = hasLiveVideo;
         setHasRemoteVideoTrack(hasLiveVideo);
-        setRemoteStream(stream);
+
+        updateRemoteStreamsState();
+        stream = primary;
         if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== stream) {
           remoteAudioRef.current.srcObject = stream;
         }
@@ -2312,6 +2349,41 @@ const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState ==
       setIsSwitchingCamera(false);
     }
   };
+
+const switchCameraDevice = async () => {
+  if (!isVideoEnabled || isScreenSharing) return;
+  if (!navigator.mediaDevices?.getUserMedia) return;
+  if (!videoInputs || videoInputs.length < 2) {
+    await switchCameraFacing();
+    return;
+  }
+  setIsSwitchingCamera(true);
+  try {
+    const idx = Math.max(0, videoInputs.findIndex((d) => d.deviceId === currentVideoDeviceId));
+    const next = videoInputs[(idx + 1) % videoInputs.length];
+    const cameraStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        deviceId: next?.deviceId ? { exact: next.deviceId } : void 0,
+        width: { ideal: 480, max: 960 },
+        height: { ideal: 270, max: 540 },
+        frameRate: { ideal: 20, max: 24 }
+      }
+    });
+    const newTrack = cameraStream.getVideoTracks()[0];
+    if (!newTrack) throw new Error("No camera track");
+    await replaceOutgoingVideoTrack(newTrack);
+    await attachLocalVideoTrack(newTrack);
+    setCurrentVideoDeviceId(next?.deviceId || null);
+    setIsVideoOff(false);
+  } catch (e) {
+    console.warn("Camera device switch failed:", e);
+    try { await switchCameraFacing(); } catch {}
+  } finally {
+    setIsSwitchingCamera(false);
+  }
+};
+
   const restoreCameraAfterShare = async () => {
     const cameraStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
@@ -2397,15 +2469,23 @@ const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState ==
   const participantCount = Math.max(2, Math.min(12, resolveCallParticipantCount(callData)));
   const tileColumns = participantCount <= 2 ? 2 : participantCount <= 4 ? 2 : participantCount <= 9 ? 3 : 4;
   const tileMinHeightClass = participantCount <= 2 ? "min-h-[220px] md:min-h-[420px]" : participantCount <= 4 ? "min-h-[150px] md:min-h-[220px]" : "min-h-[110px] md:min-h-[160px]";
-  const callTiles = [
-    { key: "remote", type: "remote", label: "相手" },
-    { key: "local", type: "local", label: "あなた" },
-    ...Array.from({ length: Math.max(0, participantCount - 2) }, (_, idx) => ({
-      key: `member-${idx + 3}`,
-      type: "placeholder",
-      label: `参加者${idx + 3}`
-    }))
-  ];
+  
+const remoteStreamsForTiles = remoteStreams && remoteStreams.length ? remoteStreams : remoteStream ? [remoteStream] : [];
+const callTiles = [
+  ...remoteStreamsForTiles.slice(0, Math.max(1, participantCount - 1)).map((s, idx) => ({
+    key: `remote-${s.id || idx}`,
+    type: "remote",
+    label: remoteStreamsForTiles.length > 1 ? `相手${idx + 1}` : "相手",
+    stream: s,
+    isPrimary: idx === 0
+  })),
+  { key: "local", type: "local", label: "あなた" },
+  ...Array.from({ length: Math.max(0, participantCount - 1 - remoteStreamsForTiles.length) }, (_, idx) => ({
+    key: `member-${idx + 2 + remoteStreamsForTiles.length}`,
+    type: "placeholder",
+    label: `参加者${idx + 2 + remoteStreamsForTiles.length}`
+  }))
+];
   const showModernGroupLayout = true;
   if (callError) {
     return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center text-white flex-col gap-4", children: [
@@ -2428,10 +2508,11 @@ const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState ==
       /* @__PURE__ */ jsx("div", { className: "relative z-10 flex-1 p-4 md:p-6 pb-32", children: /* @__PURE__ */ jsx("div", { className: "grid gap-2.5 md:gap-3 h-full", style: { gridTemplateColumns: `repeat(${tileColumns}, minmax(0, 1fr))` }, children: callTiles.map((tile) => {
             if (tile.type === "remote") {
               return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden rounded-3xl border border-cyan-300/30 bg-black ${tileMinHeightClass}`, children: [
-                /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "absolute inset-0 w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }),
-                (!remoteStream || !hasRemoteVideo) && /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55", children: [
+                
+tile.isPrimary ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "absolute inset-0 w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }) : /* @__PURE__ */ jsx(MediaVideo, { stream: tile.stream, className: "absolute inset-0 w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }),
+                (!tile.stream || !(tile.stream.getVideoTracks && tile.stream.getVideoTracks().some((t) => t.readyState === "live"))) && /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55", children: [
                   /* @__PURE__ */ jsx(User, { className: "w-8 h-8 opacity-80" }),
-                  /* @__PURE__ */ jsx("p", { className: "text-xs font-bold", children: remoteStream ? "接続中..." : "待機中..." })
+                  /* @__PURE__ */ jsx("p", { className: "text-xs font-bold", children: tile.stream ? "接続中..." : "待機中..." })
                 ] }),
                 /* @__PURE__ */ jsx("div", { className: "absolute left-2.5 bottom-2.5 text-[10px] font-black bg-black/45 px-2 py-1 rounded-full", children: "相手" })
               ] }, tile.key);
@@ -2455,6 +2536,7 @@ const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState ==
         /* @__PURE__ */ jsxs("div", { className: "mx-auto w-full max-w-lg bg-black/40 border border-white/15 rounded-2xl px-5 py-4 backdrop-blur-xl flex items-center justify-center gap-4 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]", children: [
           /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `w-12 h-12 rounded-xl flex items-center justify-center ${isMuted ? "bg-white text-black" : "bg-white/15 text-white"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-5 h-5" }) : /* @__PURE__ */ jsx(Mic, { className: "w-5 h-5" }) }),
           isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `w-12 h-12 rounded-xl flex items-center justify-center ${isVideoOff ? "bg-white text-black" : "bg-white/15 text-white"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-5 h-5" }) : /* @__PURE__ */ jsx(Video, { className: "w-5 h-5" }) }),
+          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: switchCameraDevice, disabled: isSwitchingCamera, className: `w-12 h-12 rounded-xl flex items-center justify-center ${isSwitchingCamera ? "bg-white/10 text-white/40" : "bg-white/15 text-white"}`, title: "カメラ切替", children: /* @__PURE__ */ jsx(RefreshCcw, { className: `w-5 h-5 ${isSwitchingCamera ? "animate-spin" : ""}` }) }),
 
 /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: !navigator.mediaDevices?.getDisplayMedia, className: `w-12 h-12 rounded-xl flex items-center justify-center ${isScreenSharing ? "bg-blue-600 text-white" : "bg-white/15 text-white"} ${!navigator.mediaDevices?.getDisplayMedia ? "opacity-40 cursor-not-allowed" : ""}`, children: isScreenSharing ? /* @__PURE__ */ jsx(StopCircle, { className: "w-5 h-5" }) : /* @__PURE__ */ jsx(Upload, { className: "w-5 h-5" }) }),
           /* @__PURE__ */ jsx("button", { onClick: handleEndCallRequest, className: "w-16 h-16 rounded-2xl bg-red-500 text-white flex items-center justify-center shadow-2xl ring-1 ring-white/10", children: /* @__PURE__ */ jsx(PhoneOff, { className: "w-6 h-6" }) }),
