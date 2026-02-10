@@ -3194,7 +3194,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
   }, [m.id, chatId]);
   useEffect(() => {
     if (shouldLoadFromChunks) {
-      if (mediaSrc && !mediaSrc.startsWith("blob:") && mediaSrc !== m.preview) return;
+      if (mediaSrc && (mediaSrc.startsWith("blob:") || (!mediaSrc.startsWith("blob:") && mediaSrc !== m.preview))) return;
       setLoading(true);
       (async () => {
         try {
@@ -3326,14 +3326,14 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
           /* @__PURE__ */ jsx("img", { src: m.content || "", className: "w-32 h-32 object-contain drop-shadow-sm hover:scale-105 transition-transform" }),
           m.audio && /* @__PURE__ */ jsx("div", { className: "absolute bottom-0 right-0 bg-black/20 text-white rounded-full p-1", children: /* @__PURE__ */ jsx(Volume2, { className: "w-3 h-3" }) })
         ] }),
-        (m.type === "image" || m.type === "video") && /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+        (m.type === "image" || m.type === "video") && /* @__PURE__ */ jsxs("div", { className: "relative flex justify-center", children: [
           isShowingPreview && !finalSrc ? /* @__PURE__ */ jsxs("div", { className: "p-4 bg-gray-100 rounded-xl flex flex-col items-center justify-center gap-2 min-w-[150px] min-h-[100px] border border-gray-200", children: [
             /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-8 h-8 text-green-500" }),
             /* @__PURE__ */ jsx("span", { className: "text-[10px] text-gray-500 font-bold", children: m.type === "video" ? "\u52D5\u753B\u3092\u53D7\u4FE1\u4E2D..." : "\u753B\u50CF\u3092\u53D7\u4FE1\u4E2D..." })
           ] }) : /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-            m.type === "video" ? /* @__PURE__ */ jsx("video", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md bg-black ${showMenu ? "brightness-50 transition-all" : ""}`, controls: true, playsInline: true, preload: "metadata", onError: () => {
+            m.type === "video" ? /* @__PURE__ */ jsx("video", { src: finalSrc || "", className: `block mx-auto w-full max-w-[320px] rounded-xl border border-white/50 shadow-md bg-black ${showMenu ? "brightness-50 transition-all" : ""}`, controls: true, playsInline: true, preload: "metadata", onError: () => {
               if (hasLocalBlobContent && m.hasChunks) setForceChunkLoad(true);
-            } }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy", onError: () => {
+            } }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `block mx-auto w-full max-w-[320px] rounded-xl border border-white/50 shadow-md ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy", onError: () => {
               if (hasLocalBlobContent && m.hasChunks) setForceChunkLoad(true);
             } }),
             m.type === "video" && !isShowingPreview && !finalSrc && /* @__PURE__ */ jsx("div", { className: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none", children: /* @__PURE__ */ jsx("div", { className: "bg-black/30 rounded-full p-2 backdrop-blur-sm", children: /* @__PURE__ */ jsx(Play, { className: "w-8 h-8 text-white fill-white opacity-90" }) }) }),
@@ -6938,7 +6938,6 @@ var App_13_default = App;
 export {
   App_13_default as default
 };
-
 
 
 
