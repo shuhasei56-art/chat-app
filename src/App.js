@@ -1054,7 +1054,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       videoEl.removeEventListener("enterpictureinpicture", onEnterPip);
       videoEl.removeEventListener("leavepictureinpicture", onLeavePip);
     };
-  }, [remoteStream]);
+  }, []);
   useEffect(() => {
     const md = navigator.mediaDevices;
     if (!md?.enumerateDevices) return;
@@ -1230,7 +1230,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     let videoFailed = false;
     const audioEl = remoteAudioRef.current;
     const videoEl = remoteVideoRef.current;
-    const mediaStream = videoEl?.srcObject || audioEl?.srcObject || remoteStreamRef.current || remoteStream;
+    const mediaStream = videoEl?.srcObject || audioEl?.srcObject || remoteStreamRef.current;
     // Ensure elements reference the latest remote MediaStream (some webviews ignore early srcObject assignments).
     if (mediaStream) {
       if (audioEl && audioEl.srcObject !== mediaStream) audioEl.srcObject = mediaStream;
@@ -1280,7 +1280,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     }
     setNeedsRemotePlay(audioFailed || videoFailed);
     return !(audioFailed || videoFailed);
-  }, [remoteStream]);
+  }, []);
   useEffect(() => {
     const becameConnected = isConnected && !prevConnectedRef.current;
     if (becameConnected) {
@@ -1739,37 +1739,36 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         }
       };
       pc.ontrack = async (event) => {
-        const directStream = event.streams?.[0];
-        const stream = directStream || remoteStreamRef.current;
-        if (!directStream && event.track) {
-          const exists = stream.getTracks().some((track) => track.id === event.track.id);
-          if (!exists) stream.addTrack(event.track);
-        }
-        remoteStreamRef.current = stream;
-        if (event.track) {
-          event.track.onunmute = () => {
+        // Keep a single remote MediaStream instance to avoid srcObject churn (flicker)
+        const stream = remoteStreamRef.current || new MediaStream();
+        const track = event.track;
+        if (track) {
+          const exists = stream.getTracks().some((t) => t.id === track.id);
+          if (!exists) stream.addTrack(track);
+          track.onunmute = () => {
             if (!isMountedRef.current) return;
             tryPlayRemoteMedia();
           };
-          event.track.onmute = () => {
-            const hasLiveVideo2 = stream.getVideoTracks().some((track) => track.readyState === "live");
+          track.onmute = () => {
+            const hasLiveVideo2 = stream.getVideoTracks().some((t) => t.readyState === "live");
             hasRemoteVideoTrackRef.current = hasLiveVideo2;
             setHasRemoteVideoTrack(hasLiveVideo2);
           };
-          event.track.onended = () => {
-            const hasLiveVideo2 = stream.getVideoTracks().some((track) => track.readyState === "live");
+          track.onended = () => {
+            const hasLiveVideo2 = stream.getVideoTracks().some((t) => t.readyState === "live");
             hasRemoteVideoTrackRef.current = hasLiveVideo2;
             setHasRemoteVideoTrack(hasLiveVideo2);
           };
         }
-        const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState === "live");
+        remoteStreamRef.current = stream;
+const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState === "live");
         hasRemoteVideoTrackRef.current = hasLiveVideo;
         setHasRemoteVideoTrack(hasLiveVideo);
         setRemoteStream(stream);
-        if (remoteAudioRef.current) {
+        if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== stream) {
           remoteAudioRef.current.srcObject = stream;
         }
-        if (remoteVideoRef.current) {
+        if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== stream) {
           remoteVideoRef.current.srcObject = stream;
         }
         const played = await tryPlayRemoteMedia();
