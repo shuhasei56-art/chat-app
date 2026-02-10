@@ -1735,49 +1735,49 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         }
       };
       pc.ontrack = async (event) => {
-        // 1. Refにある現在のストリームを取得
-        const currentStream = remoteStreamRef.current;
-
-        // 2. 受信したトラックをRefのストリームに確実に追加
+        const stream = remoteStreamRef.current;
+        
+        // 1. トラックを既存のストリームに追加するだけにする
         if (event.track) {
-          if (!currentStream.getTracks().some((t) => t.id === event.track.id)) {
-            currentStream.addTrack(event.track);
+          if (!stream.getTracks().some((t) => t.id === event.track.id)) {
+            stream.addTrack(event.track);
           }
         }
-        
-        // 3. event.streamsがある場合、そこに含まれるトラックも漏らさず追加
-        if (event.streams && event.streams[0]) {
-          event.streams[0].getTracks().forEach((t) => {
-            if (!currentStream.getTracks().some((existing) => existing.id === t.id)) {
-              currentStream.addTrack(t);
-            }
-          });
+
+        // 2. 初めてストリームが有効になった時だけ State を更新して、不要な再描画を防ぐ
+        if (!remoteStream) {
+          setRemoteStream(stream);
         }
 
-        // 4. Reactに検知させるため、完全に新しいMediaStreamインスタンスとして複製を作成
-        const newStreamInstance = new MediaStream(currentStream.getTracks());
-        
-        // 5. Stateを更新
-        setRemoteStream(newStreamInstance);
-
-        // 6. 【重要】Reactの再描画を待たず、強制的にvideo/audioタグへソースを適用する
-        // これにより、トラックが追加された瞬間に映像が出るようになります
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = newStreamInstance;
+        // 3. 直接DOMに割り当てる（既にセット済みの場合は何もしないことで点滅を防ぐ）
+        if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== stream) {
+          remoteVideoRef.current.srcObject = stream;
         }
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = newStreamInstance;
+        if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== stream) {
+          remoteAudioRef.current.srcObject = stream;
         }
 
-        // トラックの状態監視イベントを設定
+        const updateVideoStatus = () => {
+          const hasLive = stream.getVideoTracks().some(t => t.readyState === "live");
+          if (hasRemoteVideoTrackRef.current !== hasLive) {
+            hasRemoteVideoTrackRef.current = hasLive;
+            setHasRemoteVideoTrack(hasLive);
+          }
+        };
+
         if (event.track) {
           event.track.onunmute = () => {
             if (!isMountedRef.current) return;
-            // アンミュート時も再度ソースを適用して再生を試みる
-            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = newStreamInstance;
-            if (remoteAudioRef.current) remoteAudioRef.current.srcObject = newStreamInstance;
             tryPlayRemoteMedia();
+            updateVideoStatus();
           };
+          event.track.onmute = updateVideoStatus;
+          event.track.onended = updateVideoStatus;
+        }
+
+        updateVideoStatus();
+        await tryPlayRemoteMedia();
+      };
           
           const updateVideoStatus = () => {
              const hasLive = newStreamInstance.getVideoTracks().some(t => t.readyState === "live");
