@@ -1093,17 +1093,16 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     applySink(remoteVideoRef.current);
   }, [selectedAudioOutput, canSelectAudioOutput, remoteStream]);
   useEffect(() => {
-    if (!isConnected) {
-      setCallDurationSec(0);
-      return;
-    }
-    const timer = setInterval(() => {
-      if (!callStartedAtRef.current) return;
-      const elapsed = Math.floor((Date.now() - callStartedAtRef.current) / 1e3);
-      setCallDurationSec(elapsed);
-    }, 1e3);
-    return () => clearInterval(timer);
-  }, [isConnected]);
+  // Start counting as soon as the call UI is shown (even while "接続確認中"),
+  // and reset is handled by resetCallState() when the call ends.
+  if (!callStartedAtRef.current) callStartedAtRef.current = Date.now();
+  const timer = setInterval(() => {
+    if (!callStartedAtRef.current) return;
+    const elapsed = Math.floor((Date.now() - callStartedAtRef.current) / 1e3);
+    setCallDurationSec(elapsed);
+  }, 1e3);
+  return () => clearInterval(timer);
+}, []);
   useEffect(() => {
     qualityModeRef.current = qualityMode;
   }, [qualityMode]);
@@ -2397,7 +2396,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     return best > 0 ? best : data.isGroupCall ? 4 : 2;
   };
   const participantCount = Math.max(2, Math.min(12, resolveCallParticipantCount(callData)));
-  const tileColumns = participantCount <= 2 ? 1 : participantCount <= 4 ? 2 : participantCount <= 9 ? 3 : 4;
+  const tileColumns = participantCount <= 2 ? 2 : participantCount <= 4 ? 2 : participantCount <= 9 ? 3 : 4;
   const tileMinHeightClass = participantCount <= 2 ? "min-h-[220px] md:min-h-[420px]" : participantCount <= 4 ? "min-h-[150px] md:min-h-[220px]" : "min-h-[110px] md:min-h-[160px]";
   const callTiles = [
     { key: "remote", type: "remote", label: "相手" },
@@ -2457,6 +2456,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         /* @__PURE__ */ jsxs("div", { className: "mx-auto w-full max-w-lg bg-black/40 border border-white/15 rounded-2xl px-5 py-4 backdrop-blur-xl flex items-center justify-center gap-4 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]", children: [
           /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `w-12 h-12 rounded-xl flex items-center justify-center ${isMuted ? "bg-white text-black" : "bg-white/15 text-white"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-5 h-5" }) : /* @__PURE__ */ jsx(Mic, { className: "w-5 h-5" }) }),
           isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `w-12 h-12 rounded-xl flex items-center justify-center ${isVideoOff ? "bg-white text-black" : "bg-white/15 text-white"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-5 h-5" }) : /* @__PURE__ */ jsx(Video, { className: "w-5 h-5" }) }),
+
+/* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: !navigator.mediaDevices?.getDisplayMedia, className: `w-12 h-12 rounded-xl flex items-center justify-center ${isScreenSharing ? "bg-blue-600 text-white" : "bg-white/15 text-white"} ${!navigator.mediaDevices?.getDisplayMedia ? "opacity-40 cursor-not-allowed" : ""}`, children: isScreenSharing ? /* @__PURE__ */ jsx(StopCircle, { className: "w-5 h-5" }) : /* @__PURE__ */ jsx(Upload, { className: "w-5 h-5" }) }),
           /* @__PURE__ */ jsx("button", { onClick: handleEndCallRequest, className: "w-16 h-16 rounded-2xl bg-red-500 text-white flex items-center justify-center shadow-2xl ring-1 ring-white/10", children: /* @__PURE__ */ jsx(PhoneOff, { className: "w-6 h-6" }) }),
           /* @__PURE__ */ jsx("button", { onClick: () => setShowAdvancedPanel((v) => !v), className: `w-12 h-12 rounded-xl flex items-center justify-center ${showAdvancedPanel ? "bg-white text-black" : "bg-white/15 text-white"}`, children: /* @__PURE__ */ jsx(MoreVertical, { className: "w-5 h-5" }) })
         ] })
@@ -3483,13 +3484,33 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
     await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { comments: arrayUnion({ userId: user.uid, userName: profile.name, text: commentText, createdAt: (/* @__PURE__ */ new Date()).toISOString() }) });
     setCommentText("");
   };
+const deletePost = async () => {
+  if (!isMe) return;
+  const ok = window.confirm("この投稿を削除しますか？");
+  if (!ok) return;
+  try {
+    const batch = writeBatch(db2);
+    // Delete chunk docs if the post was stored in chunks
+    if (post.hasChunks && post.chunkCount) {
+      for (let i = 0; i < post.chunkCount; i++) {
+        batch.delete(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks", `${i}`));
+      }
+    }
+    batch.delete(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id));
+    await batch.commit();
+  } catch (e) {
+    console.warn("Delete post failed:", e);
+    alert("削除に失敗しました");
+  }
+};
   return /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2 border-b", children: [
     /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
       /* @__PURE__ */ jsxs("div", { className: "relative", children: [
         /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
         isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
       ] }),
-      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
+      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name }),
+      isMe && /* @__PURE__ */ jsx("button", { onClick: deletePost, className: "ml-auto p-2 rounded-full hover:bg-gray-100 text-gray-500", title: "\u524a\u9664", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
     (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
@@ -6334,7 +6355,8 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
                   icon = partnerData.avatar;
                 }
               }
-              const unreadCount = chat.unreadCounts?.[user.uid] || 0;
+              const unreadCountRaw = Number(chat.unreadCounts?.[user.uid] || 0) || 0;
+              const unreadCount = chat.lastMessage?.senderId && chat.lastMessage.senderId !== user.uid ? unreadCountRaw : 0;
               return /* @__PURE__ */ jsxs(
                 "div",
                 {
