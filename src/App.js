@@ -2432,9 +2432,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         /* @__PURE__ */ jsxs("div", { className: "bg-indigo-500 text-white rounded-full px-3 py-1 text-[10px] font-black", children: ["参加: ", participantCount] }),
         /* @__PURE__ */ jsx("button", { onClick: openAdvancedSettingsPanel, className: "ml-auto bg-white/10 hover:bg-white/20 border border-white/20 rounded-full px-4 py-2 text-xs font-black", children: "設定" })
       ] }),
-      /* @__PURE__ */ jsx("div", { className: "relative z-10 flex-1 p-3 md:p-5 pb-28", children: /* @__PURE__ */ jsx("div", { className: "grid gap-2.5 md:gap-3 h-full", style: { gridTemplateColumns: `repeat(${tileColumns}, minmax(0, 1fr))`, ...(participantCount <= 2 ? { gridTemplateRows: "repeat(2, minmax(0, 1fr))" } : {}) }, children: callTiles.map((tile) => {
+      /* @__PURE__ */ jsx("div", { className: "relative z-10 flex-1 p-3 md:p-5 pb-28", children: /* @__PURE__ */ jsx("div", { className: "relative grid gap-2.5 md:gap-3 h-full", style: { gridTemplateColumns: `repeat(${tileColumns}, minmax(0, 1fr))`, ...(participantCount <= 2 && callData.isGroupCall ? { gridTemplateRows: "repeat(2, minmax(0, 1fr))" } : {}) }, children: callTiles.map((tile) => {
             if (tile.type === "remote") {
-              return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden rounded-3xl border border-cyan-300/30 bg-black ${tileMinHeightClass}`, children: [
+              return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden ${oneOnOneCall ? "rounded-none md:rounded-3xl" : "rounded-3xl"} border border-cyan-300/30 bg-black ${tileMinHeightClass} ${oneOnOneCall ? "col-span-full row-span-full" : ""}`, children: [
                 /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "absolute inset-0 w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }),
                 (!remoteStream || !hasRemoteVideo) && /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55", children: [
                   /* @__PURE__ */ jsx(User, { className: "w-8 h-8 opacity-80" }),
@@ -2444,7 +2444,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
               ] }, tile.key);
             }
             if (tile.type === "local") {
-              return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden rounded-3xl border border-emerald-300/35 bg-black ${tileMinHeightClass}`, children: [
+              return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden ${oneOnOneCall ? "absolute left-4 top-4 w-[120px] h-[160px] rounded-2xl shadow-2xl border-white/30 z-30" : "rounded-3xl"} border border-emerald-300/35 bg-black ${tileMinHeightClass}`, children: [
                 /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "absolute inset-0 w-full h-full object-cover", style: { filter: localFilter, transform: localVideoTransform || "none" }, onError: handleLocalVideoRenderIssue, onStalled: handleLocalVideoRenderIssue, onEmptied: handleLocalVideoRenderIssue, onAbort: handleLocalVideoRenderIssue }),
                 (!isVideoEnabled || isVideoOff) && /* @__PURE__ */ jsx("div", { className: "absolute inset-0 flex items-center justify-center bg-black/65", children: /* @__PURE__ */ jsx(VideoOff, { className: "w-8 h-8 opacity-80" }) }),
                 /* @__PURE__ */ jsx("div", { className: "absolute left-2.5 bottom-2.5 text-[10px] font-black bg-black/45 px-2 py-1 rounded-full", children: "あなた" })
