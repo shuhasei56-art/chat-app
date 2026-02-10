@@ -6893,7 +6893,7 @@ function App() {
             )
           }
         ),
-        /* @__PURE__ */ jsxs("div", { className: "absolute top-4 left-0 right-0 px-4 flex gap-2 overflow-x-auto scrollbar-hide z-[1001]", children: [
+        /* @__PURE__ */ jsxs("div", { className: "absolute top-16 left-0 right-0 px-4 flex flex-wrap items-center gap-2 z-[1001] bg-black/30 backdrop-blur-md rounded-2xl py-2", children: [
           /* @__PURE__ */ jsx("button", { onClick: () => setActiveEffect("Normal"), className: `p-2 rounded-xl text-xs font-bold whitespace-nowrap ${activeEffect === "Normal" ? "bg-white text-black" : "bg-black/50 text-white"}`, children: "Normal" }),
           userEffects.map((ef) => /* @__PURE__ */ jsxs("button", { onClick: () => setActiveEffect(ef.name), className: `p-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-1 ${activeEffect === ef.name ? "bg-white text-black" : "bg-black/50 text-white"}`, children: [
             /* @__PURE__ */ jsx(Sparkles, { className: "w-3 h-3" }),
