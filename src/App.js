@@ -1542,12 +1542,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
       const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
       const pc = new RTCPeerConnection(buildRtcConfig(false));
-      try {
-        // Ensure we can receive media even if we have not added local tracks yet (group calls / listen-only join)
-        pc.addTransceiver("audio", { direction: "recvonly" });
-        pc.addTransceiver("video", { direction: "recvonly" });
-      } catch {
-      }
+      try { pc.addTransceiver("audio", { direction: "recvonly" }); } catch (e) {}
+      try { pc.addTransceiver("video", { direction: "recvonly" }); } catch (e) {}
       pcRef.current = pc;
       const applyAdaptiveProfile = async (profile) => {
         if (!pcRef.current) return;
@@ -1741,6 +1737,17 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         }
       };
       pc.ontrack = async (event) => {
+        try {
+          const s0 = event.streams?.[0];
+          const attachStream = s0 || remoteStreamRef.current;
+          if (attachStream && remoteVideoRef.current && remoteVideoRef.current.srcObject !== attachStream) {
+            remoteVideoRef.current.srcObject = attachStream;
+          }
+          if (attachStream && remoteAudioRef.current && remoteAudioRef.current.srcObject !== attachStream) {
+            remoteAudioRef.current.srcObject = attachStream;
+          }
+        } catch (e) {}
+
         const directStream = event.streams?.[0];
         const stream = directStream || remoteStreamRef.current;
         if (!directStream && event.track) {
@@ -2396,7 +2403,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   };
   const participantCount = Math.max(2, Math.min(12, resolveCallParticipantCount(callData)));
   const tileColumns = participantCount <= 2 ? 1 : participantCount <= 4 ? 2 : participantCount <= 9 ? 3 : 4;
-  const tileMinHeightClass = participantCount <= 2 ? "min-h-[220px] md:min-h-[420px]" : participantCount <= 4 ? "min-h-[150px] md:min-h-[220px]" : "min-h-[110px] md:min-h-[160px]";
+  const tileMinHeightClass = participantCount <= 2 ? "" : participantCount <= 4 ? "min-h-[150px] md:min-h-[220px]" : "min-h-[110px] md:min-h-[160px]";
   const callTiles = [
     { key: "remote", type: "remote", label: "相手" },
     { key: "local", type: "local", label: "あなた" },
@@ -2425,7 +2432,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         /* @__PURE__ */ jsxs("div", { className: "bg-indigo-500 text-white rounded-full px-3 py-1 text-[10px] font-black", children: ["参加: ", participantCount] }),
         /* @__PURE__ */ jsx("button", { onClick: openAdvancedSettingsPanel, className: "ml-auto bg-white/10 hover:bg-white/20 border border-white/20 rounded-full px-4 py-2 text-xs font-black", children: "設定" })
       ] }),
-      /* @__PURE__ */ jsx("div", { className: "relative z-10 flex-1 p-3 md:p-5 pb-28", children: /* @__PURE__ */ jsx("div", { className: "grid gap-2.5 md:gap-3 h-full", style: { gridTemplateColumns: `repeat(${tileColumns}, minmax(0, 1fr))` }, children: callTiles.map((tile) => {
+      /* @__PURE__ */ jsx("div", { className: "relative z-10 flex-1 p-3 md:p-5 pb-28", children: /* @__PURE__ */ jsx("div", { className: "grid gap-2.5 md:gap-3 h-full", style: { gridTemplateColumns: `repeat(${tileColumns}, minmax(0, 1fr))`, ...(participantCount <= 2 ? { gridTemplateRows: "repeat(2, minmax(0, 1fr))" } : {}) }, children: callTiles.map((tile) => {
             if (tile.type === "remote") {
               return /* @__PURE__ */ jsxs("div", { className: `relative overflow-hidden rounded-3xl border border-cyan-300/30 bg-black ${tileMinHeightClass}`, children: [
                 /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "absolute inset-0 w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }),
@@ -3434,6 +3441,18 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
   const [postPreview, setPostPreview] = useState(null);
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
+  const handleDeletePost = useCallback(async () => {
+    try {
+      if (!confirm("この投稿を削除しますか？")) return;
+      await deleteDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id));
+      const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"));
+      for (const d of c.docs) await deleteDoc(d.ref);
+      showNotification("投稿を削除しました");
+    } catch (e) {
+      console.error(e);
+      showNotification("削除に失敗しました");
+    }
+  }, [db2, appId2, post.id, showNotification]);
   useEffect(() => {
     if (post.hasChunks && !mediaSrc) {
       setIsLoadingMedia(true);
@@ -3487,7 +3506,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
         /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
         isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
       ] }),
-      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
+      /* @__PURE__ */ jsxs("div", { className: "flex-1 flex items-center justify-between", children: [/* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name }), isMe && /* @__PURE__ */ jsx("button", { onClick: handleDeletePost, className: "text-xs px-3 py-1 rounded-full bg-red-500/10 text-red-600 border border-red-500/20", children: "削除" })] })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
     (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
