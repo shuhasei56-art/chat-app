@@ -1761,12 +1761,16 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState === "live");
         hasRemoteVideoTrackRef.current = hasLiveVideo;
         setHasRemoteVideoTrack(hasLiveVideo);
-        setRemoteStream(stream);
+        
+        // 修正: ReactのuseEffectを発火させるため、新しいMediaStreamインスタンスとして複製を作成する
+        const newStream = new MediaStream(stream.getTracks());
+        setRemoteStream(newStream);
+
         if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = stream;
+          remoteAudioRef.current.srcObject = newStream;
         }
         if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = stream;
+          remoteVideoRef.current.srcObject = newStream;
         }
         const played = await tryPlayRemoteMedia();
         if (!played) {
