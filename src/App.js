@@ -6852,7 +6852,8 @@ function App() {
     }, 45e3);
     return () => clearTimeout(timeout);
   }, [activeCall, effectiveCallPhase, chats, syncedCallData]);
-  return /* @__PURE__ */ jsx("div", { className: "w-full h-[100dvh] bg-[#d7dbe1] overflow-hidden", children: /* @__PURE__ */ jsxs("div", { className: "w-full h-[100dvh] bg-[#f3f4f6] flex flex-col relative overflow-hidden", children: [
+  const isVideoFullscreen = !!activeCall;
+  return /* @__PURE__ */ jsx("div", { className: isVideoFullscreen ? "w-full h-[100dvh] bg-[#d7dbe1] overflow-hidden" : "w-full min-h-[100dvh] bg-[#d7dbe1] overflow-hidden flex justify-center", children: /* @__PURE__ */ jsxs("div", { className: isVideoFullscreen ? "w-full h-[100dvh] bg-[#f3f4f6] flex flex-col relative overflow-hidden" : "w-full max-w-[430px] h-[100dvh] bg-[#f3f4f6] flex flex-col relative overflow-hidden shadow-2xl", children: [
     notification && /* @__PURE__ */ jsx("div", { className: "fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce", children: notification }),
     !user ? /* @__PURE__ */ jsx(AuthView, { onLogin: setUser, showNotification }) : /* @__PURE__ */ jsxs(Fragment, { children: [
       activeCall ? effectiveCallPhase === "incoming" ? /* @__PURE__ */ jsx(
