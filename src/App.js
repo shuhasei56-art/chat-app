@@ -2402,6 +2402,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     return best > 0 ? best : data.isGroupCall ? 4 : 2;
   };
   const participantCount = Math.max(2, Math.min(12, resolveCallParticipantCount(callData)));
+  const oneOnOneCall = participantCount === 2 && !callData.isGroupCall;
   const tileColumns = participantCount <= 2 ? 1 : participantCount <= 4 ? 2 : participantCount <= 9 ? 3 : 4;
   const tileMinHeightClass = participantCount <= 2 ? "" : participantCount <= 4 ? "min-h-[150px] md:min-h-[220px]" : "min-h-[110px] md:min-h-[160px]";
   const callTiles = [
@@ -6954,7 +6955,6 @@ var App_13_default = App;
 export {
   App_13_default as default
 };
-
 
 
 
