@@ -2675,9 +2675,152 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
               title: "通話終了",
               children: /* @__PURE__ */ jsx(PhoneOff, { className: "w-7 h-7" })
             })
+          ,
+          /* 設定 */
+          /* @__PURE__ */ jsx("button", {
+            onClick: () => setShowAdvancedPanel((v) => !v),
+            className: `w-14 h-14 rounded-full flex items-center justify-center transition active:scale-95 ${showAdvancedPanel ? "bg-white/30" : "bg-white/20 hover:bg-white/25"}`,
+            title: "設定",
+            children: /* @__PURE__ */ jsx(MoreVertical, { className: "w-6 h-6" })
+          })
           ]
         })
       })
+    ,
+    showAdvancedPanel && /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[2000] bg-black/80 backdrop-blur-md p-4 md:p-6 overflow-y-auto", children: [
+      /* @__PURE__ */ jsxs("div", { className: "max-w-2xl mx-auto bg-slate-900/90 border border-white/15 rounded-3xl p-4 md:p-6 text-white space-y-4 shadow-2xl", children: [
+        /* header */
+        /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between gap-3", children: [
+          /* @__PURE__ */ jsx("div", { className: "font-black text-lg", children: "通話設定パネル" }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setShowAdvancedPanel(false), className: "w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center", title: "閉じる", children: /* @__PURE__ */ jsx(X, { className: "w-5 h-5" }) })
+        ] }),
+
+        /* quick actions (8) */
+        /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-2", children: [
+          /* 1 mic */
+          /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: "px-3 py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-xs font-black flex items-center justify-center gap-2", children: [/* @__PURE__ */ jsx(isMuted ? MicOff : Mic, { className: "w-4 h-4" }), isMuted ? "マイクON" : "マイクOFF"] }),
+          /* 2 camera */
+          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: "px-3 py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-xs font-black flex items-center justify-center gap-2", children: [/* @__PURE__ */ jsx(isVideoOff ? VideoOff : Video, { className: "w-4 h-4" }), isVideoOff ? "カメラON" : "カメラOFF"] }),
+          /* 3 switch cam */
+          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: switchCameraFacing, disabled: isSwitchingCamera || isScreenSharing, className: `px-3 py-3 rounded-2xl text-xs font-black flex items-center justify-center gap-2 ${isSwitchingCamera || isScreenSharing ? "bg-white/5 opacity-60" : "bg-white/10 hover:bg-white/15"}`, children: [/* @__PURE__ */ jsx(RefreshCcw, { className: "w-4 h-4" }), "カメラ切替"] }),
+          /* 4 screen share */
+          /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, className: `px-3 py-3 rounded-2xl text-xs font-black flex items-center justify-center gap-2 ${isScreenSharing ? "bg-indigo-500/80" : "bg-white/10 hover:bg-white/15"}`, children: [/* @__PURE__ */ jsx(isScreenSharing ? StopCircle : MonitorUp, { className: "w-4 h-4" }), isScreenSharing ? "共有停止" : "画面共有"] }),
+          /* 5 playback */
+          /* @__PURE__ */ jsx("button", { onClick: retryRemotePlayback, className: "px-3 py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-xs font-black flex items-center justify-center gap-2", children: [/* @__PURE__ */ jsx(Play, { className: "w-4 h-4" }), "音声再生"] }),
+          /* 6 PiP */
+          /* @__PURE__ */ jsx("button", { onClick: togglePictureInPicture, className: "px-3 py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-xs font-black flex items-center justify-center gap-2", children: [/* @__PURE__ */ jsx(Maximize, { className: "w-4 h-4" }), "PiP"] }),
+          /* 7 snapshot */
+          /* @__PURE__ */ jsx("button", { onClick: captureCallSnapshot, className: "px-3 py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-xs font-black flex items-center justify-center gap-2", children: [/* @__PURE__ */ jsx(ImageIcon, { className: "w-4 h-4" }), "スクショ"] }),
+          /* 8 record */
+          /* @__PURE__ */ jsx("button", { onClick: isRecording ? stopRecording : startRecording, className: `px-3 py-3 rounded-2xl text-xs font-black flex items-center justify-center gap-2 ${isRecording ? "bg-red-500/80" : "bg-white/10 hover:bg-white/15"}`, children: [/* @__PURE__ */ jsx(isRecording ? StopCircle : Disc, { className: "w-4 h-4" }), isRecording ? "録画停止" : "録画開始"] })
+        ] }),
+
+        /* quality + audio DSP (6) */
+        /* @__PURE__ */ jsxs("div", { className: "space-y-2", children: [
+          /* quality mode */
+          /* @__PURE__ */ jsxs("div", { className: "bg-white/5 rounded-2xl p-3 space-y-2", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-xs font-black opacity-90", children: "画質" }),
+            /* @__PURE__ */ jsxs("select", { value: qualityMode, onChange: (e) => setQualityMode(e.target.value), className: "w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs font-bold", children: [
+              /* @__PURE__ */ jsx("option", { value: "auto", children: "自動" }),
+              /* @__PURE__ */ jsx("option", { value: "low", children: "低" }),
+              /* @__PURE__ */ jsx("option", { value: "medium", children: "中" }),
+              /* @__PURE__ */ jsx("option", { value: "high", children: "高" })
+            ] })
+          ] }),
+
+          /* audio processing toggles */
+          /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-1 md:grid-cols-3 gap-2", children: [
+            /* 9 noise suppression */
+            /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [
+              /* @__PURE__ */ jsx("input", { type: "checkbox", checked: noiseSuppressionEnabled, onChange: (e) => setNoiseSuppressionEnabled(e.target.checked) }),
+              "ノイズ抑制"
+            ] }),
+            /* 10 echo cancellation */
+            /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [
+              /* @__PURE__ */ jsx("input", { type: "checkbox", checked: echoCancellationEnabled, onChange: (e) => setEchoCancellationEnabled(e.target.checked) }),
+              "エコーキャンセル"
+            ] }),
+            /* 11 auto gain */
+            /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [
+              /* @__PURE__ */ jsx("input", { type: "checkbox", checked: autoGainControlEnabled, onChange: (e) => setAutoGainControlEnabled(e.target.checked) }),
+              "自動ゲイン"
+            ] })
+          ] })
+        ] }),
+
+        /* sliders (7) */
+        /* @__PURE__ */ jsxs("div", { className: "bg-white/5 rounded-2xl p-3 space-y-3", children: [
+          /* 12 mic gain */
+          /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-xs font-black opacity-90", children: ["マイク感度: ", Math.round(micGain * 100), "%"] }),
+            /* @__PURE__ */ jsx("input", { type: "range", min: 0.2, max: 2, step: 0.05, value: micGain, onChange: (e) => setMicGain(parseFloat(e.target.value)), className: "w-full" })
+          ] }),
+          /* 13 remote boost */
+          /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-xs font-black opacity-90", children: ["相手音量ブースト: ", Math.round(remoteBoost * 100), "%"] }),
+            /* @__PURE__ */ jsx("input", { type: "range", min: 0.2, max: 2, step: 0.05, value: remoteBoost, onChange: (e) => setRemoteBoost(parseFloat(e.target.value)), className: "w-full" })
+          ] }),
+          /* 14 remote brightness */
+          /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-xs font-black opacity-90", children: ["明るさ: ", remoteBrightness, "%"] }),
+            /* @__PURE__ */ jsx("input", { type: "range", min: 50, max: 150, step: 1, value: remoteBrightness, onChange: (e) => setRemoteBrightness(parseInt(e.target.value)), className: "w-full" })
+          ] }),
+          /* 15 remote contrast */
+          /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-xs font-black opacity-90", children: ["コントラスト: ", remoteContrast, "%"] }),
+            /* @__PURE__ */ jsx("input", { type: "range", min: 50, max: 150, step: 1, value: remoteContrast, onChange: (e) => setRemoteContrast(parseInt(e.target.value)), className: "w-full" })
+          ] }),
+          /* 16 remote saturation */
+          /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-xs font-black opacity-90", children: ["彩度: ", remoteSaturation, "%"] }),
+            /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 200, step: 1, value: remoteSaturation, onChange: (e) => setRemoteSaturation(parseInt(e.target.value)), className: "w-full" })
+          ] }),
+          /* 17 remote zoom */
+          /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-xs font-black opacity-90", children: ["ズーム: ", remoteZoom, "%"] }),
+            /* @__PURE__ */ jsx("input", { type: "range", min: 70, max: 140, step: 1, value: remoteZoom, onChange: (e) => setRemoteZoom(parseInt(e.target.value)), className: "w-full" })
+          ] })
+        ] }),
+
+        /* toggles (6) */
+        /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-2", children: [
+          /* 18 remote mirror */
+          /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [
+            /* @__PURE__ */ jsx("input", { type: "checkbox", checked: isRemoteMirror, onChange: (e) => setIsRemoteMirror(e.target.checked) }),
+            "相手映像ミラー"
+          ] }),
+          /* 19 local mirror */
+          /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [
+            /* @__PURE__ */ jsx("input", { type: "checkbox", checked: isLocalMirror, onChange: (e) => setIsLocalMirror(e.target.checked) }),
+            "自分映像ミラー"
+          ] }),
+          /* 20 auto hide controls */
+          /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [
+            /* @__PURE__ */ jsx("input", { type: "checkbox", checked: autoHideControls, onChange: (e) => setAutoHideControls(e.target.checked) }),
+            "操作バー自動非表示"
+          ] }),
+          /* 21 shortcut help */
+          /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [
+            /* @__PURE__ */ jsx("input", { type: "checkbox", checked: showShortcutHelp, onChange: (e) => setShowShortcutHelp(e.target.checked) }),
+            "ショートカット表示"
+          ] }),
+          /* 22 confirm hangup */
+          /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [
+            /* @__PURE__ */ jsx("input", { type: "checkbox", checked: confirmBeforeHangup, onChange: (e) => setConfirmBeforeHangup(e.target.checked) }),
+            "切断前確認"
+          ] }),
+          /* 23 keep awake */
+          /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [
+            /* @__PURE__ */ jsx("input", { type: "checkbox", checked: keepAwake, onChange: (e) => setKeepAwake(e.target.checked) }),
+            "画面スリープ抑止"
+          ] })
+        ] }),
+
+        /* footer */
+        /* @__PURE__ */ jsx("div", { className: "text-[11px] opacity-70 leading-relaxed", children: "この設定パネルから、マイク/カメラ/画面共有/録画/スクショ/画質・音声処理・表示調整など（20+機能）をまとめて操作できます。" })
+      ] })
+    ] })
+
     ]
   });
 };
