@@ -39,12 +39,6 @@ import {
   runTransaction
 } from "firebase/firestore";
 import {
-  getStorage,
-  ref as storageRef,
-  uploadBytesResumable,
-  getDownloadURL
-} from "firebase/storage";
-import {
   Search,
   UserPlus,
   Image as ImageIcon,
@@ -122,7 +116,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const storage = getStorage(app);
 const appId = "messenger-app-v9-integrated";
 const CHUNK_SIZE = 740000;
 const getUploadConcurrency = () => {
@@ -171,53 +164,62 @@ const evictOldestMessageMediaCache = () => {
   }
 };
 const isCachedMessageMediaUrl = (url) => !!url && messageMediaUrlSet.has(url);
+const base64ToUint8Array = (base64) => {
+  const bin = atob(base64);
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+};
 const loadChunkedMessageMedia = async ({ db: db2, appId: appId2, chatId, message }) => {
-
-// If the message already has a remote URL (e.g., Firebase Storage), use it directly.
-const directUrl = message.mediaUrl || message.content;
-if (typeof directUrl === "string" && /^https?:\/\//.test(directUrl)) {
-  const cacheKey = buildMessageMediaCacheKey(chatId, message.id, message.chunkCount, message.mimeType, message.type);
-  const cached = messageMediaUrlCache.get(cacheKey);
-  if (cached) return cached;
-  evictOldestMessageMediaCache();
-  messageMediaUrlCache.set(cacheKey, directUrl);
-  messageMediaUrlSet.add(directUrl);
-  return directUrl;
-}
-
   const cacheKey = buildMessageMediaCacheKey(chatId, message.id, message.chunkCount, message.mimeType, message.type);
   const cached = messageMediaUrlCache.get(cacheKey);
   if (cached) return cached;
   const inFlight = messageMediaPromiseCache.get(cacheKey);
   if (inFlight) return inFlight;
   const loadPromise = (async () => {
-    let base64Data = "";
-    if (message.chunkCount) {
-      const chunkPromises = [];
-      for (let i = 0; i < message.chunkCount; i++) {
-        chunkPromises.push(
-          getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", message.id, "chunks", `${i}`))
-        );
-      }
-      const chunkDocs = await Promise.all(chunkPromises);
-      chunkDocs.forEach((d) => {
-        if (d.exists()) base64Data += d.data().data;
-      });
+    const mimeType = message.mimeType || getDefaultMimeTypeByMessageType(message.type);
+    const parts = [];
+    const count = message.chunkCount || 0;
+    const CONCURRENCY = Math.max(4, Math.min(16, navigator.hardwareConcurrency || 8));
+    if (count > 0) {
+      let nextIndex = 0;
+      const worker = async () => {
+        while (nextIndex < count) {
+          const i = nextIndex++;
+          const snap = await getDoc(
+            doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", message.id, "chunks", `${i}`)
+          );
+          if (!snap.exists()) {
+            // Upload中などで未到着の場合は、今回は諦めてnull（点滅・再取得を避ける）
+            return false;
+          }
+          const data = snap.data()?.data || "";
+          if (!data) return false;
+          parts[i] = base64ToUint8Array(data);
+        }
+        return true;
+      };
+      const workers = [];
+      for (let i = 0; i < CONCURRENCY; i++) workers.push(worker());
+      const okList = await Promise.all(workers);
+      if (okList.some((x) => x === false)) return null;
     } else {
+      // 旧形式（index順のクエリ）。これも巨大base64連結を避ける
       const snap = await getDocs(
         query(
           collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", message.id, "chunks"),
           orderBy("index", "asc")
         )
       );
-      snap.forEach((d) => base64Data += d.data().data);
+      if (snap.empty) return null;
+      snap.forEach((d) => {
+        const data = d.data()?.data || "";
+        if (data) parts.push(base64ToUint8Array(data));
+      });
+      if (!parts.length) return null;
     }
-    if (!base64Data) return null;
-    const mimeType = message.mimeType || getDefaultMimeTypeByMessageType(message.type);
-    const byteCharacters = atob(base64Data);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
-    const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+    const blob = new Blob(parts, { type: mimeType });
     const objectUrl = URL.createObjectURL(blob);
     evictOldestMessageMediaCache();
     messageMediaUrlCache.set(cacheKey, objectUrl);
@@ -5053,48 +5055,6 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           }, 100);
         }
       }
-      
-// === Fast video delivery (Firebase Storage) ===
-// Firestore chunking makes video playback slow because receiver must rebuild Blob after downloading all chunks.
-// For videos, upload to Firebase Storage and store the download URL in the message document.
-if (file && type === "video") {
-  try {
-    const safeName = (file.name || "video").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
-    const path = `artifacts/${appId2}/public/data/chats/${activeChatId}/messages/${newMsgRef.id}/${Date.now()}_${user.uid}_${safeName}`;
-    const r = storageRef(storage, path);
-    const task = uploadBytesResumable(r, file, { contentType: file.type || "video/mp4" });
-    await new Promise((resolve, reject) => {
-      task.on(
-        "state_changed",
-        (snap) => {
-          const total = snap.totalBytes || file.size || 1;
-          const pct = Math.round(snap.bytesTransferred / total * 100);
-          setUploadProgressSafe(pct);
-        },
-        (err) => reject(err),
-        () => resolve(null)
-      );
-    });
-    const url = await getDownloadURL(task.snapshot.ref);
-    await updateDoc(newMsgRef, {
-      // keep message reloadable without chunk rebuild
-      content: url,
-      mediaUrl: url,
-      storagePath: path,
-      hasChunks: false,
-      chunkCount: 0,
-      isUploading: false
-    });
-    // prevent falling back to chunk upload
-    setUploadingSafe(false);
-    setUploadProgressSafe(100);
-    return;
-  } catch (e) {
-    console.error("Storage upload failed, falling back to chunk upload:", e);
-    // continue to existing chunk upload as fallback
-  }
-}
-
       let hasChunks = false, chunkCount = 0;
       if (file && file.size > CHUNK_SIZE) {
         hasChunks = true;
@@ -5134,13 +5094,24 @@ if (file && type === "video") {
           }
         }
         await Promise.all(executing);
-        await updateDoc(newMsgRef, {
-          hasChunks: true,
-          chunkCount,
-          // blob URL is session-local. Keep message reloadable from chunk docs.
-          content: previewData || "",
-          isUploading: false
-        });
+        // 送信者側では、アップロード完了後に hasChunks/chunkCount が付くことで
+// キャッシュキーが変わり、blob URL が消えて動画が再読み込み→点滅/待機になる。
+// ここで「完成後のキー」にも blob URL を登録して、即再生を維持する。
+if (localBlobUrl && file && type === "video") {
+  const finalKey = buildMessageMediaCacheKey(activeChatId, newMsgRef.id, chunkCount, file.type || "video/mp4", "video");
+  if (!messageMediaUrlCache.get(finalKey)) {
+    evictOldestMessageMediaCache();
+    messageMediaUrlCache.set(finalKey, localBlobUrl);
+    messageMediaUrlSet.add(localBlobUrl);
+  }
+}
+await updateDoc(newMsgRef, {
+  hasChunks: true,
+  chunkCount,
+  // blob URL is session-local. Keep message reloadable from chunk docs.
+  content: previewData || "",
+  isUploading: false
+});
       } else if (!hasChunks) {
         if (localBlobUrl && file) {
           const reader = new FileReader();
