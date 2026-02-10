@@ -1735,43 +1735,64 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         }
       };
       pc.ontrack = async (event) => {
-        const directStream = event.streams?.[0];
-        const stream = directStream || remoteStreamRef.current;
-        if (!directStream && event.track) {
-          const exists = stream.getTracks().some((track) => track.id === event.track.id);
-          if (!exists) stream.addTrack(event.track);
+        // 1. Refにある現在のストリームを取得
+        const currentStream = remoteStreamRef.current;
+
+        // 2. 受信したトラックをRefのストリームに確実に追加
+        if (event.track) {
+          if (!currentStream.getTracks().some((t) => t.id === event.track.id)) {
+            currentStream.addTrack(event.track);
+          }
         }
-        remoteStreamRef.current = stream;
+        
+        // 3. event.streamsがある場合、そこに含まれるトラックも漏らさず追加
+        if (event.streams && event.streams[0]) {
+          event.streams[0].getTracks().forEach((t) => {
+            if (!currentStream.getTracks().some((existing) => existing.id === t.id)) {
+              currentStream.addTrack(t);
+            }
+          });
+        }
+
+        // 4. Reactに検知させるため、完全に新しいMediaStreamインスタンスとして複製を作成
+        const newStreamInstance = new MediaStream(currentStream.getTracks());
+        
+        // 5. Stateを更新
+        setRemoteStream(newStreamInstance);
+
+        // 6. 【重要】Reactの再描画を待たず、強制的にvideo/audioタグへソースを適用する
+        // これにより、トラックが追加された瞬間に映像が出るようになります
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = newStreamInstance;
+        }
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = newStreamInstance;
+        }
+
+        // トラックの状態監視イベントを設定
         if (event.track) {
           event.track.onunmute = () => {
             if (!isMountedRef.current) return;
+            // アンミュート時も再度ソースを適用して再生を試みる
+            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = newStreamInstance;
+            if (remoteAudioRef.current) remoteAudioRef.current.srcObject = newStreamInstance;
             tryPlayRemoteMedia();
           };
-          event.track.onmute = () => {
-            const hasLiveVideo2 = stream.getVideoTracks().some((track) => track.readyState === "live");
-            hasRemoteVideoTrackRef.current = hasLiveVideo2;
-            setHasRemoteVideoTrack(hasLiveVideo2);
+          
+          const updateVideoStatus = () => {
+             const hasLive = newStreamInstance.getVideoTracks().some(t => t.readyState === "live");
+             hasRemoteVideoTrackRef.current = hasLive;
+             setHasRemoteVideoTrack(hasLive);
           };
-          event.track.onended = () => {
-            const hasLiveVideo2 = stream.getVideoTracks().some((track) => track.readyState === "live");
-            hasRemoteVideoTrackRef.current = hasLiveVideo2;
-            setHasRemoteVideoTrack(hasLiveVideo2);
-          };
+
+          event.track.onmute = updateVideoStatus;
+          event.track.onended = updateVideoStatus;
         }
-        const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState === "live");
+
+        const hasLiveVideo = newStreamInstance.getVideoTracks().some((track) => track.readyState === "live");
         hasRemoteVideoTrackRef.current = hasLiveVideo;
         setHasRemoteVideoTrack(hasLiveVideo);
-        
-        // 修正: ReactのuseEffectを発火させるため、新しいMediaStreamインスタンスとして複製を作成する
-        const newStream = new MediaStream(stream.getTracks());
-        setRemoteStream(newStream);
 
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = newStream;
-        }
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = newStream;
-        }
         const played = await tryPlayRemoteMedia();
         if (!played) {
           setTimeout(() => {
