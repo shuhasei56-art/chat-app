@@ -1935,17 +1935,16 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       cleanup();
       startedRef.current = false;
     };
+  // 1940行目付近にある useEffect の終わり方を確認
   }, [
-    chatId,
-    user,
-    isVideoEnabled,
-    sessionId,
-    isCallerProp,
-    callData,
-    cleanup,
-    safeEndCall,
+    activeCall, 
+    remoteStream, 
+    isMuted, 
+    isVideoOff, 
+    isScreenSharing, 
+    safeEndCall, 
     tryPlayRemoteMedia
-  ]);
+  ]); // 正しく配列を閉じ、useEffect の引数として完結させる
   useEffect(() => {
     if (remoteStream && remoteAudioRef.current) {
       remoteAudioRef.current.srcObject = remoteStream;
