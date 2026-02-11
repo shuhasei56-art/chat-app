@@ -85,13 +85,13 @@ const db = getFirestore(app);
 const appId = "messenger-app-v9-integrated";
 const CHUNK_SIZE = 740000;
 const getUploadConcurrency = () => {
-  const net = (navigator.connection && navigator.connection.effectiveType) || "";
+  const net = navigator.connection && navigator.connection.effectiveType || "";
   const hw = navigator.hardwareConcurrency || 8;
   let base = 12;
   if (net === "slow-2g" || net === "2g") base = 4;
   else if (net === "3g") base = 7;
   else if (net === "4g") base = 12;
-  if ((navigator.connection && navigator.connection.saveData)) base = Math.min(base, 6);
+  if (navigator.connection && navigator.connection.saveData) base = Math.min(base, 6);
   const hwBoost = Math.max(1, Math.min(10, Math.floor(hw / 2)));
   return Math.max(4, Math.min(28, base + hwBoost));
 };
@@ -225,7 +225,7 @@ const rtcConfig = {
 const buildRtcConfig = (preferRelay = false) => ({
   ...rtcConfig,
   // Use TURN relay on reconnect for long-distance / strict NAT when TURN is configured.
-  iceTransportPolicy: (forceRelayOnly || hasTurnConfig || (preferRelay && hasTurnConfig)) ? "relay" : "all"
+  iceTransportPolicy: (forceRelayOnly || hasTurnConfig || preferRelay && hasTurnConfig) ? "relay" : "all"
 });
 const formatTime = (timestamp) => {
   if (!timestamp) return "";
@@ -238,7 +238,7 @@ const hasTurnConfigured = () => {
     const urls = process.env.REACT_APP_TURN_URLS;
     const username = process.env.REACT_APP_TURN_USERNAME;
     const credential = process.env.REACT_APP_TURN_CREDENTIAL;
-    return !!(urls && username && credential);
+    return !!urls && username && credential;
   } catch {
     return false;
   }
@@ -677,7 +677,7 @@ const AuthView = ({ onLogin, showNotification }) => {
     return `${input.toLowerCase()}@voom-persistent.app`;
   };
   const getAuthErrorMessage = (error, mode = "login") => {
-    const code = (error && error.code) || "";
+    const code = error && error.code || "";
     if (code === "auth/invalid-email") return "ID形式が不正です。英数字と . _ - のみ使用できます。";
     if (code === "auth/user-not-found") return "このIDは登録されていません。";
     if (code === "auth/wrong-password" || code === "auth/invalid-credential" || code === "auth/invalid-login-credentials") return "IDまたはパスワードが違います。";
@@ -687,10 +687,10 @@ const AuthView = ({ onLogin, showNotification }) => {
     if (code === "auth/too-many-requests") return "試行回数が多すぎます。しばらく待ってから再試行してください。";
     if (code === "auth/network-request-failed") return "ネットワークエラーです。接続を確認して再試行してください。";
     if (code === "auth/operation-not-allowed") return "Firebase Authenticationでこのログイン方法が無効です。Sign-in method を有効化してください。";
-    return `${mode === "signup" ? "登録" : "ログイン"}に失敗しました: ${(error && error.message) || "不明なエラー"}`;
+    return `${mode === "signup" ? "登録" : "ログイン"}に失敗しました: ${error && error.message || "不明なエラー"}`;
   };
   const getGoogleLoginErrorMessage = (error) => {
-    const code = (error && error.code) || "";
+    const code = error && error.code || "";
     if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
       return "ポップアップがブロックされたため、リダイレクトでログインします。";
     }
@@ -703,7 +703,7 @@ const AuthView = ({ onLogin, showNotification }) => {
     if (code === "auth/operation-not-allowed") {
       return "FirebaseでGoogleログインが有効化されていません。Authentication > Sign-in method で有効にしてください。";
     }
-    return `Googleログインに失敗しました: ${(error && error.message) || "不明なエラー"}`;
+    return `Googleログインに失敗しました: ${error && error.message || "不明なエラー"}`;
   };
   const handleGoogleLogin = async () => {
     const googleProvider = new GoogleAuthProvider();
@@ -713,7 +713,7 @@ const AuthView = ({ onLogin, showNotification }) => {
       return;
     } catch (error) {
       console.error("Popup Login Error:", error);
-      const code = (error && error.code) || "";
+      const code = error && error.code || "";
       if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request" || code === "auth/operation-not-supported-in-this-environment") {
         try {
           showNotification("ポップアップが使えないため、リダイレクトでログインします。");
@@ -763,7 +763,7 @@ const AuthView = ({ onLogin, showNotification }) => {
           await signInWithEmailAndPassword(auth, email, password);
           showNotification("\u30ED\u30B0\u30A4\u30F3\u3057\u307E\u3057\u305F");
         } catch (loginError) {
-          const loginCode = (loginError && loginError.code) || "";
+          const loginCode = loginError && loginError.code || "";
           if (["auth/user-not-found", "auth/wrong-password", "auth/invalid-credential", "auth/invalid-login-credentials"].includes(loginCode)) {
             try {
               const methods = await fetchSignInMethodsForEmail(auth, email);
@@ -949,9 +949,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const qualityModeRef = useRef("auto");
   const audioPrefsRef = useRef({ noiseSuppression: true, echoCancellation: true, autoGainControl: true });
   const prevConnectedRef = useRef(false);
-  const sessionId = (callData && callData.sessionId) || "";
-  const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : (callData && callData.callerId) === user.uid;
-  const canSelectAudioOutput = typeof HTMLMediaElement !== "undefined" && typeof (HTMLMediaElement.prototype && HTMLMediaElement.prototype.setSinkId) === "function";
+  const sessionId = callData && callData.sessionId || "";
+  const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData && callData.callerId === user.uid;
+  const canSelectAudioOutput = typeof HTMLMediaElement !== "undefined" && typeof HTMLMediaElement.prototype && HTMLMediaElement.prototype.setSinkId === "function";
   const isIOSWebKit = (() => {
     const ua = navigator.userAgent || "";
     const iOS = /iP(hone|ad|od)/.test(ua) || navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
@@ -984,9 +984,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       return "none";
     };
     const match = (effects || []).find(
-      (e) => (e && e.name) === effectName && typeof (e && e.filter) === "string" && e.filter.trim() !== ""
+      (e) => e && e.name === effectName && typeof e && e.filter === "string" && e.filter.trim() !== ""
     );
-    if ((match && match.filter)) return sanitizeFilter(match.filter);
+    if (match && match.filter) return sanitizeFilter(match.filter);
     switch (effectName) {
       case "Sepia":
         return "sepia(100%)";
@@ -1017,7 +1017,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     onEndCallRef.current = onEndCall;
   }, [onEndCall]);
   const safeEndCall = useCallback((delay = 0) => {
-    const endCall = () => (onEndCallRef.current && onEndCallRef.current)();
+    const endCall = () => onEndCallRef.current && onEndCallRef.current();
     if (delay <= 0) {
       endCall();
       return;
@@ -1059,7 +1059,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   }, [remoteStream]);
   useEffect(() => {
     const md = navigator.mediaDevices;
-    if (!(md && md.enumerateDevices)) return;
+    if (!md && md.enumerateDevices) return;
     let cancelled = false;
     const loadOutputs = async () => {
       try {
@@ -1075,10 +1075,10 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       }
     };
     loadOutputs();
-    (md.addEventListener && md.addEventListener)("devicechange", loadOutputs);
+    md.addEventListener && md.addEventListener("devicechange", loadOutputs);
     return () => {
       cancelled = true;
-      (md.removeEventListener && md.removeEventListener)("devicechange", loadOutputs);
+      md.removeEventListener && md.removeEventListener("devicechange", loadOutputs);
     };
   }, [selectedAudioOutput]);
   useEffect(() => {
@@ -1117,7 +1117,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     };
     const stream = localStreamRef.current;
     const track = (stream && stream.getAudioTracks ? stream.getAudioTracks() : [])[0];
-    if (!(track && track.applyConstraints)) return;
+    if (!track && track.applyConstraints) return;
     track.applyConstraints({
       advanced: [
         {
@@ -1233,7 +1233,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     let videoFailed = false;
     const audioEl = remoteAudioRef.current;
     const videoEl = remoteVideoRef.current;
-    const mediaStream = (videoEl && videoEl.srcObject) || (audioEl && audioEl.srcObject) || remoteStreamRef.current || remoteStream;
+    const mediaStream = videoEl && videoEl.srcObject || audioEl && audioEl.srcObject || remoteStreamRef.current || remoteStream;
     const hasVideoTrack = hasRemoteVideoTrackRef.current || !!(mediaStream && mediaStream.getVideoTracks ? mediaStream.getVideoTracks() : []).some((track) => track.readyState === "live");
     const hasAudioTrack = !!(mediaStream && mediaStream.getAudioTracks ? mediaStream.getAudioTracks() : []).some((track) => track.readyState === "live");
     if (audioEl) {
@@ -1283,7 +1283,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     const becameConnected = isConnected && !prevConnectedRef.current;
     if (becameConnected) {
       if (playConnectSound) playNotificationSound();
-      if (vibrateOnConnect && navigator.vibrate) navigator.vibrate([120, 60, 120]);
+      if vibrateOnConnect && navigator.vibrate navigator.vibrate([120, 60, 120]);
       tryPlayRemoteMedia();
     }
     prevConnectedRef.current = isConnected;
@@ -1305,8 +1305,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       try {
         videoEl.srcObject = stream;
         videoEl.muted = true;
-        const p = (videoEl.play && videoEl.play)();
-        if ((p && p.catch)) p.catch(() => null);
+        const p = videoEl.play && videoEl.play();
+        if (p && p.catch) p.catch(() => null);
       } catch {
       }
     };
@@ -1445,7 +1445,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       autoSnapshotTimerRef.current = null;
     }
     if (wakeLockRef.current) {
-      (wakeLockRef.current.release && wakeLockRef.current.release)().catch(() => null);
+      wakeLockRef.current.release && wakeLockRef.current.release().catch(() => null);
       wakeLockRef.current = null;
     }
     try {
@@ -1500,7 +1500,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     }
   }, []);
   const getMediaErrorMessage = (err) => {
-    const name = (err && err.name) || "";
+    const name = err && err.name || "";
     if (name === "NotAllowedError" || name === "SecurityError") return "\u30AB\u30E1\u30E9/\u30DE\u30A4\u30AF\u306E\u5229\u7528\u304C\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002\u30D6\u30E9\u30A6\u30B6\u8A2D\u5B9A\u3067\u8A31\u53EF\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
     if (name === "NotFoundError") return "\u30AB\u30E1\u30E9\u307E\u305F\u306F\u30DE\u30A4\u30AF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002";
     if (name === "NotReadableError") return "\u30AB\u30E1\u30E9/\u30DE\u30A4\u30AF\u3092\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002\u4ED6\u306E\u30A2\u30D7\u30EA\u304C\u4F7F\u7528\u4E2D\u306E\u53EF\u80FD\u6027\u304C\u3042\u308A\u307E\u3059\u3002";
@@ -1549,7 +1549,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           callRef,
           {
             sessionId,
-            callerId: (callData && callData.callerId) || user.uid,
+            callerId: callData && callData.callerId || user.uid,
             callType: isVideoEnabled ? "video" : "audio",
             offer: { type: "offer", sdp: restartOffer.sdp },
             offerSdp: restartOffer.sdp,
@@ -1563,7 +1563,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       } finally {
         isRecoveringRef.current = false;
       }
-    }, [chatId, sessionId, isCaller, isVideoEnabled, (callData && callData.callerId), user.uid]);
+    }, [chatId, sessionId, isCaller, isVideoEnabled, callData && callData.callerId, user.uid]);
   useEffect(() => {
     isMountedRef.current = true;
     initAudioContext();
@@ -1574,16 +1574,16 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      if (!chatId || !(user && user.uid)) return;
+      if (!chatId || !user && user.uid) return;
       if (startedRef.current) return;
       startedRef.current = true;
-      const localIsCaller = typeof isCallerProp === "boolean" ? isCallerProp : (callData && callData.callerId) === user.uid;
+      const localIsCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData && callData.callerId === user.uid;
       if (!sessionId) {
         setCallError("\u901A\u8A71\u30BB\u30C3\u30B7\u30E7\u30F3\u304C\u7121\u52B9\u3067\u3059\u3002");
         safeEndCall(1500);
         return;
       }
-      if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+      if (!navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         setCallError("\u3053\u306E\u30D6\u30E9\u30A6\u30B6\u306F\u901A\u8A71\u306B\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u305B\u3093\u3002");
         safeEndCall(1500);
         return;
@@ -1596,7 +1596,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
 
       const pc = new RTCPeerConnection(buildRtcConfig(false));
       try { pc.addTransceiver("audio", { direction: "sendrecv" }); } catch (e) {}
-      const wantsVideo = ((callData && callData.callType) !== "audio");
+      const wantsVideo = (callData && callData.callType !== "audio");
       if (wantsVideo) { try { pc.addTransceiver("video", { direction: "sendrecv" }); } catch (e) {} }
       pcRef.current = pc;
 
@@ -1622,9 +1622,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         const senders = pcRef.current.getSenders();
         await Promise.all(
           senders.map(async (sender) => {
-            if (!(sender && sender.track)) return;
+            if (!sender && sender.track) return;
             const kind = sender.track.kind;
-            const params = (sender.getParameters && sender.getParameters)() || {};
+            const params = sender.getParameters && sender.getParameters() || {};
             if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
             try {
               if (kind === "video") {
@@ -1663,7 +1663,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           setNetworkQuality(level === "low" ? "poor" : level === "medium" ? "medium" : "good");
           applyAdaptiveProfile(getProfileByNetwork(level));
         } else {
-          const connType = (navigator.connection && navigator.connection.effectiveType) || "";
+          const connType = navigator.connection && navigator.connection.effectiveType || "";
           if (connType === "slow-2g" || connType === "2g") {
             setNetworkQuality("poor");
             applyAdaptiveProfile(getProfileByNetwork("poor"));
@@ -1717,7 +1717,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
 
       pc.ontrack = async (event) => {
         try {
-          const attachStream = (event.streams && event.streams)[0] || null;
+          const attachStream = event.streams && event.streams[0] || null;
           if (attachStream) remoteStreamRef.current = attachStream;
           if (attachStream && remoteVideoRef.current && remoteVideoRef.current.srcObject !== attachStream) {
             remoteVideoRef.current.srcObject = attachStream;
@@ -1727,7 +1727,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           }
         } catch {}
 
-        const directStream = (event.streams && event.streams)[0];
+        const directStream = event.streams && event.streams[0];
         const stream = directStream || remoteStreamRef.current;
         if (!directStream && event.track) {
           const exists = stream.getTracks().some((track) => track.id === event.track.id);
@@ -1832,7 +1832,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         if (!data) return;
         try {
           if (localIsCaller) {
-            const ans = (data.answer && data.answer.sdp) || data.answerSdp || "";
+            const ans = data.answer && data.answer.sdp || data.answerSdp || "";
             const canApplyAnswer = pc.signalingState === "have-local-offer";
             const hasNewAnswer = ans && ans !== lastRemoteAnswerSdpRef.current;
             if (hasNewAnswer && canApplyAnswer && !applyingRemoteAnswerRef.current) {
@@ -1847,7 +1847,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
               }
             }
           } else {
-            const off = (data.offer && data.offer.sdp) || data.offerSdp || "";
+            const off = data.offer && data.offer.sdp || data.offerSdp || "";
             const canApplyOffer = pc.signalingState === "stable";
             const hasNewOffer = off && off !== lastRemoteOfferSdpRef.current;
             if (hasNewOffer && canApplyOffer && !applyingRemoteOfferRef.current) {
@@ -1877,8 +1877,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
             }
           }
         } catch (e) {
-          const msg = (e && e.message) || "";
-          if ((e && e.name) === "InvalidStateError" && /wrong state:\s*stable/i.test(msg)) return;
+          const msg = e && e.message || "";
+          if (e && e.name === "InvalidStateError" && /wrong state:\s*stable/i.test(msg)) return;
           console.warn("Call signaling sync failed:", e);
         }
       });
@@ -1907,7 +1907,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
             callRef,
             {
               sessionId,
-              callerId: (callData && callData.callerId) || user.uid,
+              callerId: callData && callData.callerId || user.uid,
               callType: isVideoEnabled ? "video" : "audio",
               status: "accepted",
               offer: { type: "offer", sdp: offer.sdp },
@@ -1931,12 +1931,12 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       cleanup();
       startedRef.current = false;
     };
-  }, [chatId, (user && user.uid), isVideoEnabled, sessionId, isCallerProp, (callData && callData.callerId), cleanup, safeEndCall, tryPlayRemoteMedia]);
+  }, [chatId, user && user.uid, isVideoEnabled, sessionId, isCallerProp, callData && callData.callerId, cleanup, safeEndCall, tryPlayRemoteMedia]);
   useEffect(() => {
-    if (remoteStream && remoteAudioRef.current) {
+    if remoteStream && remoteAudioRef.current {
       remoteAudioRef.current.srcObject = remoteStream;
     }
-    if (remoteStream && remoteVideoRef.current) {
+    if remoteStream && remoteVideoRef.current {
       remoteVideoRef.current.srcObject = remoteStream;
     }
     const hasLiveVideo = (remoteStream && remoteStream.getVideoTracks ? remoteStream.getVideoTracks() : []).some((track) => track.readyState === "live") || false;
@@ -1953,15 +1953,15 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     const resume = () => {
       tryPlayRemoteMedia();
     };
-    (audioEl && audioEl.addEventListener)("loadedmetadata", resume);
-    (audioEl && audioEl.addEventListener)("canplay", resume);
-    (videoEl && videoEl.addEventListener)("loadedmetadata", resume);
-    (videoEl && videoEl.addEventListener)("canplay", resume);
+    audioEl && audioEl.addEventListener("loadedmetadata", resume);
+    audioEl && audioEl.addEventListener("canplay", resume);
+    videoEl && videoEl.addEventListener("loadedmetadata", resume);
+    videoEl && videoEl.addEventListener("canplay", resume);
     return () => {
-      (audioEl && audioEl.removeEventListener)("loadedmetadata", resume);
-      (audioEl && audioEl.removeEventListener)("canplay", resume);
-      (videoEl && videoEl.removeEventListener)("loadedmetadata", resume);
-      (videoEl && videoEl.removeEventListener)("canplay", resume);
+      audioEl && audioEl.removeEventListener("loadedmetadata", resume);
+      audioEl && audioEl.removeEventListener("canplay", resume);
+      videoEl && videoEl.removeEventListener("loadedmetadata", resume);
+      videoEl && videoEl.removeEventListener("canplay", resume);
     };
   }, [remoteStream, tryPlayRemoteMedia]);
   useEffect(() => {
@@ -2037,14 +2037,14 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     if (isRecordingCall || typeof MediaRecorder === "undefined") return;
     try {
       let recordStream = null;
-      if ((callStageRef.current && callStageRef.current.captureStream)) {
+      if (callStageRef.current && callStageRef.current.captureStream) {
         recordStream = callStageRef.current.captureStream(24);
       } else if ((remoteStreamRef.current && remoteStreamRef.current.getTracks ? remoteStreamRef.current.getTracks() : []).length) {
         recordStream = remoteStreamRef.current;
       }
       if (!recordStream || !recordStream.getTracks || recordStream.getTracks().length === 0) return;
       let recorder = null;
-      const supportedMime = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find((m) => (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported)(m));
+      const supportedMime = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find((m) => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m));
       try {
         recorder = supportedMime ? new MediaRecorder(recordStream, { mimeType: supportedMime }) : new MediaRecorder(recordStream);
       } catch {
@@ -2177,7 +2177,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     try {
       if (document.fullscreenElement) {
         await document.exitFullscreen();
-      } else if ((callStageRef.current && callStageRef.current.requestFullscreen)) {
+      } else if (callStageRef.current && callStageRef.current.requestFullscreen) {
         await callStageRef.current.requestFullscreen();
       }
     } catch (e) {
@@ -2212,9 +2212,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     try {
       if (!document.fullscreenElement) {
         const el = callStageRef.current || document.documentElement;
-        if ((el && el.requestFullscreen)) {
+        if (el && el.requestFullscreen) {
           await el.requestFullscreen();
-        } else if ((el && el.webkitRequestFullscreen)) {
+        } else if (el && el.webkitRequestFullscreen) {
           el.webkitRequestFullscreen();
         }
       }
@@ -2269,7 +2269,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       const ok = window.confirm("通話を終了しますか？");
       if (!ok) return;
     }
-    (onEndCall && onEndCall)();
+    onEndCall && onEndCall();
   };
   const resetAdvancedSettings = () => {
     setConfirmBeforeHangup(false);
@@ -2338,7 +2338,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   };
   const switchCameraFacing = async () => {
     if (!isVideoEnabled || isScreenSharing) return;
-    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) return;
+    if (!navigator.mediaDevices && navigator.mediaDevices.getUserMedia) return;
     setIsSwitchingCamera(true);
 
     const tryWithFacingMode = async (facingMode) => {
@@ -2389,14 +2389,14 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
 
       if (!facingModeLikelyWorked) {
         // enumerateDevices は「getUserMedia 後」にラベルが出るので、ここで呼ぶ
-        const devices = (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) ? await navigator.mediaDevices.enumerateDevices() : [];
+        const devices = navigator.mediaDevices && navigator.mediaDevices.enumerateDevices ? await navigator.mediaDevices.enumerateDevices() : [];
         const cams = devices.filter((d) => d.kind === "videoinput");
         availableVideoDevicesRef.current = cams;
 
         if (cams.length >= 2) {
           const idx = Math.max(0, cams.findIndex((d) => d.deviceId === currentDeviceId));
           const next = cams[(idx + 1) % cams.length];
-          if ((next && next.deviceId)) {
+          if (next && next.deviceId) {
             newTrack = await tryWithDeviceId(next.deviceId);
           }
         }
@@ -2438,7 +2438,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       video: videoConstraints
     });
     const cameraTrack = cameraStream.getVideoTracks()[0];
-    if ((cameraTrack && cameraTrack.getSettings)) {
+    if (cameraTrack && cameraTrack.getSettings) {
       const did = cameraTrack.getSettings().deviceId;
       if (did) currentVideoDeviceIdRef.current = did;
     }
@@ -2467,7 +2467,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   };
   const toggleScreenShare = async () => {
     // Allow screen sharing even when camera is OFF (video call only)
-    if (!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)) return;
+    if (!navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) return;
     if (isScreenSharing) {
       await stopScreenShare();
       return;
@@ -2764,7 +2764,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
               children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" })
             }),
             /* 画面共有（追加） */
-            isVideoEnabled && (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && /* @__PURE__ */ jsx("button", {
+            isVideoEnabled && navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia && /* @__PURE__ */ jsx("button", {
               onClick: toggleScreenShare,
               className: `w-14 h-14 rounded-full flex items-center justify-center transition active:scale-95 ${isScreenSharing ? "bg-blue-600 hover:bg-blue-500" : "bg-white/20 hover:bg-white/25"}`,
               title: isScreenSharing ? "画面共有停止" : "画面共有",
@@ -2998,7 +2998,7 @@ const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, sh
     /* @__PURE__ */ jsx("h3", { className: "font-bold text-lg mb-4 text-gray-800", children: "\u30B3\u30A4\u30F3\u3092\u9001\u308B" }),
     /* @__PURE__ */ jsxs("div", { className: "bg-yellow-50 p-4 rounded-2xl mb-4 border border-yellow-100", children: [
       /* @__PURE__ */ jsx("div", { className: "text-xs text-yellow-700 font-bold uppercase tracking-widest", children: "\u3042\u306A\u305F\u306E\u6B8B\u9AD8" }),
-      /* @__PURE__ */ jsx("div", { className: "text-3xl font-black text-yellow-500 mt-1", children: (myWallet && myWallet.toLocaleString)() })
+      /* @__PURE__ */ jsx("div", { className: "text-3xl font-black text-yellow-500 mt-1", children: myWallet && myWallet.toLocaleString() })
     ] }),
     /* @__PURE__ */ jsxs("p", { className: "text-sm font-bold text-gray-500 mb-2", children: [
       "To: ",
@@ -3059,14 +3059,14 @@ const StickerBuyModal = ({ onClose, onGoToStore, packId }) => {
 const GroupAddMemberModal = ({ onClose, currentMembers, chatId, allUsers, profile, user, chats, showNotification }) => {
   const [selected, setSelected] = useState([]);
   const inviteableFriends = useMemo(() => {
-    const candidateUids = new Set((profile && profile.friends) || []);
+    const candidateUids = new Set(profile && profile.friends || []);
     (chats || []).forEach((chat) => {
-      if ((chat && chat.isGroup) || !Array.isArray((chat && chat.participants)) || !chat.participants.includes(user.uid)) return;
+      if (chat && chat.isGroup || !Array.isArray(chat && chat.participants) || !chat.participants.includes(user.uid)) return;
       const otherUid = chat.participants.find((p) => p && p !== user.uid);
       if (otherUid) candidateUids.add(otherUid);
     });
-    return allUsers.filter((u) => (u && u.uid) && candidateUids.has(u.uid) && !currentMembers.includes(u.uid));
-  }, [allUsers, chats, currentMembers, (profile && profile.friends), user.uid]);
+    return allUsers.filter((u) => u && u.uid && candidateUids.has(u.uid) && !currentMembers.includes(u.uid));
+  }, [allUsers, chats, currentMembers, profile && profile.friends, user.uid]);
   const toggle = (uid) => setSelected((prev) => prev.includes(uid) ? prev.filter((i) => i !== uid) : [...prev, uid]);
   const handleInvite = async () => {
     if (selected.length === 0) return;
@@ -3231,13 +3231,13 @@ const LeaveGroupConfirmModal = ({ onClose, onLeave }) => /* @__PURE__ */ jsx("di
 ] }) });
 const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }) => {
   const caller = allUsers.find((u) => u.uid === callData.callerId);
-  const isVideo = (callData && callData.callType) !== "audio";
+  const isVideo = callData && callData.callType !== "audio";
   return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[500] bg-gray-900 flex flex-col items-center justify-between py-16 px-6 animate-in fade-in duration-300", children: [
     /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 z-0 overflow-hidden", children: [
       /* @__PURE__ */ jsx(
         "img",
         {
-          src: (caller && caller.avatar) || "https://api.dicebear.com/7.x/avataaars/svg?seed=caller",
+          src: caller && caller.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=caller",
           className: "w-full h-full object-cover blur-3xl opacity-50 scale-125",
           alt: "background"
         }
@@ -3250,7 +3250,7 @@ const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }) => {
           /* @__PURE__ */ jsx(PhoneCall, { className: "w-5 h-5 animate-pulse" }),
           /* @__PURE__ */ jsx("span", { className: "text-sm font-bold tracking-widest", children: "\u7740\u4FE1\u4E2D..." })
         ] }),
-        /* @__PURE__ */ jsx("h2", { className: "text-4xl font-bold text-white drop-shadow-xl text-center leading-tight", children: (caller && caller.name) || "Unknown" }),
+        /* @__PURE__ */ jsx("h2", { className: "text-4xl font-bold text-white drop-shadow-xl text-center leading-tight", children: caller && caller.name || "Unknown" }),
         /* @__PURE__ */ jsx("div", { className: "text-white/70 text-sm font-bold mt-1", children: isVideo ? "\u30D3\u30C7\u30AA\u901A\u8A71" : "\u97F3\u58F0\u901A\u8A71" })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "relative mt-8", children: [
@@ -3259,7 +3259,7 @@ const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }) => {
         /* @__PURE__ */ jsx(
           "img",
           {
-            src: (caller && caller.avatar) || "https://api.dicebear.com/7.x/avataaars/svg?seed=caller",
+            src: caller && caller.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=caller",
             className: "w-40 h-40 rounded-full border-[6px] border-white/20 shadow-2xl object-cover relative z-10 bg-gray-800"
           }
         )
@@ -3306,11 +3306,11 @@ const CallAcceptedOverlay = ({ callData, onJoin }) => /* @__PURE__ */ jsx("div",
   ] })
 ] }) });
 const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, myProfile, allUsers, showNotification }) => {
-  const myFriends = (myProfile && myProfile.friends) || [];
+  const myFriends = myProfile && myProfile.friends || [];
   const myFriendsSet = useMemo(() => new Set(myFriends), [myFriends]);
-  const friendFriends = (friend && friend.friends) || [];
-  const isFriend = myFriendsSet.has((friend && friend.uid));
-  const isHidden = ((myProfile && myProfile.hiddenFriends) || []).includes((friend && friend.uid));
+  const friendFriends = friend && friend.friends || [];
+  const isFriend = myFriendsSet.has(friend && friend.uid);
+  const isHidden = (myProfile && myProfile.hiddenFriends || []).includes(friend && friend.uid);
   const mutualCount = useMemo(() => {
     let n = 0;
     for (const uid of friendFriends) {
@@ -3328,23 +3328,23 @@ const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, m
     return n;
   }, [friendFriends, myFriendsSet, myUid]);
   const toggleHideFriend = async () => {
-    if (!myUid || !(friend && friend.uid)) return;
+    if (!myUid || !friend && friend.uid) return;
     if (!isFriend) return;
     try {
       const userRef = doc(db, "artifacts", appId, "public", "data", "users", myUid);
       if (isHidden) {
         await updateDoc(userRef, { hiddenFriends: arrayRemove(friend.uid) });
-        (showNotification && showNotification)("\u975E\u8868\u793A\u3092\u89E3\u9664\u3057\u307E\u3057\u305F");
+        showNotification && showNotification("\u975E\u8868\u793A\u3092\u89E3\u9664\u3057\u307E\u3057\u305F");
       } else {
         const ok = window.confirm("\u3053\u306E\u53CB\u3060\u3061\u3092\u975E\u8868\u793A\u306B\u3057\u307E\u3059\u304B\uFF1F\n\uFF08\u53CB\u3060\u3061\u95A2\u4FC2\u306F\u89E3\u9664\u3055\u308C\u307E\u305B\u3093\uFF09");
         if (!ok) return;
         await updateDoc(userRef, { hiddenFriends: arrayUnion(friend.uid) });
-        (showNotification && showNotification)("\u975E\u8868\u793A\u306B\u3057\u307E\u3057\u305F");
+        showNotification && showNotification("\u975E\u8868\u793A\u306B\u3057\u307E\u3057\u305F");
       }
-      (onClose && onClose)();
+      onClose && onClose();
     } catch (e) {
       console.error(e);
-      (showNotification && showNotification)("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
+      showNotification && showNotification("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
     }
   };
   return /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-[40px] overflow-hidden shadow-2xl relative flex flex-col items-center pb-8", children: [
@@ -3376,8 +3376,8 @@ const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, m
         "button",
         {
           onClick: () => {
-            (onStartChat && onStartChat)(friend.uid);
-            (onClose && onClose)();
+            onStartChat && onStartChat(friend.uid);
+            onClose && onClose();
           },
           className: "flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2",
           children: [
@@ -3418,8 +3418,8 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
   const [showMenu, setShowMenu] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
   const [forceChunkLoad, setForceChunkLoad] = useState(false);
-  const isInvalidBlob = !isMe && (m.content && m.content.startsWith)("blob:");
-  const hasLocalBlobContent = isMe && (m.content && m.content.startsWith)("blob:");
+  const isInvalidBlob = !isMe && m.content && m.content.startsWith("blob:");
+  const hasLocalBlobContent = isMe && m.content && m.content.startsWith("blob:");
   const shouldLoadFromChunks = m.hasChunks && (!hasLocalBlobContent || forceChunkLoad);
   useEffect(() => {
     if (!forceChunkLoad && m.hasChunks && isMe) {
@@ -3502,11 +3502,11 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
     if (m.audio) {
       new Audio(m.audio).play().catch((e2) => console.error("Audio playback error:", e2));
     }
-    if (onStickerClick && m.packId) {
+    if onStickerClick && m.packId {
       onStickerClick(m.packId);
     }
   };
-  const readCount = ((m.readBy && m.readBy.length) || 1) - 1;
+  const readCount = (m.readBy && m.readBy.length || 1) - 1;
   const finalSrc = m.type === "video" ? mediaSrc : mediaSrc || m.preview;
   const isShowingPreview = loading || isInvalidBlob || finalSrc === m.preview;
   const handleBubbleClick = (e) => {
@@ -3522,7 +3522,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
       if (part.match(/^https?:\/\//)) return /* @__PURE__ */ jsx("a", { href: part, target: "_blank", rel: "noopener noreferrer", className: "text-blue-600 underline break-all", onClick: (e) => e.stopPropagation(), children: part }, i);
       if (part.startsWith("@")) {
         const name = part.substring(1);
-        const mentionedUser = (usersByName && usersByName.get)(name);
+        const mentionedUser = usersByName && usersByName.get(name);
         if (mentionedUser) return /* @__PURE__ */ jsx("span", { className: "text-blue-500 font-bold cursor-pointer hover:underline bg-blue-50 px-1 rounded", onClick: (e) => {
           e.stopPropagation();
           onShowProfile && onShowProfile(mentionedUser);
@@ -3543,11 +3543,11 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
       e.stopPropagation();
       onShowProfile && onShowProfile(sender);
     }, children: [
-      !avatarError && (sender && sender.avatar) ? /* @__PURE__ */ jsx("img", { src: (sender && sender.avatar), className: "w-9 h-9 rounded-2xl object-cover border border-gray-200", loading: "lazy", onError: () => setAvatarError(true) }, (sender && sender.avatar)) : /* @__PURE__ */ jsx("div", { className: "w-9 h-9 rounded-2xl bg-[#7a54c5] text-white text-lg leading-none font-medium flex items-center justify-center", children: ((sender && sender.name) || (sender && sender.id) || "h").trim().charAt(0).toLowerCase() || "h" }),
-      isTodayBirthday((sender && sender.birthday)) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-[8px]", children: "\u{1F382}" })
+      !avatarError && sender && sender.avatar ? /* @__PURE__ */ jsx("img", { src: sender && sender.avatar, className: "w-9 h-9 rounded-2xl object-cover border border-gray-200", loading: "lazy", onError: () => setAvatarError(true) }, sender && sender.avatar) : /* @__PURE__ */ jsx("div", { className: "w-9 h-9 rounded-2xl bg-[#7a54c5] text-white text-lg leading-none font-medium flex items-center justify-center", children: (sender && sender.name || sender && sender.id || "h").trim().charAt(0).toLowerCase() || "h" }),
+      isTodayBirthday(sender && sender.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-[8px]", children: "\u{1F382}" })
     ] }),
     /* @__PURE__ */ jsxs("div", { className: `flex flex-col ${isMe ? "items-end" : "items-start"} max-w-[75%]`, children: [
-      !isMe && isGroup && /* @__PURE__ */ jsx("div", { className: "text-[9px] text-gray-600 font-bold mb-1 ml-1 cursor-pointer hover:underline", onClick: () => onShowProfile && onShowProfile(sender), children: (sender && sender.name) }),
+      !isMe && isGroup && /* @__PURE__ */ jsx("div", { className: "text-[9px] text-gray-600 font-bold mb-1 ml-1 cursor-pointer hover:underline", onClick: () => onShowProfile && onShowProfile(sender), children: sender && sender.name }),
       /* @__PURE__ */ jsx("div", { className: "relative", children: /* @__PURE__ */ jsxs("div", { onClick: handleBubbleClick, className: `p-1.5 px-2.5 rounded-[18px] text-[11px] shadow-sm relative cursor-pointer ${m.type === "sticker" ? "bg-transparent shadow-none p-0" : isMe ? "bg-[#76ff03] text-black" : "bg-white text-black"} ${["image", "video", "call_invite"].includes(m.type) ? "p-0 bg-transparent shadow-none" : ""}`, children: [
         m.replyTo && m.type !== "sticker" && /* @__PURE__ */ jsxs("div", { className: `mb-2 p-2 rounded-lg border-l-4 text-xs opacity-70 ${isMe ? "bg-black/5 border-white/50" : "bg-gray-100 border-gray-300"}`, children: [
           /* @__PURE__ */ jsx("div", { className: "font-bold text-[10px] mb-0.5", children: m.replyTo.senderName }),
@@ -3594,7 +3594,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
               /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-8 h-8 text-green-500" }),
               /* @__PURE__ */ jsx("span", { className: "text-[10px] text-gray-500 font-bold", children: "\u52D5\u753B\u3092\u53D7\u4FE1\u4E2D..." })
             ] }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy", onError: () => {
-              if (hasLocalBlobContent && m.hasChunks) setForceChunkLoad(true);
+              if hasLocalBlobContent && m.hasChunks setForceChunkLoad(true);
             } }),
             m.type === "video" && !isShowingPreview && !finalSrc && /* @__PURE__ */ jsx("div", { className: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none", children: /* @__PURE__ */ jsx("div", { className: "bg-black/30 rounded-full p-2 backdrop-blur-sm", children: /* @__PURE__ */ jsx(Play, { className: "w-8 h-8 text-white fill-white opacity-90" }) }) }),
             isShowingPreview && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-2 right-2 bg-black/60 text-white text-[9px] px-2 py-0.5 rounded-full backdrop-blur-md flex items-center gap-1", children: [
@@ -3680,7 +3680,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
           ] })
         ] })
       ] }) }),
-      m.reactions && Object.keys(m.reactions).some((k) => m.reactions[(k] && k].length) > 0) && /* @__PURE__ */ jsx("div", { className: `flex flex-wrap gap-1 mt-1 ${isMe ? "justify-end" : "justify-start"}`, children: Object.entries(m.reactions).map(([emoji, uids]) => (uids && uids.length) > 0 && /* @__PURE__ */ jsxs("button", { onClick: () => onReaction(m.id, emoji), title: getUserNames(uids), className: `flex items-center gap-1 px-2 py-1 rounded-full text-xs shadow-sm border transition-all hover:scale-105 active:scale-95 ${uids.includes(user.uid) ? "bg-white border-green-500 text-green-600 ring-1 ring-green-100" : "bg-white border-gray-100 text-gray-600"}`, children: [
+      m.reactions && Object.keys(m.reactions).some((k) => m.reactions[(k] && k].length) > 0) && /* @__PURE__ */ jsx("div", { className: `flex flex-wrap gap-1 mt-1 ${isMe ? "justify-end" : "justify-start"}`, children: Object.entries(m.reactions).map(([emoji, uids]) => uids && uids.length > 0 && /* @__PURE__ */ jsxs("button", { onClick: () => onReaction(m.id, emoji), title: getUserNames(uids), className: `flex items-center gap-1 px-2 py-1 rounded-full text-xs shadow-sm border transition-all hover:scale-105 active:scale-95 ${uids.includes(user.uid) ? "bg-white border-green-500 text-green-600 ring-1 ring-green-100" : "bg-white border-gray-100 text-gray-600"}`, children: [
         /* @__PURE__ */ jsx("span", { className: "text-sm", children: emoji }),
         /* @__PURE__ */ jsx("span", { className: "font-bold text-[10px]", children: uids.length })
       ] }, emoji)) }),
@@ -3694,7 +3694,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
 const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, showNotification = () => {} }) => {
   const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [postPreview, setPostPreview] = useState(null);
-  const u = allUsers.find((x) => x.uid === post.userId), isLiked = (post.likes && post.likes.includes)((user && user.uid));
+  const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes && post.likes.includes(user && user.uid);
   const isMe = post.userId === user.uid;
   const handleDeletePost = useCallback(async () => {
     try {
@@ -3776,10 +3776,10 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, showN
   return /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2 border-b", children: [
     /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
       /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-        /* @__PURE__ */ jsx("img", { src: (u && u.avatar), className: "w-10 h-10 rounded-xl border", loading: "lazy" }, (u && u.avatar)),
-        isTodayBirthday((u && u.birthday)) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
+        /* @__PURE__ */ jsx("img", { src: u && u.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u && u.avatar),
+        isTodayBirthday(u && u.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
       ] }),
-      /* @__PURE__ */ jsxs("div", { className: "flex-1 flex items-center justify-between", children: [/* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: (u && u.name) }), isMe && /* @__PURE__ */ jsx("button", { onClick: handleDeletePost, className: "text-xs px-3 py-1 rounded-full bg-red-500/10 text-red-600 border border-red-500/20", children: "削除" })] })
+      /* @__PURE__ */ jsxs("div", { className: "flex-1 flex items-center justify-between", children: [/* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u && u.name }), isMe && /* @__PURE__ */ jsx("button", { onClick: handleDeletePost, className: "text-xs px-3 py-1 rounded-full bg-red-500/10 text-red-600 border border-red-500/20", children: "削除" })] })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
     (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
@@ -3792,14 +3792,14 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, showN
     /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-6 py-2 border-y mb-3", children: [
       /* @__PURE__ */ jsxs("button", { onClick: toggleLike, className: "flex items-center gap-1.5", children: [
         /* @__PURE__ */ jsx(Heart, { className: `w-5 h-5 ${isLiked ? "fill-red-500 text-red-500" : "text-gray-400"}` }),
-        /* @__PURE__ */ jsx("span", { className: "text-xs", children: (post.likes && post.likes.length) || 0 })
+        /* @__PURE__ */ jsx("span", { className: "text-xs", children: post.likes && post.likes.length || 0 })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5 text-gray-400", children: [
         /* @__PURE__ */ jsx(MessageCircle, { className: "w-5 h-5" }),
-        /* @__PURE__ */ jsx("span", { className: "text-xs", children: (post.comments && post.comments.length) || 0 })
+        /* @__PURE__ */ jsx("span", { className: "text-xs", children: post.comments && post.comments.length || 0 })
       ] })
     ] }),
-    /* @__PURE__ */ jsx("div", { className: "space-y-3 mb-4", children: (post.comments && post.comments.map)((c, i) => /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-3 py-2", children: [
+    /* @__PURE__ */ jsx("div", { className: "space-y-3 mb-4", children: post.comments && post.comments.map((c, i) => /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-3 py-2", children: [
       /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-500", children: c.userName }),
       /* @__PURE__ */ jsx("div", { className: "text-xs", children: c.text })
     ] }, i)) }),
@@ -3818,11 +3818,11 @@ const GroupCreateView = ({ user, profile, allUsers, chats, setView, showNotifica
   const [groupIcon, setGroupIcon] = useState("https://api.dicebear.com/7.x/shapes/svg?seed=group");
   const [selectedMembers, setSelectedMembers] = useState([]);
   const friendsList = useMemo(() => {
-    const rawFriends = (profile && profile.friends) || [];
-    const hiddenSet = new Set((profile && profile.hiddenFriends) || []);
+    const rawFriends = profile && profile.friends || [];
+    const hiddenSet = new Set(profile && profile.hiddenFriends || []);
     const friendKeySet = new Set(rawFriends);
     (chats || []).forEach((chat) => {
-      if ((chat && chat.isGroup) || !Array.isArray((chat && chat.participants)) || !chat.participants.includes(user.uid)) return;
+      if (chat && chat.isGroup || !Array.isArray(chat && chat.participants) || !chat.participants.includes(user.uid)) return;
       const otherUid = chat.participants.find((p) => p && p !== user.uid);
       if (otherUid) friendKeySet.add(otherUid);
     });
@@ -3830,12 +3830,12 @@ const GroupCreateView = ({ user, profile, allUsers, chats, setView, showNotifica
     const byId = allUsers.filter((u) => friendKeySet.has(u.id));
     const merged = [...byUid, ...byId].filter((u) => u.uid && u.uid !== user.uid && !hiddenSet.has(u.uid));
     return Array.from(new Map(merged.map((u) => [u.uid, u])).values());
-  }, [allUsers, chats, (profile && profile.friends), (profile && profile.hiddenFriends), user.uid]);
+  }, [allUsers, chats, profile && profile.friends, profile && profile.hiddenFriends, user.uid]);
   const toggleMember = (uid) => {
     setSelectedMembers((prev) => prev.includes(uid) ? prev.filter((id) => id !== uid) : [...prev, uid]);
   };
   const handleCreate = async () => {
-    if ((profile && profile.isBanned)) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
+    if (profile && profile.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     if (!groupName.trim()) return showNotification("\u30B0\u30EB\u30FC\u30D7\u540D\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
     if (selectedMembers.length === 0) return showNotification("\u30E1\u30F3\u30D0\u30FC\u3092\u9078\u629E\u3057\u3066\u304F\u3060\u3055\u3044");
     const participants = Array.from(new Set([user.uid, ...selectedMembers]));
@@ -3884,7 +3884,7 @@ const BirthdayCardBox = ({ user, setView }) => {
     const q = query(collection(db, "artifacts", appId, "public", "data", "birthday_cards"), where("toUserId", "==", user.uid));
     const unsub = onSnapshot(q, (snap) => {
       const cards = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      cards.sort((a, b) => ((b.createdAt && b.createdAt.toDate) ? b.createdAt.toDate().getTime() : 0) - ((a.createdAt && a.createdAt.toDate) ? a.createdAt.toDate().getTime() : 0));
+      cards.sort((a, b) => (b.createdAt && b.createdAt.toDate ? b.createdAt.toDate().getTime() : 0) - (a.createdAt && a.createdAt.toDate ? a.createdAt.toDate().getTime() : 0));
       setMyCards(cards);
     });
     return () => unsub();
@@ -4016,8 +4016,8 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
   };
   const clearCanvas = () => {
     const canvas = canvasRef.current;
-    const ctx = (canvas && canvas.getContext)("2d");
-    if (ctx && canvas) {
+    const ctx = canvas && canvas.getContext("2d");
+    if ctx && canvas {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       setTextObjects([]);
@@ -4036,7 +4036,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
     setDraggingTextId(id);
   };
   const handleContainerMouseMove = (e) => {
-    if (draggingTextId && containerRef.current) {
+    if draggingTextId && containerRef.current {
       const rect = containerRef.current.getBoundingClientRect();
       const x = (e.clientX || e.touches[0].clientX) - rect.left;
       const y = (e.clientY || e.touches[0].clientY) - rect.top;
@@ -4053,8 +4053,8 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
       const img = new Image();
       img.onload = () => {
         const canvas = canvasRef.current;
-        const ctx = (canvas && canvas.getContext)("2d");
-        if (ctx && canvas) {
+        const ctx = canvas && canvas.getContext("2d");
+        if ctx && canvas {
           let width = img.width;
           let height = img.height;
           const maxSize = 250;
@@ -4113,14 +4113,14 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
     }
   };
   const stopStickerRecording = () => {
-    if (stickerMediaRecorderRef.current && isRecordingSticker) {
+    if stickerMediaRecorderRef.current && isRecordingSticker {
       stickerMediaRecorderRef.current.stop();
       setIsRecordingSticker(false);
     }
   };
   const cutShape = (shape) => {
     const canvas = canvasRef.current;
-    const ctx = (canvas && canvas.getContext)("2d");
+    const ctx = canvas && canvas.getContext("2d");
     if (!canvas || !ctx) return;
     const width = canvas.width;
     const height = canvas.height;
@@ -4174,7 +4174,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
   const applyFreehandCut = () => {
     if (cutPoints.length < 3 || !cuttingSnapshotRef.current) return;
     const canvas = canvasRef.current;
-    const ctx = (canvas && canvas.getContext)("2d");
+    const ctx = canvas && canvas.getContext("2d");
     if (!canvas || !ctx) return;
     const width = canvas.width;
     const height = canvas.height;
@@ -4201,7 +4201,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
       return;
     }
     const canvas = canvasRef.current;
-    const ctx = (canvas && canvas.getContext)("2d");
+    const ctx = canvas && canvas.getContext("2d");
     if (!canvas || !ctx) return;
     ctx.save();
     ctx.textAlign = "center";
@@ -4218,12 +4218,12 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
     showNotification("\u30D1\u30C3\u30AF\u306B\u8FFD\u52A0\u3057\u307E\u3057\u305F");
   };
   const submitPack = async () => {
-    if ((profile && profile.isBanned)) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
+    if (profile && profile.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     if (!packName.trim()) return showNotification("\u30D1\u30C3\u30AF\u540D\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
     if (createdStickers.length === 0) return showNotification("\u30B9\u30BF\u30F3\u30D7\u304C\u3042\u308A\u307E\u305B\u3093");
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, "artifacts", appId, "public", "data", "sticker_packs"), { authorId: user.uid, authorName: (profile && profile.name) || user.displayName || "Creator", name: packName, description: packDescription, stickers: createdStickers, price: 100, status: "pending", purchasedBy: [], createdAt: serverTimestamp() });
+      await addDoc(collection(db, "artifacts", appId, "public", "data", "sticker_packs"), { authorId: user.uid, authorName: profile && profile.name || user.displayName || "Creator", name: packName, description: packDescription, stickers: createdStickers, price: 100, status: "pending", purchasedBy: [], createdAt: serverTimestamp() });
       showNotification("\u7533\u8ACB\u3057\u307E\u3057\u305F\uFF01\u627F\u8A8D\u3055\u308C\u308B\u3068\u5831\u916C\u304C\u3082\u3089\u3048\u307E\u3059");
       onClose();
     } catch (e) {
@@ -4380,8 +4380,8 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       const unsub = onSnapshot(q, (snap) => {
         const fetchedPacks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         fetchedPacks.sort((a, b) => {
-          const tA = (a.createdAt && a.createdAt.toDate) ? a.createdAt.toDate().getTime() : (a.createdAt && a.createdAt.seconds) * 1e3 || 0;
-          const tB = (b.createdAt && b.createdAt.toDate) ? b.createdAt.toDate().getTime() : (b.createdAt && b.createdAt.seconds) * 1e3 || 0;
+          const tA = a.createdAt && a.createdAt.toDate ? a.createdAt.toDate().getTime() : a.createdAt && a.createdAt.seconds * 1e3 || 0;
+          const tB = b.createdAt && b.createdAt.toDate ? b.createdAt.toDate().getTime() : b.createdAt && b.createdAt.seconds * 1e3 || 0;
           return tB - tA;
         });
         setPacks(fetchedPacks);
@@ -4411,8 +4411,8 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
           ...d.data()
         }));
         items.sort((a, b) => {
-          const tA = (a.listedAt && a.listedAt.toDate) ? a.listedAt.toDate().getTime() : (a.listedAt && a.listedAt.seconds) * 1e3 || (a.updatedAt && a.updatedAt.seconds) * 1e3 || 0;
-          const tB = (b.listedAt && b.listedAt.toDate) ? b.listedAt.toDate().getTime() : (b.listedAt && b.listedAt.seconds) * 1e3 || (b.updatedAt && b.updatedAt.seconds) * 1e3 || 0;
+          const tA = a.listedAt && a.listedAt.toDate ? a.listedAt.toDate().getTime() : a.listedAt && a.listedAt.seconds * 1e3 || a.updatedAt && a.updatedAt.seconds * 1e3 || 0;
+          const tB = b.listedAt && b.listedAt.toDate ? b.listedAt.toDate().getTime() : b.listedAt && b.listedAt.seconds * 1e3 || b.updatedAt && b.updatedAt.seconds * 1e3 || 0;
           return tB - tA;
         });
         setPublicMarketEffects(items);
@@ -4426,8 +4426,8 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     const unsubMine = onSnapshot(qMine, (snap) => {
       const mine = snap.docs.map((d) => ({ id: d.id, ref: d.ref, ...d.data() }));
       mine.sort((a, b) => {
-        const tA = (a.createdAt && a.createdAt.toDate) ? a.createdAt.toDate().getTime() : (a.createdAt && a.createdAt.seconds) * 1e3 || 0;
-        const tB = (b.createdAt && b.createdAt.toDate) ? b.createdAt.toDate().getTime() : (b.createdAt && b.createdAt.seconds) * 1e3 || 0;
+        const tA = a.createdAt && a.createdAt.toDate ? a.createdAt.toDate().getTime() : a.createdAt && a.createdAt.seconds * 1e3 || 0;
+        const tB = b.createdAt && b.createdAt.toDate ? b.createdAt.toDate().getTime() : b.createdAt && b.createdAt.seconds * 1e3 || 0;
         return tB - tA;
       });
       setMyEffects(mine);
@@ -4449,7 +4449,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     let cancelled = false;
     const loadFallbackMarket = async () => {
       try {
-        const targets = (allUsers || []).map((u) => (u && u.uid)).filter((uid) => !!uid);
+        const targets = (allUsers || []).map((u) => u && u.uid).filter((uid) => !!uid);
         const results = await Promise.all(
           targets.map(async (uid) => {
             const q = query(collection(db, "artifacts", appId, "public", "data", "users", uid, "effects"), where("forSale", "==", true));
@@ -4468,8 +4468,8 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
         if (cancelled) return;
         const items = results.flat();
         items.sort((a, b) => {
-          const tA = (a.listedAt && a.listedAt.toDate) ? a.listedAt.toDate().getTime() : (a.listedAt && a.listedAt.seconds) * 1e3 || (a.updatedAt && a.updatedAt.seconds) * 1e3 || 0;
-          const tB = (b.listedAt && b.listedAt.toDate) ? b.listedAt.toDate().getTime() : (b.listedAt && b.listedAt.seconds) * 1e3 || (b.updatedAt && b.updatedAt.seconds) * 1e3 || 0;
+          const tA = a.listedAt && a.listedAt.toDate ? a.listedAt.toDate().getTime() : a.listedAt && a.listedAt.seconds * 1e3 || a.updatedAt && a.updatedAt.seconds * 1e3 || 0;
+          const tB = b.listedAt && b.listedAt.toDate ? b.listedAt.toDate().getTime() : b.listedAt && b.listedAt.seconds * 1e3 || b.updatedAt && b.updatedAt.seconds * 1e3 || 0;
           return tB - tA;
         });
         setFallbackMarketEffects(items);
@@ -4494,14 +4494,14 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     };
     const map = /* @__PURE__ */ new Map();
     const push = (effect) => {
-      const shouldShow = (effect && effect.forSale) !== false && Number((effect && effect.price) || 0) > 0;
+      const shouldShow = effect && effect.forSale !== false && Number(effect && effect.price || 0) > 0;
       if (!shouldShow) return;
       const refPath = (effect && (effect.ref) && effect.ref).path);
-      const key = (effect && effect._key) || refPath || (effect && effect.id);
+      const key = effect && effect._key || refPath || effect && effect.id;
       if (!key) return;
-      const inferredSellerId = (effect && effect.creatorId) || (effect && effect.ownerId) || getEffectOwnerUidFromRefPath(refPath);
+      const inferredSellerId = effect && effect.creatorId || effect && effect.ownerId || getEffectOwnerUidFromRefPath(refPath);
       if (!inferredSellerId) return;
-      const normalized = { ...effect, _key: key, creatorId: inferredSellerId, ownerId: (effect && effect.ownerId) || inferredSellerId };
+      const normalized = { ...effect, _key: key, creatorId: inferredSellerId, ownerId: effect && effect.ownerId || inferredSellerId };
       if (!map.has(key)) map.set(key, normalized);
     };
     publicMarketEffects.forEach(push);
@@ -4517,7 +4517,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     return list;
   }, [marketEffects, myEffects, publicMarketEffects, fallbackMarketEffects]);
   const handleBuyEffect = async (effect) => {
-    if ((profile && profile.isBanned)) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
+    if (profile && profile.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     if ((profile.wallet || 0) < effect.price) {
       showNotification("\u30B3\u30A4\u30F3\u304C\u8DB3\u308A\u307E\u305B\u3093");
       return;
@@ -4545,9 +4545,9 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     }
   };
   const handleBuyMarketEffect = async (effect) => {
-    if ((profile && profile.isBanned)) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
-    const price = Number((effect && effect.price) || 0);
-    const sellerId = (effect && effect.creatorId) || (effect && effect.ownerId) || getEffectOwnerUidFromRefPath((effect && (effect.ref) && effect.ref).path));
+    if (profile && profile.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
+    const price = Number(effect && effect.price || 0);
+    const sellerId = effect && effect.creatorId || effect && effect.ownerId || getEffectOwnerUidFromRefPath((effect && (effect.ref) && effect.ref).path));
     if (!sellerId) {
       showNotification("\u8CA9\u58F2\u8005\u60C5\u5831\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
       return;
@@ -4597,31 +4597,31 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
           purchasedAt: serverTimestamp(),
           createdAt: serverTimestamp()
         });
-        if ((effect && effect.sourceRefPath)) {
+        if (effect && effect.sourceRefPath) {
           t.update(doc(db, effect.sourceRefPath), { soldCount: increment(1) });
         }
-        if ((effect && effect.marketRefPath)) {
+        if (effect && effect.marketRefPath) {
           t.update(doc(db, effect.marketRefPath), { soldCount: increment(1) });
-        } else if ((effect && effect.ref)) {
+        } else if (effect && effect.ref) {
           t.update(effect.ref, { soldCount: increment(1) });
         }
       });
       showNotification(`${effect.name}\u3092\u8CFC\u5165\u3057\u307E\u3057\u305F\uFF01`);
     } catch (e) {
       console.error(e);
-      showNotification((e && e.message) === "NOT_ENOUGH" ? "\u30B3\u30A4\u30F3\u304C\u8DB3\u308A\u307E\u305B\u3093" : "\u8CFC\u5165\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+      showNotification(e && e.message === "NOT_ENOUGH" ? "\u30B3\u30A4\u30F3\u304C\u8DB3\u308A\u307E\u305B\u3093" : "\u8CFC\u5165\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
     } finally {
       setPurchasing(null);
     }
   };
   const canSellMyEffect = (ef) => {
-    const creatorId = (ef && ef.creatorId);
+    const creatorId = ef && ef.creatorId;
     if (creatorId) return creatorId === user.uid;
-    if ((ef && ef.type) === "premium" || (ef && ef.source) === "system" || (ef && ef.source) === "market") return false;
+    if (ef && ef.type === "premium" || ef && ef.source === "system" || ef && ef.source === "market") return false;
     return true;
   };
   const saveMyEffectPrice = async (ef) => {
-    if (!(ef && ef.ref)) return;
+    if (!ef && ef.ref) return;
     if (!canSellMyEffect(ef)) {
       showNotification("\u8CFC\u5165\u3057\u305F\u30A8\u30D5\u30A7\u30AF\u30C8\u306F\u8CA9\u58F2\u3067\u304D\u307E\u305B\u3093");
       return;
@@ -4648,7 +4648,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     }
   };
   const toggleMyEffectSale = async (ef, toForSale) => {
-    if (!(ef && ef.ref)) return;
+    if (!ef && ef.ref) return;
     if (!canSellMyEffect(ef)) {
       showNotification("\u8CFC\u5165\u3057\u305F\u30A8\u30D5\u30A7\u30AF\u30C8\u306F\u8CA9\u58F2\u3067\u304D\u307E\u305B\u3093");
       return;
@@ -4711,12 +4711,12 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     }
   };
   const handleBuy = async (pack) => {
-    if ((profile && profile.isBanned)) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
+    if (profile && profile.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     if ((profile.wallet || 0) < pack.price) {
       showNotification("\u30B3\u30A4\u30F3\u304C\u8DB3\u308A\u307E\u305B\u3093");
       return;
     }
-    if ((pack.purchasedBy && pack.purchasedBy.includes)(user.uid) || pack.authorId === user.uid) {
+    if (pack.purchasedBy && pack.purchasedBy.includes(user.uid) || pack.authorId === user.uid) {
       showNotification("\u65E2\u306B\u5165\u624B\u6E08\u307F\u3067\u3059");
       return;
     }
@@ -4770,7 +4770,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       showNotification(approve ? "承認しました" : "却下しました");
     } catch (e) {
       console.error(e);
-      const msg = typeof e === "string" ? e : (e && e.message) || "";
+      const msg = typeof e === "string" ? e : e && e.message || "";
       if (msg.includes("permission") || msg.includes("PERMISSION")) {
         showNotification("権限がないため承認できません（Firestoreルール/管理者権限を確認してください）");
       } else if (msg === "Already processed") {
@@ -4858,7 +4858,7 @@ const executeBanToggle = async () => {
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 bg-yellow-100 px-3 py-1 rounded-full", children: [
         /* @__PURE__ */ jsx(Coins, { className: "w-4 h-4 text-yellow-600" }),
-        /* @__PURE__ */ jsx("span", { className: "font-bold text-yellow-700", children: (profile && profile.wallet) || 0 })
+        /* @__PURE__ */ jsx("span", { className: "font-bold text-yellow-700", children: profile && profile.wallet || 0 })
       ] })
     ] }),
     /* @__PURE__ */ jsxs("div", { className: "flex border-b", children: [
@@ -4917,7 +4917,7 @@ const executeBanToggle = async () => {
                 ] }),
                 /* @__PURE__ */ jsxs("p", { className: "text-xs text-gray-500 truncate", children: [
                   "\u51FA\u54C1\u8005: ",
-                  (seller && seller.name) || effect.creatorId
+                  seller && seller.name || effect.creatorId
                 ] }),
                 /* @__PURE__ */ jsxs("p", { className: "text-[10px] text-gray-400", children: [
                   "\u8CA9\u58F2\u6570: ",
@@ -5001,7 +5001,7 @@ const executeBanToggle = async () => {
     activeTab === "shop" && activeShopTab === "stickers" && /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto p-4 space-y-4", children: [
       packs.length === 0 && /* @__PURE__ */ jsx("div", { className: "text-center py-10 text-gray-400", children: "\u30B9\u30BF\u30F3\u30D7\u304C\u3042\u308A\u307E\u305B\u3093" }),
       packs.map((pack) => {
-        const isOwned = (pack.purchasedBy && pack.purchasedBy.includes)(user.uid) || pack.authorId === user.uid;
+        const isOwned = pack.purchasedBy && pack.purchasedBy.includes(user.uid) || pack.authorId === user.uid;
         return /* @__PURE__ */ jsxs("div", { className: "border rounded-2xl p-4 shadow-sm bg-white", children: [
           /* @__PURE__ */ jsxs("div", { className: "flex justify-between items-start mb-2", children: [
             /* @__PURE__ */ jsxs("div", { className: "flex-1", children: [
@@ -5130,23 +5130,23 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   const usersByUid = useMemo(() => {
     const map = /* @__PURE__ */ new Map();
     (allUsers || []).forEach((u) => {
-      if ((u && u.uid)) map.set(u.uid, u);
+      if (u && u.uid) map.set(u.uid, u);
     });
     return map;
   }, [allUsers]);
   const usersByName = useMemo(() => {
     const map = /* @__PURE__ */ new Map();
     (allUsers || []).forEach((u) => {
-      if ((u && u.name)) map.set(u.name, u);
+      if (u && u.name) map.set(u.name, u);
     });
     return map;
   }, [allUsers]);
   const chatData = chats.find((c) => c.id === activeChatId);
   const contactCandidates = useMemo(() => {
-    const hiddenSet = new Set((profile && profile.hiddenFriends) || []);
-    const friendKeySet = new Set((profile && profile.friends) || []);
+    const hiddenSet = new Set(profile && profile.hiddenFriends || []);
+    const friendKeySet = new Set(profile && profile.friends || []);
     (chats || []).forEach((chat) => {
-      if ((chat && chat.isGroup) || !Array.isArray((chat && chat.participants)) || !chat.participants.includes(user.uid)) return;
+      if (chat && chat.isGroup || !Array.isArray(chat && chat.participants) || !chat.participants.includes(user.uid)) return;
       const otherUid = chat.participants.find((p) => p && p !== user.uid);
       if (otherUid) friendKeySet.add(otherUid);
     });
@@ -5154,10 +5154,10 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     const byId = allUsers.filter((u) => friendKeySet.has(u.id));
     const merged = [...byUid, ...byId].filter((u) => u.uid && u.uid !== user.uid && !hiddenSet.has(u.uid));
     return Array.from(new Map(merged.map((u) => [u.uid, u])).values());
-  }, [allUsers, chats, (profile && profile.friends), (profile && profile.hiddenFriends), user.uid]);
-  const isGroup = (chatData && chatData.isGroup) || false;
-  const activeChatCallStatus = (chatData && chatData.callStatus) || null;
-  const hasJoinableCall = !!(activeChatCallStatus && activeChatCallStatus.sessionId) && (activeChatCallStatus.status === "ringing" || activeChatCallStatus.status === "accepted");
+  }, [allUsers, chats, profile && profile.friends, profile && profile.hiddenFriends, user.uid]);
+  const isGroup = chatData && chatData.isGroup || false;
+  const activeChatCallStatus = chatData && chatData.callStatus || null;
+  const hasJoinableCall = !!activeChatCallStatus && activeChatCallStatus.sessionId && (activeChatCallStatus.status === "ringing" || activeChatCallStatus.status === "accepted");
   let partnerId = null;
   let partnerData = null;
   if (chatData && !isGroup) {
@@ -5165,8 +5165,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     if (!partnerId) partnerId = user.uid;
     partnerData = usersByUid.get(partnerId);
   }
-  const title = !isGroup && partnerData ? partnerData.name : (chatData && chatData.name) || "";
-  const icon = !isGroup && partnerData ? partnerData.avatar : (chatData && chatData.icon) || "";
+  const title = !isGroup && partnerData ? partnerData.name : chatData && chatData.name || "";
+  const icon = !isGroup && partnerData ? partnerData.avatar : chatData && chatData.icon || "";
   const onStickerClick = (packId) => {
     setBuyStickerModalPackId(packId);
   };
@@ -5195,7 +5195,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     startVideoCall(activeChatId, isVideo, true, callerId, sessionId);
   };
   const joinCurrentCall = async () => {
-    if (!(activeChatCallStatus && activeChatCallStatus.sessionId)) {
+    if (!activeChatCallStatus && activeChatCallStatus.sessionId) {
       showNotification("参加できる通話がありません");
       return;
     }
@@ -5265,7 +5265,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   }, [activeChatId, user.uid, db2, appId2]);
   useEffect(() => {
     if (!activeChatId || messages.length === 0) return;
-    const targets = messages.filter((m) => m.senderId !== user.uid && !(m.readBy && m.readBy.includes)(user.uid) && !readSyncedIdsRef.current.has(m.id));
+    const targets = messages.filter((m) => m.senderId !== user.uid && !m.readBy && m.readBy.includes(user.uid) && !readSyncedIdsRef.current.has(m.id));
     if (targets.length === 0) return;
     const toSync = targets.slice(0, 120);
     toSync.forEach((m) => readSyncedIdsRef.current.add(m.id));
@@ -5286,9 +5286,9 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   useEffect(() => {
     if (messages.length > 0) {
       const lastMsg = messages[messages.length - 1];
-      if (isFirstLoad.current || (lastMsg && lastMsg.id) !== lastMessageIdRef.current) {
-        (scrollRef.current && scrollRef.current.scrollIntoView)({ behavior: "auto" });
-        lastMessageIdRef.current = (lastMsg && lastMsg.id);
+      if (isFirstLoad.current || lastMsg && lastMsg.id !== lastMessageIdRef.current) {
+        scrollRef.current && scrollRef.current.scrollIntoView({ behavior: "auto" });
+        lastMessageIdRef.current = lastMsg && lastMsg.id;
       }
       isFirstLoad.current = false;
     }
@@ -5312,7 +5312,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       }
     };
     loadBackground();
-  }, [(chatData && chatData.id), (chatData && chatData.updatedAt), (chatData && chatData.hasBackgroundChunks), (chatData && chatData.backgroundImage), activeChatId]);
+  }, [chatData && chatData.id, chatData && chatData.updatedAt, chatData && chatData.hasBackgroundChunks, chatData && chatData.backgroundImage, activeChatId]);
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -5344,14 +5344,14 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     }
   };
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    if mediaRecorderRef.current && isRecording {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       clearInterval(recordingIntervalRef.current);
     }
   };
   const cancelRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    if mediaRecorderRef.current && isRecording {
       mediaRecorderRef.current.onstop = () => {
         if (audioStreamRef.current) {
           audioStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -5366,7 +5366,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     }
   };
   const sendMessage = async (content, type = "text", additionalData = {}, file = null) => {
-    if ((profile && profile.isBanned)) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
+    if (profile && profile.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     if (!content && !file && type === "text" || isUploading) return;
     const setUploadingSafe = (next) => {
       if (isMountedRef.current) setIsUploading(next);
@@ -5441,7 +5441,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           setPlusMenuOpen(false);
           setContactModalOpen(false);
           setTimeout(() => {
-            (scrollRef.current && scrollRef.current.scrollIntoView)({ behavior: "auto" });
+            scrollRef.current && scrollRef.current.scrollIntoView({ behavior: "auto" });
           }, 100);
         }
 
@@ -5491,7 +5491,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           setPlusMenuOpen(false);
           setContactModalOpen(false);
           setTimeout(() => {
-            (scrollRef.current && scrollRef.current.scrollIntoView)({ behavior: "auto" });
+            scrollRef.current && scrollRef.current.scrollIntoView({ behavior: "auto" });
           }, 100);
         }
       }
@@ -5542,7 +5542,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           isUploading: false
         });
       } else if (!hasChunks) {
-        if (localBlobUrl && file) {
+        if localBlobUrl && file {
           const reader = new FileReader();
           reader.readAsDataURL(file);
           await new Promise((resolve) => {
@@ -5565,7 +5565,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             setPlusMenuOpen(false);
             setContactModalOpen(false);
             setTimeout(() => {
-              (scrollRef.current && scrollRef.current.scrollIntoView)({ behavior: "auto" });
+              scrollRef.current && scrollRef.current.scrollIntoView({ behavior: "auto" });
             }, 100);
           }
         }
@@ -5599,7 +5599,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     try {
       const msgRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", messageId);
       const msg = messages.find((m) => m.id === messageId);
-      const currentReactions = (msg.reactions && msg.reactions)[emoji] || [];
+      const currentReactions = msg.reactions && msg.reactions[emoji] || [];
       if (currentReactions.includes(user.uid)) {
         await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayRemove(user.uid) });
       } else {
@@ -5721,7 +5721,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       return true;
     }
     if (cmd === "me") {
-      await sendMessage(`*${(profile && profile.name) || "Me"} ${args || "..."}*`);
+      await sendMessage(`*${profile && profile.name || "Me"} ${args || "..."}*`);
       return true;
     }
     if (cmd === "echo") {
@@ -5861,7 +5861,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       return true;
     }
     if (cmd === "uuid") {
-      const id = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const id = crypto && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       await sendMessage(id);
       return true;
     }
@@ -6125,7 +6125,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         /* @__PURE__ */ jsx("button", { onClick: submitEditMessage, className: "flex-1 py-2 bg-green-500 rounded-xl font-bold text-white", children: "\u66F4\u65B0" })
       ] })
     ] }) }),
-    addMemberModalOpen && /* @__PURE__ */ jsx(GroupAddMemberModal, { onClose: () => setAddMemberModalOpen(false), currentMembers: (chatData && chatData.participants) || [], chatId: activeChatId, allUsers, profile, user, chats, showNotification }),
+    addMemberModalOpen && /* @__PURE__ */ jsx(GroupAddMemberModal, { onClose: () => setAddMemberModalOpen(false), currentMembers: chatData && chatData.participants || [], chatId: activeChatId, allUsers, profile, user, chats, showNotification }),
     groupEditModalOpen && /* @__PURE__ */ jsx(GroupEditModal, { onClose: () => setGroupEditModalOpen(false), chatId: activeChatId, currentName: chatData.name, currentIcon: chatData.icon, currentMembers: chatData.participants, allUsers, showNotification, user, profile }),
     leaveModalOpen && /* @__PURE__ */ jsx(LeaveGroupConfirmModal, { onClose: () => setLeaveModalOpen(false), onLeave: handleLeaveGroup }),
     cardModalOpen && /* @__PURE__ */ jsx(BirthdayCardModal, { onClose: () => setCardModalOpen(false), onSend: sendBirthdayCard, toName: title }),
@@ -6240,7 +6240,7 @@ const VoomView = ({ user, allUsers, profile, posts = [], showNotification = () =
     };
   }, [media]);
   const postMessage = async () => {
-    if ((profile && profile.isBanned)) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
+    if (profile && profile.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     if (!content && !mediaFile || isUploading) return;
     setIsUploading(true);
     try {
@@ -6288,7 +6288,7 @@ const VoomView = ({ user, allUsers, profile, posts = [], showNotification = () =
     if (!inputFile) return;
     e.target.value = "";
     const processed = await processFileBeforeUpload(inputFile);
-    const file = processed instanceof File ? processed : new File([processed], inputFile.name, { type: (processed && processed.type) || inputFile.type || "application/octet-stream", lastModified: Date.now() });
+    const file = processed instanceof File ? processed : new File([processed], inputFile.name, { type: processed && processed.type || inputFile.type || "application/octet-stream", lastModified: Date.now() });
     if (media && media.startsWith("blob:")) {
       URL.revokeObjectURL(media);
     }
@@ -6416,17 +6416,17 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
   };
   useEffect(() => {
     return () => {
-      if (videoRef.current && videoRef.current.srcObject) {
+      if videoRef.current && videoRef.current.srcObject {
         const stream = videoRef.current.srcObject;
         stream.getTracks().forEach((t) => t.stop());
       }
     };
   }, []);
   const tick = () => {
-    if ((videoRef.current && videoRef.current.readyState) === (videoRef.current && videoRef.current.HAVE_ENOUGH_DATA)) {
+    if (videoRef.current && videoRef.current.readyState === videoRef.current && videoRef.current.HAVE_ENOUGH_DATA) {
       const c = canvasRef.current;
-      const ctx = (c && c.getContext)("2d");
-      if (c && ctx) {
+      const ctx = c && c.getContext("2d");
+      if c && ctx {
         c.height = videoRef.current.videoHeight;
         c.width = videoRef.current.videoWidth;
         ctx.drawImage(videoRef.current, 0, 0, c.width, c.height);
@@ -6456,7 +6456,7 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
       scanning ? /* @__PURE__ */ jsxs("div", { className: "relative w-64 h-64 border-4 border-green-500 rounded-3xl overflow-hidden", children: [
         /* @__PURE__ */ jsx("video", { ref: videoRef, className: "w-full h-full object-cover" }),
         /* @__PURE__ */ jsx("canvas", { ref: canvasRef, className: "hidden" })
-      ] }) : /* @__PURE__ */ jsx("div", { className: "bg-white p-6 rounded-[40px] shadow-xl border", children: /* @__PURE__ */ jsx("img", { src: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${(user && user.uid)}`, className: "w-48 h-48" }) }),
+      ] }) : /* @__PURE__ */ jsx("div", { className: "bg-white p-6 rounded-[40px] shadow-xl border", children: /* @__PURE__ */ jsx("img", { src: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user && user.uid}`, className: "w-48 h-48" }) }),
       /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-4 w-full", children: [
         /* @__PURE__ */ jsxs("button", { onClick: startScanner, className: "flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border", children: [
           /* @__PURE__ */ jsx(Maximize, { className: "w-6 h-6 text-green-500" }),
@@ -6503,7 +6503,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
   const [coinModalTarget, setCoinModalTarget] = useState(null);
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
   const [openFriendMenuId, setOpenFriendMenuId] = useState(null);
-  const hiddenFriendUids = useMemo(() => new Set((profile && profile.hiddenFriends) || []), [(profile && profile.hiddenFriends)]);
+  const hiddenFriendUids = useMemo(() => new Set(profile && profile.hiddenFriends || []), [profile && profile.hiddenFriends]);
   const talkFriendUids = useMemo(() => {
     const s = /* @__PURE__ */ new Set();
     (chats || []).forEach((c) => {
@@ -6516,14 +6516,14 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     return s;
   }, [chats, user.uid]);
   const directFriendUids = useMemo(() => {
-    const s = new Set((profile && profile.friends) || []);
+    const s = new Set(profile && profile.friends || []);
     talkFriendUids.forEach((uid) => s.add(uid));
     return s;
-  }, [(profile && profile.friends), talkFriendUids]);
+  }, [profile && profile.friends, talkFriendUids]);
   const talkFriendCount = talkFriendUids.size;
-  const groupChatCount = useMemo(() => (chats || []).filter((c) => (c && c.isGroup)).length, [chats]);
+  const groupChatCount = useMemo(() => (chats || []).filter((c) => c && c.isGroup).length, [chats]);
   const friendsListAll = useMemo(
-    () => allUsers.filter((u) => (u && u.uid) && u.uid !== user.uid && directFriendUids.has(u.uid)),
+    () => allUsers.filter((u) => u && u.uid && u.uid !== user.uid && directFriendUids.has(u.uid)),
     [allUsers, directFriendUids, user.uid]
   );
   const directFriendsListAll = useMemo(
@@ -6541,7 +6541,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
   const friendsOfFriendsCount = useMemo(() => {
     const fof = /* @__PURE__ */ new Set();
     directFriendsListAll.forEach((f) => {
-      const ff = (f && f.friends) || [];
+      const ff = f && f.friends || [];
       ff.forEach((uid) => {
         if (!uid) return;
         if (uid === user.uid) return;
@@ -6552,7 +6552,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     return fof.size;
   }, [directFriendsListAll, user.uid, directFriendUids]);
   const getMutualCount = useCallback((friend) => {
-    const ff = (friend && friend.friends) || [];
+    const ff = friend && friend.friends || [];
     let n = 0;
     for (const uid of ff) {
       if (!uid || uid === user.uid) continue;
@@ -6561,7 +6561,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     return n;
   }, [directFriendUids, user.uid]);
   const getFofCandidateCount = useCallback((friend) => {
-    const ff = (friend && friend.friends) || [];
+    const ff = friend && friend.friends || [];
     let n = 0;
     for (const uid of ff) {
       if (!uid || uid === user.uid) continue;
@@ -6578,7 +6578,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
       const updatePayload = {
         hiddenChats: arrayUnion(chatId)
       };
-      const targetChat = (chats || []).find((c) => (c && c.id) === chatId);
+      const targetChat = (chats || []).find((c) => c && c.id === chatId);
       if (targetChat && !targetChat.isGroup) {
         const partnerUid = (targetChat.participants || []).find((p) => p && p !== user.uid);
         if (partnerUid) {
@@ -6622,7 +6622,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     setOpenFriendMenuId(null);
     try {
       const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-      const relatedDirectChatIds = (chats || []).filter((c) => !(c && c.isGroup) && (c.participants || []).includes(user.uid) && (c.participants || []).includes(friendUid)).map((c) => c.id);
+      const relatedDirectChatIds = (chats || []).filter((c) => !c && c.isGroup && (c.participants || []).includes(user.uid) && (c.participants || []).includes(friendUid)).map((c) => c.id);
       const updatePayload = {
         hiddenFriends: arrayRemove(friendUid)
       };
@@ -6684,14 +6684,14 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
         /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto scrollbar-hide", children: [
           /* @__PURE__ */ jsxs("div", { className: "p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer border-b", onClick: () => setView("profile"), children: [
             /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-              /* @__PURE__ */ jsx("img", { src: (profile && profile.avatar), className: "w-16 h-16 rounded-2xl object-cover border" }, (profile && profile.avatar)),
-              isTodayBirthday((profile && profile.birthday)) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-base", children: "\u{1F382}" })
+              /* @__PURE__ */ jsx("img", { src: profile && profile.avatar, className: "w-16 h-16 rounded-2xl object-cover border" }, profile && profile.avatar),
+              isTodayBirthday(profile && profile.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-base", children: "\u{1F382}" })
             ] }),
             /* @__PURE__ */ jsxs("div", { className: "flex-1", children: [
-              /* @__PURE__ */ jsx("div", { className: "font-bold text-lg", children: (profile && profile.name) }),
+              /* @__PURE__ */ jsx("div", { className: "font-bold text-lg", children: profile && profile.name }),
               /* @__PURE__ */ jsxs("div", { className: "text-xs text-gray-400 font-mono", children: [
                 "ID: ",
-                (profile && profile.id)
+                profile && profile.id
               ] })
             ] })
           ] }),
@@ -6779,7 +6779,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
                 /* @__PURE__ */ jsx("div", { className: "text-2xl font-black text-gray-800", children: groupChatCount })
               ] })
             ] }) }),
-            chats.filter((chat) => !(profile && (profile.hiddenChats) && profile.hiddenChats).includes)(chat.id)).sort((a, b) => ((b.updatedAt && b.updatedAt.seconds) || 0) - ((a.updatedAt && a.updatedAt.seconds) || 0)).map((chat) => {
+            chats.filter((chat) => !(profile && (profile.hiddenChats) && profile.hiddenChats).includes)(chat.id)).sort((a, b) => (b.updatedAt && b.updatedAt.seconds || 0) - (a.updatedAt && a.updatedAt.seconds || 0)).map((chat) => {
               let name = chat.name, icon = chat.icon, partnerData = null;
               if (!chat.isGroup) {
                 partnerData = allUsers.find((u) => u.uid === chat.participants.find((p) => p !== user.uid));
@@ -6788,7 +6788,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
                   icon = partnerData.avatar;
                 }
               }
-              const unreadCount = (chat.unreadCounts && chat.unreadCounts)[user.uid] || 0;
+              const unreadCount = chat.unreadCounts && chat.unreadCounts[user.uid] || 0;
               return /* @__PURE__ */ jsxs(
                 "div",
                 {
@@ -6808,7 +6808,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
                         " ",
                         chat.isGroup ? `(${chat.participants.length})` : ""
                       ] }),
-                      /* @__PURE__ */ jsx("div", { className: `text-xs truncate ${unreadCount > 0 ? "font-bold text-black" : "text-gray-400"}`, children: (chat.lastMessage && chat.lastMessage.content) })
+                      /* @__PURE__ */ jsx("div", { className: `text-xs truncate ${unreadCount > 0 ? "font-bold text-black" : "text-gray-400"}`, children: chat.lastMessage && chat.lastMessage.content })
                     ] }),
                     /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-end gap-1", children: [
                       /* @__PURE__ */ jsx("div", { className: "text-[10px] text-gray-300", children: formatTime(chat.updatedAt) }),
@@ -6894,9 +6894,9 @@ function App() {
   };
   const handleLogout = useCallback(async (nextProfile = null) => {
     try {
-      const uid = (user && user.uid);
+      const uid = user && user.uid;
       const profileToSave = nextProfile || profile;
-      if (uid && profileToSave) {
+      if uid && profileToSave {
         const persistFields = {
           avatar: profileToSave.avatar || "",
           cover: profileToSave.cover || "",
@@ -6911,7 +6911,7 @@ function App() {
     } finally {
       await auth.signOut();
     }
-  }, [(user && user.uid), profile]);
+  }, [user && user.uid, profile]);
   useEffect(() => {
     const unlockAudio = () => {
       initAudioContext();
@@ -7008,9 +7008,9 @@ function App() {
           if (lastMsg && lastMsg.senderId !== user.uid && lastMsg.createdAt) {
             const now = Date.now();
             let msgTime = 0;
-            if ((lastMsg.createdAt && lastMsg.createdAt.seconds)) {
+            if (lastMsg.createdAt && lastMsg.createdAt.seconds) {
               msgTime = lastMsg.createdAt.seconds * 1e3;
-            } else if ((lastMsg.createdAt && lastMsg.createdAt.toMillis)) {
+            } else if (lastMsg.createdAt && lastMsg.createdAt.toMillis) {
               msgTime = lastMsg.createdAt.toMillis();
             } else if (lastMsg.createdAt instanceof Date) {
               msgTime = lastMsg.createdAt.getTime();
@@ -7027,12 +7027,12 @@ function App() {
       });
       setChats(chatList);
       setActiveCall((prev) => {
-        const incoming = chatList.find((c) => (c.callStatus && c.callStatus.status) === "ringing" && c.callStatus.callerId !== user.uid);
-        if (incoming && (!prev || prev.chatId !== incoming.id || (prev && (prev.callData) && prev.callData).sessionId) !== (incoming.callStatus && incoming.callStatus.sessionId))) {
+        const incoming = chatList.find((c) => c.callStatus && c.callStatus.status === "ringing" && c.callStatus.callerId !== user.uid);
+        if (incoming && (!prev || prev.chatId !== incoming.id || (prev && (prev.callData) && prev.callData).sessionId) !== incoming.callStatus && incoming.callStatus.sessionId)) {
           return {
             chatId: incoming.id,
             callData: incoming.callStatus,
-            isVideo: (incoming.callStatus && incoming.callStatus.callType) !== "audio",
+            isVideo: incoming.callStatus && incoming.callStatus.callType !== "audio",
             isGroupCall: false,
             isCaller: false,
             phase: "incoming"
@@ -7044,11 +7044,11 @@ function App() {
         const status = (currentChat && (currentChat.callStatus) && currentChat.callStatus).status);
         if (!currentChat || !currentChat.callStatus) return null;
         if (status === "accepted") {
-          return { ...prev, phase: "inCall", callData: currentChat.callStatus, isVideo: (currentChat.callStatus && currentChat.callStatus.callType) !== "audio", isCaller: (currentChat.callStatus && currentChat.callStatus.callerId) === user.uid };
+          return { ...prev, phase: "inCall", callData: currentChat.callStatus, isVideo: currentChat.callStatus && currentChat.callStatus.callType !== "audio", isCaller: currentChat.callStatus && currentChat.callStatus.callerId === user.uid };
         }
         if (status === "ringing") {
-          const incomingCall = (currentChat.callStatus && currentChat.callStatus.callerId) !== user.uid;
-          return { ...prev, phase: incomingCall ? "incoming" : "dialing", callData: currentChat.callStatus, isVideo: (currentChat.callStatus && currentChat.callStatus.callType) !== "audio", isCaller: !incomingCall };
+          const incomingCall = currentChat.callStatus && currentChat.callStatus.callerId !== user.uid;
+          return { ...prev, phase: incomingCall ? "incoming" : "dialing", callData: currentChat.callStatus, isVideo: currentChat.callStatus && currentChat.callStatus.callType !== "audio", isCaller: !incomingCall };
         }
         return null;
       });
@@ -7153,9 +7153,9 @@ function App() {
   const startVideoCall = async (chatId, isVideo = true, isJoin = false, joinCallerId, joinSessionId = "") => {
     initAudioContext();
     const chat = chats.find((c) => c.id === chatId);
-    const isGroup = (chat && chat.isGroup);
+    const isGroup = chat && chat.isGroup;
     if (isJoin) {
-      let latestCallStatus = (chat && chat.callStatus) || null;
+      let latestCallStatus = chat && chat.callStatus || null;
       try {
         const latestChatSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId));
         if (latestChatSnap.exists()) {
@@ -7164,7 +7164,7 @@ function App() {
       } catch (e) {
         console.warn("Failed to load latest callStatus before join:", e);
       }
-      const latestSessionId = (latestCallStatus && latestCallStatus.sessionId) || "";
+      const latestSessionId = latestCallStatus && latestCallStatus.sessionId || "";
       if (joinSessionId && latestSessionId && joinSessionId !== latestSessionId) {
         showNotification("\u53E4\u3044\u901A\u8A71\u62DB\u5F85\u306E\u305F\u3081\u3001\u6700\u65B0\u306E\u901A\u8A71\u30BB\u30C3\u30B7\u30E7\u30F3\u306B\u53C2\u52A0\u3057\u307E\u3059");
       }
@@ -7173,8 +7173,8 @@ function App() {
         try {
           const callsCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "calls");
           const snap = await getDocs(query(callsCol, orderBy("createdAt", "desc"), limit(1)));
-          const first = (snap.docs && snap.docs)[0] || null;
-          sessionId = (first && first.id) || (first && first.data ? first.data().sessionId : "") || "";
+          const first = snap.docs && snap.docs[0] || null;
+          sessionId = first && first.id || (first && first.data ? first.data().sessionId : "") || "";
         } catch {
         }
       }
@@ -7182,8 +7182,8 @@ function App() {
         showNotification("\u53C2\u52A0\u3067\u304D\u308B\u901A\u8A71\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002\u901A\u8A71\u4E2D\u306B\u3082\u3046\u4E00\u5EA6\u53C2\u52A0\u3057\u3066\u304F\u3060\u3055\u3044");
         return;
       }
-      const callerId = (latestCallStatus && latestCallStatus.callerId) || joinCallerId || "";
-      const callType = (latestCallStatus && latestCallStatus.callType) || (isVideo ? "video" : "audio");
+      const callerId = latestCallStatus && latestCallStatus.callerId || joinCallerId || "";
+      const callType = latestCallStatus && latestCallStatus.callType || (isVideo ? "video" : "audio");
       setActiveCall({
         chatId,
         callData: { callerId, sessionId, callType, status: "accepted", isGroupCall: !!isGroup },
@@ -7253,7 +7253,7 @@ function App() {
         await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { callStatus: deleteField() });
       }
       if (cleanupSignaling) {
-        await cleanupCallSignaling(chatId, (callData && callData.sessionId) || null);
+        await cleanupCallSignaling(chatId, callData && callData.sessionId || null);
       }
     } catch (e) {
       console.error("Failed to end call:", e);
@@ -7265,12 +7265,12 @@ function App() {
     if (!activeCall) return;
     initAudioContext();
     try {
-      const callData = (activeCallChat && activeCallChat.callStatus) || activeCall.callData || {};
+      const callData = activeCallChat && activeCallChat.callStatus || activeCall.callData || {};
       const nextCallData = {
         ...callData,
         status: "accepted",
         callerId: callData.callerId,
-        callType: callData.callType || ((activeCall && activeCall.isVideo) ? "video" : "audio"),
+        callType: callData.callType || (activeCall && activeCall.isVideo ? "video" : "audio"),
         sessionId: callData.sessionId || `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
         acceptedBy: user.uid,
         acceptedAt: Date.now()
@@ -7285,30 +7285,30 @@ function App() {
   useEffect(() => {
     if (!activeCall || !chats.length) return;
     const callChat = chats.find((c) => c.id === activeCall.chatId);
-    if (callChat && callChat.backgroundImage) {
+    if callChat && callChat.backgroundImage {
       setCurrentChatBackground(callChat.backgroundImage);
     } else {
       setCurrentChatBackground(null);
     }
   }, [activeCall, chats]);
   const activeCallChat = activeCall ? chats.find((c) => c.id === activeCall.chatId) : null;
-  const syncedCallData = (activeCallChat && activeCallChat.callStatus) || (activeCall && activeCall.callData) || null;
+  const syncedCallData = activeCallChat && activeCallChat.callStatus || activeCall && activeCall.callData || null;
   const effectiveCallPhase = useMemo(() => {
     if (!activeCall) return null;
     if (activeCall.isGroupCall) return activeCall.phase;
-    const callStatus = (syncedCallData && syncedCallData.status);
+    const callStatus = syncedCallData && syncedCallData.status;
     if (!callStatus) return activeCall.phase || null;
     if (callStatus === "accepted") return "inCall";
     if (callStatus === "ringing") {
-      return (syncedCallData && syncedCallData.callerId) === user.uid ? "dialing" : "incoming";
+      return syncedCallData && syncedCallData.callerId === user.uid ? "dialing" : "incoming";
     }
     return activeCall.phase || null;
-  }, [activeCall, syncedCallData, (user && user.uid)]);
+  }, [activeCall, syncedCallData, user && user.uid]);
   useEffect(() => {
     if (!activeCall || effectiveCallPhase !== "dialing") return;
     const timeout = setTimeout(() => {
       const latestChat = chats.find((c) => c.id === activeCall.chatId);
-      const latestCall = (latestChat && latestChat.callStatus) || syncedCallData;
+      const latestCall = latestChat && latestChat.callStatus || syncedCallData;
       if (!latestCall || latestCall.status !== "ringing") return;
       showNotification("\u5FDC\u7B54\u304C\u306A\u304B\u3063\u305F\u305F\u3081\u901A\u8A71\u3092\u7D42\u4E86\u3057\u307E\u3057\u305F");
       endCall(activeCall.chatId, latestCall);
