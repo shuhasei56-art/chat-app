@@ -714,7 +714,9 @@ const AuthView = ({ onLogin, showNotification }) => {
     } catch (error) {
       console.error("Popup Login Error:", error);
       const code = error && error.code || "";
-      if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request" || code === "auth/operation-not-supported-in-this-environment") {
+      
+      // ポップアップブロック時のフォールバック処理
+      if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
         try {
           showNotification("ポップアップが使えないため、リダイレクトでログインします。");
           await signInWithRedirect(auth, googleProvider);
@@ -725,11 +727,13 @@ const AuthView = ({ onLogin, showNotification }) => {
           return;
         }
       }
+      
+      // その他のエラー処理
       if (code === "auth/operation-not-supported-in-this-environment") {
-        showNotification("\u3053\u306E\u74B0\u5883\u3067\u306FGoogle\u30ED\u30B0\u30A4\u30F3\u304C\u4F7F\u3048\u307E\u305B\u3093\u3002");
-        return;
+        showNotification("この環境ではGoogleログインが使えません。");
+      } else {
+        showNotification(getGoogleLoginErrorMessage(error));
       }
-      showNotification(getGoogleLoginErrorMessage(error));
     }
   };
   const handleGuestLogin = async () => {
@@ -2494,7 +2498,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       };
       screenTrackRef.current = displayTrack;
       setIsScreenSharing(true);
-      try { setIsVideoEnabled(true); } catch {}
+      // カメラを強制的にONの状態にする（UI表示のため）
       setIsVideoOff(false);
     } catch (e) {
       console.warn("Screen share start failed:", e);
@@ -5207,7 +5211,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     startVideoCall(activeChatId, isVideo, true, callerId, sessionId);
   };
   const joinCurrentCall = async () => {
-    if (!activeChatCallStatus && activeChatCallStatus.sessionId) {
+    // ステータスが無い、またはセッションIDが無い場合は参加不可
+    if (!activeChatCallStatus || !activeChatCallStatus.sessionId) {
       showNotification("参加できる通話がありません");
       return;
     }
@@ -7004,7 +7009,8 @@ function App() {
         writeCachedProfile(user.uid, next);
       }
     });
-    const unsubUsers = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "users")), (snap) => {
+    // 読み込み数を500件などに制限してパフォーマンスを保護する
+    const unsubUsers = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "users"), limit(500)), (snap) => {
       setAllUsers(snap.docs.map((d) => d.data()));
     });
     const unsubEffects = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "users", user.uid, "effects"), orderBy("createdAt", "desc")), (snap) => {
