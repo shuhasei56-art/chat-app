@@ -1924,6 +1924,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           safeEndCall(1500);
         }
       }
+	    };
 
     run();
     return () => {
@@ -2301,7 +2302,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     if (!pc || !newTrack) return;
 
     // Prefer replacing an existing sender track (stable, no renegotiation)
-    let sender = pc.getSenders().find((s) => (s && (s.track) && s.track).kind) === "video");
+    let sender = pc.getSenders().find((s) => s?.track?.kind === "video");
     if (sender) {
       await sender.replaceTrack(newTrack);
       return;
@@ -3032,7 +3033,7 @@ const BirthdayCardModal = ({ onClose, onSend, toName }) => {
       /* @__PURE__ */ jsx("button", { onClick: onClose, children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "mb-4 flex gap-3", children: colors.map((c) => /* @__PURE__ */ jsx("button", { onClick: () => setColor(c.id), className: `w-10 h-10 rounded-full border-2 ${c.class} ${color === c.id ? "scale-125 ring-2 ring-gray-300" : ""}` }, c.id)) }),
-    /* @__PURE__ */ jsxs("div", { className: `p-4 rounded-2xl border-2 mb-4 ${colors.find((c) => c.id === (color) && color).class)}`, children: [
+    /* @__PURE__ */ jsxs("div", { className: `p-4 rounded-2xl border-2 mb-4 ${colors.find((c) => c.id === color)?.class || ""}`, children: [
       /* @__PURE__ */ jsxs("div", { className: "font-bold text-gray-700 mb-2", children: [
         "To: ",
         toName
@@ -3680,7 +3681,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
           ] })
         ] })
       ] }) }),
-      m.reactions && Object.keys(m.reactions).some((k) => m.reactions[(k] && k].length) > 0) && /* @__PURE__ */ jsx("div", { className: `flex flex-wrap gap-1 mt-1 ${isMe ? "justify-end" : "justify-start"}`, children: Object.entries(m.reactions).map(([emoji, uids]) => uids && uids.length > 0 && /* @__PURE__ */ jsxs("button", { onClick: () => onReaction(m.id, emoji), title: getUserNames(uids), className: `flex items-center gap-1 px-2 py-1 rounded-full text-xs shadow-sm border transition-all hover:scale-105 active:scale-95 ${uids.includes(user.uid) ? "bg-white border-green-500 text-green-600 ring-1 ring-green-100" : "bg-white border-gray-100 text-gray-600"}`, children: [
+	      m.reactions && Object.keys(m.reactions).some((k) => m.reactions[k] && m.reactions[k].length > 0) && /* @__PURE__ */ jsx("div", { className: `flex flex-wrap gap-1 mt-1 ${isMe ? "justify-end" : "justify-start"}`, children: Object.entries(m.reactions).map(([emoji, uids]) => uids && uids.length > 0 && /* @__PURE__ */ jsxs("button", { onClick: () => onReaction(m.id, emoji), title: getUserNames(uids), className: `flex items-center gap-1 px-2 py-1 rounded-full text-xs shadow-sm border transition-all hover:scale-105 active:scale-95 ${uids.includes(user.uid) ? "bg-white border-green-500 text-green-600 ring-1 ring-green-100" : "bg-white border-gray-100 text-gray-600"}`, children: [
         /* @__PURE__ */ jsx("span", { className: "text-sm", children: emoji }),
         /* @__PURE__ */ jsx("span", { className: "font-bold text-[10px]", children: uids.length })
       ] }, emoji)) }),
@@ -4496,7 +4497,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     const push = (effect) => {
       const shouldShow = effect && effect.forSale !== false && Number(effect && effect.price || 0) > 0;
       if (!shouldShow) return;
-      const refPath = (effect && (effect.ref) && effect.ref).path);
+      const refPath = effect?.ref?.path;
       const key = effect && effect._key || refPath || effect && effect.id;
       if (!key) return;
       const inferredSellerId = effect && effect.creatorId || effect && effect.ownerId || getEffectOwnerUidFromRefPath(refPath);
@@ -4507,7 +4508,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     publicMarketEffects.forEach(push);
     marketEffects.forEach(push);
     fallbackMarketEffects.forEach(push);
-    myEffects.forEach((ef) => push({ ...ef, _key: (ef && (ef.ref) && ef.ref).path) || ef.id }));
+    myEffects.forEach((ef) => push({ ...ef, _key: ((ef && ef.ref && ef.ref.path) || ef.id) }));
     const list = Array.from(map.values());
     list.sort((a, b) => {
       const tA = getTime(a.listedAt) || getTime(a.createdAt);
@@ -4547,7 +4548,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
   const handleBuyMarketEffect = async (effect) => {
     if (profile && profile.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     const price = Number(effect && effect.price || 0);
-    const sellerId = effect && effect.creatorId || effect && effect.ownerId || getEffectOwnerUidFromRefPath((effect && (effect.ref) && effect.ref).path));
+    const sellerId = (effect && effect.creatorId) || (effect && effect.ownerId) || getEffectOwnerUidFromRefPath(effect && effect.ref && effect.ref.path);
     if (!sellerId) {
       showNotification("\u8CA9\u58F2\u8005\u60C5\u5831\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
       return;
@@ -4578,7 +4579,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
         const buyerRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
         const sellerRef = doc(db, "artifacts", appId, "public", "data", "users", sellerId);
         const buyerSnap = await t.get(buyerRef);
-        const wallet = buyerSnap.data(() && ).wallet) || 0;
+        const wallet = (buyerSnap.data()?.wallet) || 0;
         if (wallet < price) throw new Error("NOT_ENOUGH");
         t.update(buyerRef, { wallet: increment(-price) });
         if (sellerId !== "system") t.update(sellerRef, { wallet: increment(price) });
@@ -4685,7 +4686,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
             listedAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
             marketRefPath: marketRef.path,
-            sourceRefPath: (ef && (ef.ref) && ef.ref).path) || ""
+            sourceRefPath: (ef && ef.ref && ef.ref.path) || ""
           },
           { merge: true }
         );
@@ -5388,7 +5389,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       // - Firestoreにchunksとして保存し、閲覧側はloadChunkedMessageMediaで即再生可能
       // - 送信者側はローカルblobをキャッシュしてアップロード完了前でもすぐ再生できる
       let previewData = null;
-      const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: usersByUid.get((currentReply.senderId) && currentReply.senderId).name) || "Unknown", type: currentReply.type } } : {};
+      const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: (usersByUid.get(currentReply.senderId)?.name) || "Unknown", type: currentReply.type } } : {};
       const fileData = file ? { fileName: file.name, fileSize: file.size, mimeType: file.type } : {};
       const currentChat = chats.find((c) => c.id === activeChatId);
       const updateData = {
@@ -6091,7 +6092,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         }
       )
     ] }),
-    !isGroup && partnerId && isTodayBirthday(usersByUid.get((partnerId) && partnerId).birthday)) && /* @__PURE__ */ jsxs("div", { className: "bg-pink-100 p-2 flex items-center justify-between px-4", children: [
+    !isGroup && partnerId && isTodayBirthday(usersByUid.get(partnerId)?.birthday) && /* @__PURE__ */ jsxs("div", { className: "bg-pink-100 p-2 flex items-center justify-between px-4", children: [
       /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
         /* @__PURE__ */ jsx(Cake, { className: "w-5 h-5 text-pink-500 animate-bounce" }),
         /* @__PURE__ */ jsxs("span", { className: "text-xs font-bold text-pink-700", children: [
@@ -6173,7 +6174,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     ] }),
     !groupSettingsOpen && /* @__PURE__ */ jsxs("div", { className: "px-3 py-2 bg-[#f1f2f4] border-t border-gray-300 flex flex-col gap-1.5 relative z-10", children: [
       stickerMenuOpen && myStickerPacks.length > 0 && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-full left-0 right-0 bg-gray-50 border-t h-72 flex flex-col shadow-2xl rounded-t-3xl overflow-hidden animate-in slide-in-from-bottom-2 z-20", children: [
-        /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-4 content-start", children: myStickerPacks.find((p) => p.id === (selectedPackId) && selectedPackId).stickers).map((s, i) => /* @__PURE__ */ jsxs("div", { className: "relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm", onClick: () => sendMessage(s, "sticker", { packId: selectedPackId }), children: [
+	        /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-4 content-start", children: (myStickerPacks.find((p) => p.id === selectedPackId)?.stickers || []).map((s, i) => /* @__PURE__ */ jsxs("div", { className: "relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm", onClick: () => sendMessage(s, "sticker", { packId: selectedPackId }), children: [
           /* @__PURE__ */ jsx("img", { src: typeof s === "string" ? s : s.image, className: "w-full aspect-square object-contain" }),
           typeof s !== "string" && s.audio && /* @__PURE__ */ jsx("div", { className: "absolute bottom-0 right-0 bg-black/20 text-white rounded-full p-1", children: /* @__PURE__ */ jsx(Volume2, { className: "w-3 h-3" }) })
         ] }, i)) }),
@@ -6182,7 +6183,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       replyTo && /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between bg-gray-100 p-2 rounded-xl text-xs mb-1 border-l-4 border-green-500", children: [
         /* @__PURE__ */ jsxs("div", { className: "flex flex-col max-w-[90%]", children: [
           /* @__PURE__ */ jsxs("span", { className: "font-bold text-green-600 mb-0.5", children: [
-            usersByUid.get((replyTo.senderId) && replyTo.senderId).name) || "Unknown",
+	            usersByUid.get(replyTo.senderId)?.name || "Unknown",
             " \u3078\u306E\u8FD4\u4FE1"
           ] }),
           /* @__PURE__ */ jsxs("div", { className: "truncate text-gray-600 flex items-center gap-1", children: [
@@ -6779,7 +6780,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
                 /* @__PURE__ */ jsx("div", { className: "text-2xl font-black text-gray-800", children: groupChatCount })
               ] })
             ] }) }),
-            chats.filter((chat) => !(profile && (profile.hiddenChats) && profile.hiddenChats).includes)(chat.id)).sort((a, b) => (b.updatedAt && b.updatedAt.seconds || 0) - (a.updatedAt && a.updatedAt.seconds || 0)).map((chat) => {
+            chats.filter((chat) => !((profile?.hiddenChats ?? []).includes(chat.id))).sort((a, b) => (b.updatedAt && b.updatedAt.seconds || 0) - (a.updatedAt && a.updatedAt.seconds || 0)).map((chat) => {
               let name = chat.name, icon = chat.icon, partnerData = null;
               if (!chat.isGroup) {
                 partnerData = allUsers.find((u) => u.uid === chat.participants.find((p) => p !== user.uid));
@@ -7025,9 +7026,15 @@ function App() {
         }
       });
       setChats(chatList);
-      setActiveCall((prev) => {
-        const incoming = chatList.find((c) => c.callStatus && c.callStatus.status === "ringing" && c.callStatus.callerId !== user.uid);
-        if (incoming && (!prev || prev.chatId !== incoming.id || (prev && (prev.callData) && prev.callData).sessionId) !== incoming.callStatus && incoming.callStatus.sessionId)) {
+	      setActiveCall((prev) => {
+	        const incoming = chatList.find((c) => c.callStatus && c.callStatus.status === "ringing" && c.callStatus.callerId !== user.uid);
+	        // Switch to a new incoming call if it's different from the current active one
+	        if (
+	          incoming &&
+	          (!prev ||
+	            prev.chatId !== incoming.id ||
+	            (prev.callData?.sessionId !== incoming.callStatus?.sessionId))
+	        ) {
           return {
             chatId: incoming.id,
             callData: incoming.callStatus,
@@ -7039,9 +7046,9 @@ function App() {
         }
         if (!prev) return prev;
         if (prev.isGroupCall) return prev;
-        const currentChat = chatList.find((c) => c.id === prev.chatId);
-        const status = (currentChat && (currentChat.callStatus) && currentChat.callStatus).status);
-        if (!currentChat || !currentChat.callStatus) return null;
+	        const currentChat = chatList.find((c) => c.id === prev.chatId);
+	        if (!currentChat || !currentChat.callStatus) return null;
+	        const status = currentChat.callStatus?.status;
         if (status === "accepted") {
           return { ...prev, phase: "inCall", callData: currentChat.callStatus, isVideo: currentChat.callStatus && currentChat.callStatus.callType !== "audio", isCaller: currentChat.callStatus && currentChat.callStatus.callerId === user.uid };
         }
@@ -7157,9 +7164,10 @@ function App() {
       let latestCallStatus = chat && chat.callStatus || null;
       try {
         const latestChatSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId));
-        if (latestChatSnap.exists()) {
-          latestCallStatus = latestChatSnap.data(() && ).callStatus) || latestCallStatus;
-        }
+	        if (latestChatSnap.exists()) {
+	          // Firestore v9: data() returns the document object
+	          latestCallStatus = latestChatSnap.data()?.callStatus || latestCallStatus;
+	        }
       } catch (e) {
         console.warn("Failed to load latest callStatus before join:", e);
       }
@@ -7408,7 +7416,6 @@ var App_13_default = App;
 export {
   App_13_default as default
 };
-
 
 
 
