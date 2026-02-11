@@ -1116,7 +1116,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       autoGainControl: autoGainControlEnabled
     };
     const stream = localStreamRef.current;
-    const track = stream?(.getAudioTracks && .getAudioTracks)()[0];
+    const track = (stream && stream.getAudioTracks ? stream.getAudioTracks() : [])[0];
     if (!(track && track.applyConstraints)) return;
     track.applyConstraints({
       advanced: [
@@ -1216,7 +1216,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       autoSnapshotTimerRef.current = null;
     }
     if (autoSnapshotSec <= 0) return;
-    const hasRemoteVideoNow = hasRemoteVideoTrack || remoteStream?(.getVideoTracks && .getVideoTracks)().some((track) => track.readyState === "live");
+    const hasRemoteVideoNow = hasRemoteVideoTrack || (remoteStream && remoteStream.getVideoTracks ? remoteStream.getVideoTracks() : []).some((track) => track.readyState === "live");
     if (!hasRemoteVideoNow) return;
     autoSnapshotTimerRef.current = setInterval(() => {
       captureCallSnapshot();
@@ -1234,8 +1234,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     const audioEl = remoteAudioRef.current;
     const videoEl = remoteVideoRef.current;
     const mediaStream = (videoEl && videoEl.srcObject) || (audioEl && audioEl.srcObject) || remoteStreamRef.current || remoteStream;
-    const hasVideoTrack = hasRemoteVideoTrackRef.current || !!mediaStream?(.getVideoTracks && .getVideoTracks)().some((track) => track.readyState === "live");
-    const hasAudioTrack = !!mediaStream?(.getAudioTracks && .getAudioTracks)().some((track) => track.readyState === "live");
+    const hasVideoTrack = hasRemoteVideoTrackRef.current || !!(mediaStream && mediaStream.getVideoTracks ? mediaStream.getVideoTracks() : []).some((track) => track.readyState === "live");
+    const hasAudioTrack = !!(mediaStream && mediaStream.getAudioTracks ? mediaStream.getAudioTracks() : []).some((track) => track.readyState === "live");
     if (audioEl) {
       audioEl.muted = false;
       audioEl.volume = remoteMutedRef.current ? 0 : remoteVolumeRef.current;
@@ -1324,7 +1324,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   }, [activeEffect, recoverLocalPreviewPlayback]);
   const localFilter = disableLocalFilter || forceStablePreviewMode ? "none" : getFilterStyle(activeEffect);
   const isEffectSuppressed = !!(activeEffect && activeEffect !== "Normal" && (disableLocalFilter || forceStablePreviewMode));
-  const hasRemoteVideo = hasRemoteVideoTrack || remoteStream?(.getVideoTracks && .getVideoTracks)().some((track) => track.readyState === "live");
+  const hasRemoteVideo = hasRemoteVideoTrack || (remoteStream && remoteStream.getVideoTracks ? remoteStream.getVideoTracks() : []).some((track) => track.readyState === "live");
   useEffect(() => {
     if (disableLocalFilter) {
       recoverLocalPreviewPlayback();
@@ -1369,7 +1369,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     const watchdog = setInterval(() => {
       if (stopped) return;
       const stream = localStreamRef.current;
-      const hasLiveEnabledVideo = !!stream?(.getVideoTracks && .getVideoTracks)().some((t) => t.readyState === "live" && t.enabled);
+      const hasLiveEnabledVideo = !!(stream && stream.getVideoTracks ? stream.getVideoTracks() : []).some((t) => t.readyState === "live" && t.enabled);
       if (!hasLiveEnabledVideo || videoEl.paused || videoEl.ended) return;
       if (videoEl.readyState < 2) return;
       if (performance.now() - lastLocalFrameAtRef.current > 1800) {
@@ -1939,7 +1939,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     if (remoteStream && remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = remoteStream;
     }
-    const hasLiveVideo = remoteStream?(.getVideoTracks && .getVideoTracks)().some((track) => track.readyState === "live") || false;
+    const hasLiveVideo = (remoteStream && remoteStream.getVideoTracks ? remoteStream.getVideoTracks() : []).some((track) => track.readyState === "live") || false;
     hasRemoteVideoTrackRef.current = hasLiveVideo;
     setHasRemoteVideoTrack(hasLiveVideo);
     if (remoteStream) {
@@ -2039,7 +2039,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       let recordStream = null;
       if ((callStageRef.current && callStageRef.current.captureStream)) {
         recordStream = callStageRef.current.captureStream(24);
-      } else if (remoteStreamRef.current?(.getTracks && .getTracks)().length) {
+      } else if ((remoteStreamRef.current && remoteStreamRef.current.getTracks ? remoteStreamRef.current.getTracks() : []).length) {
         recordStream = remoteStreamRef.current;
       }
       if (!recordStream || !recordStream.getTracks || recordStream.getTracks().length === 0) return;
@@ -2384,7 +2384,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
 
       // facingMode が効かない（PC等で1カメラ/同一deviceId）場合に、deviceId でフォールバック
       const currentDeviceId = currentVideoDeviceIdRef.current;
-      const newDeviceId = newTrack?(.getSettings && .getSettings)().deviceId || null;
+      const newDeviceId = (newTrack && newTrack.getSettings ? newTrack.getSettings() : {}).deviceId || null;
       const facingModeLikelyWorked = !!newTrack && (!currentDeviceId || !newDeviceId || newDeviceId !== currentDeviceId);
 
       if (!facingModeLikelyWorked) {
@@ -2407,7 +2407,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       await replaceOutgoingVideoTrack(newTrack);
       await attachLocalVideoTrack(newTrack);
 
-      const finalDeviceId = newTrack?(.getSettings && .getSettings)().deviceId || null;
+      const finalDeviceId = (newTrack && newTrack.getSettings ? newTrack.getSettings() : {}).deviceId || null;
       if (finalDeviceId) currentVideoDeviceIdRef.current = finalDeviceId;
 
       // facingMode が効く環境なら state を更新（UI表示用）
@@ -7174,7 +7174,7 @@ function App() {
           const callsCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "calls");
           const snap = await getDocs(query(callsCol, orderBy("createdAt", "desc"), limit(1)));
           const first = (snap.docs && snap.docs)[0] || null;
-          sessionId = (first && first.id) || first?(.data && .data)(() && ).sessionId) || "";
+          sessionId = (first && first.id) || (first && first.data ? first.data().sessionId : "") || "";
         } catch {
         }
       }
