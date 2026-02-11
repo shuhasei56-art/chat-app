@@ -1,6 +1,4 @@
 {
   "extends": ["react-app", "react-app/jest"],
-  "parserOptions": {
-    "ecmaVersion": 2020
-  }
+  "parserOptions": { "ecmaVersion": 2020 }
 }
