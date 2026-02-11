@@ -2903,7 +2903,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [/* @__PURE__ */ jsx("input", { type: "checkbox", checked: showShortcutHelp, onChange: (e) => setShowShortcutHelp(e.target.checked) }), "ショートカット表示"] }),
           /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [/* @__PURE__ */ jsx("input", { type: "checkbox", checked: confirmBeforeHangup, onChange: (e) => setConfirmBeforeHangup(e.target.checked) }), "切断前確認"] }),
           /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [/* @__PURE__ */ jsx("input", { type: "checkbox", checked: keepAwake, onChange: (e) => setKeepAwake(e.target.checked) }), "画面スリープ抑止"] }),
-          /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [/* @__PURE__ */ jsx("input", { type: "checkbox", checked: showDebugHud, onChange: (e) => setShowDebugHud(e.target.checked) }), "デバッグHUD"] })] })
+          /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 bg-white/5 rounded-2xl p-3 text-xs font-bold", children: [/* @__PURE__ */ jsx("input", { type: "checkbox", checked: showDebugHud, onChange: (e) => setShowDebugHud(e.target.checked) }), "デバッグHUD"] }),
         ] }),
         /* @__PURE__ */ jsx("div", { className: "text-[11px] opacity-70 leading-relaxed", children: "この設定パネルから、マイク/カメラ/画面共有/録画/スクショ/画質・音声処理・表示調整など（20+機能）をまとめて操作できます。" })
       ] })
@@ -4776,19 +4776,42 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
         const packRef = doc(db, "artifacts", appId, "public", "data", "sticker_packs", packId);
         const packDoc = await transaction.get(packRef);
         if (!packDoc.exists()) throw "Pack does not exist";
-        if (packDoc.data().status !== "pending") throw "Already processed";
-        transaction.update(packRef, { status: approve ? "approved" : "rejected" });
+        const packData = packDoc.data() || {};
+        if (packData.status !== "pending") throw "Already processed";
+
+        // 申請の状態を確定
+        transaction.update(packRef, { status: approve ? "approved" : "rejected", reviewedAt: serverTimestamp() });
+
+        // 承認の場合は作成者に報酬（ユーザードキュメント未作成でも落ちないようにする）
         if (approve) {
+          if (!authorId) throw "Missing authorId";
           const userRef = doc(db, "artifacts", appId, "public", "data", "users", authorId);
-          transaction.update(userRef, { wallet: increment(100) });
+          const userDoc = await transaction.get(userRef);
+          if (userDoc.exists()) {
+            transaction.update(userRef, { wallet: increment(100) });
+          } else {
+            transaction.set(userRef, { wallet: 100, createdAt: serverTimestamp() }, { merge: true });
+          }
         }
       });
-      showNotification(approve ? "\u627F\u8A8D\u3057\u3001\u5831\u916C\u3092\u4ED8\u4E0E\u3057\u307E\u3057\u305F" : "\u5374\u4E0B\u3057\u307E\u3057\u305F");
+      showNotification(approve ? "承認し、報酬を付与しました" : "却下しました");
     } catch (e) {
       console.error(e);
-      showNotification(e === "Already processed" ? "\u65E2\u306B\u51E6\u7406\u6E08\u307F\u306E\u7533\u8ACB\u3067\u3059" : "\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
+      const msg = typeof e === "string" ? e : e?.message || "";
+      if (msg.includes("permission") || msg.includes("PERMISSION")) {
+        showNotification("権限がないため承認できません（Firestoreルール/管理者権限を確認してください）");
+      } else if (msg === "Already processed") {
+        showNotification("既に処理済みの申請です");
+      } else if (msg === "Pack does not exist") {
+        showNotification("スタンプ申請が見つかりません");
+      } else if (msg === "Missing authorId") {
+        showNotification("作成者情報が不足しているため承認できません");
+      } else {
+        showNotification("エラーが発生しました");
+      }
     }
   };
+
   const executeBanToggle = async () => {
     if (!banTarget) return;
     try {
