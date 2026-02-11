@@ -1931,7 +1931,17 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       cleanup();
       startedRef.current = false;
     };
-  }, [chatId, user, firestore, remoteStream, currentCallId, safeEndCall, tryPlayRemoteMedia]);
+  }, [
+    chatId,
+    user,
+    isVideoEnabled,
+    sessionId,
+    isCallerProp,
+    callData,
+    cleanup,
+    safeEndCall,
+    tryPlayRemoteMedia
+  ]);
   useEffect(() => {
     if (remoteStream && remoteAudioRef.current) {
       remoteAudioRef.current.srcObject = remoteStream;
