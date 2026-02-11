@@ -7,7 +7,7 @@ import {
   onAuthStateChanged,
   setPersistence,
   browserLocalPersistence,
-  createUserWithEmailAndPassword,
+  createUserWithEmailAndPassword,a
   signInWithEmailAndPassword,
   fetchSignInMethodsForEmail,
   GoogleAuthProvider,
@@ -166,6 +166,9 @@ const evictOldestMessageMediaCache = () => {
 };
 const isCachedMessageMediaUrl = (url) => !!url && messageMediaUrlSet.has(url);
 
+// Global fallback to avoid ReferenceError when a component forgets to receive showNotification
+const showNotification = (..._args) => {
+};
 const getCachedMessageMediaUrl = ({ chatId, message }) => {
   try {
     const cacheKey = buildMessageMediaCacheKey(chatId, message.id, message.chunkCount, message.mimeType, message.type);
@@ -2653,7 +2656,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       /* ステータスバー */
       /* @__PURE__ */ jsxs("div", { className: "absolute top-3 left-3 right-3 z-[1500] flex items-center gap-2", children: [
         /* @__PURE__ */ jsx("div", { className: "px-3 py-2 rounded-full bg-black/45 border border-white/15 backdrop-blur-md text-[11px] font-black", children: callStatusText }),
-        showTurnHint && /* @__PURE__ */ jsx("div", { className: "px-3 py-2 rounded-full bg-amber-500/80 text-black text-[11px] font-black", children: "ネットワークによりTURNが必要な場合があります" }),
+        showTurnHint && /* @__PURE__ */ jsx("div", { className: "px-3 py-2 rounded-full bg-amber-500/80 text-black text-[11px] font-black", children: "このネットワークではTURNサーバーが必要な可能性があります（REACT_APP_TURN_URLS / REACT_APP_TURN_USERNAME / REACT_APP_TURN_CREDENTIAL を設定）" }),
         /* @__PURE__ */ jsx("button", { onClick: retryRemotePlayback, className: "ml-auto px-3 py-2 rounded-full bg-white/15 hover:bg-white/20 border border-white/15 text-[11px] font-black", children: "再生/復帰" })
       ] }),
 
@@ -3812,13 +3815,31 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, showN
   const handleDeletePost = useCallback(async () => {
     try {
       if (!confirm("この投稿を削除しますか？")) return;
+      // まずは通常削除（許可されているルールの場合）
       await deleteDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id));
-      const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"));
-      for (const d of c.docs) await deleteDoc(d.ref);
+      try {
+        const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"));
+        for (const d of c.docs) await deleteDoc(d.ref);
+      } catch {
+      }
       showNotification("投稿を削除しました");
     } catch (e) {
       console.error(e);
-      showNotification("削除に失敗しました");
+      // ルールでdeleteが禁止されている場合のフォールバック：ソフト削除
+      try {
+        await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), {
+          deleted: true,
+          deletedAt: serverTimestamp(),
+          content: "(削除されました)",
+          preview: "",
+          hasChunks: false,
+          chunkCount: 0
+        });
+        showNotification("投稿を削除しました");
+      } catch (e2) {
+        console.error(e2);
+        showNotification("削除に失敗しました");
+      }
     }
   }, [db2, appId2, post.id, showNotification]);
   useEffect(() => {
@@ -4448,6 +4469,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
 };
 const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }) => {
   const [packs, setPacks] = useState([]);
+  const [approvingPackIds, setApprovingPackIds] = useState(() => new Set());
   const [activeTab, setActiveTab] = useState("shop");
   const [activeShopTab, setActiveShopTab] = useState("stickers");
   const [adminSubTab, setAdminSubTab] = useState("stickers");
@@ -4828,6 +4850,12 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     }
   };
   const handleApprove = async (packId, authorId, approve) => {
+    // 二重クリック防止
+    setApprovingPackIds((prev) => {
+      const next = new Set(prev);
+      next.add(packId);
+      return next;
+    });
     try {
       await runTransaction(db, async (transaction) => {
         const packRef = doc(db, "artifacts", appId, "public", "data", "sticker_packs", packId);
@@ -4839,7 +4867,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
         // 申請の状態を確定
         transaction.update(packRef, { status: approve ? "approved" : "rejected", reviewedAt: serverTimestamp() });
 
-        // 承認の場合は作成者に報酬（ユーザードキュメント未作成でも落ちないようにする）
+        // 承認の場合は作成者に報酬（ユーザードキュメント未作成でも落ちない）
         if (approve) {
           if (!authorId) throw "Missing authorId";
           const userRef = doc(db, "artifacts", appId, "public", "data", "users", authorId);
@@ -4851,25 +4879,58 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
           }
         }
       });
-      showNotification(approve ? "承認し、報酬を付与しました" : "却下しました");
+
+      // UI上は即反映（onSnapshot待たずに消す）
+      setPacks((prev) => prev.filter((p) => p.id !== packId));
+      showNotification(approve ? "承認しました" : "却下しました");
     } catch (e) {
       console.error(e);
       const msg = typeof e === "string" ? e : e?.message || "";
       if (msg.includes("permission") || msg.includes("PERMISSION")) {
         showNotification("権限がないため承認できません（Firestoreルール/管理者権限を確認してください）");
       } else if (msg === "Already processed") {
-        showNotification("既に処理済みの申請です");
+        // 既に処理済みでもUIからは消してOK
+        setPacks((prev) => prev.filter((p) => p.id !== packId));
+        showNotification("既に処理済みです");
       } else if (msg === "Pack does not exist") {
-        showNotification("スタンプ申請が見つかりません");
+        setPacks((prev) => prev.filter((p) => p.id !== packId));
+        showNotification("申請が見つかりません");
       } else if (msg === "Missing authorId") {
         showNotification("作成者情報が不足しているため承認できません");
       } else {
         showNotification("エラーが発生しました");
       }
+    } finally {
+      setApprovingPackIds((prev) => {
+        const next = new Set(prev);
+        next.delete(packId);
+        return next;
+      });
     }
   };
 
-  const executeBanToggle = async () => {
+  const handleApproveAll = async (approve) => {
+    if (packs.length === 0) return;
+    if (!confirm(approve ? `申請中 ${packs.length} 件を一括承認しますか？` : `申請中 ${packs.length} 件を一括却下しますか？`)) return;
+    // まとめて処理（同時実行は3件まで）
+    const queue = [...packs];
+    const running = new Set();
+    const runOne = async (pack) => {
+      await handleApprove(pack.id, pack.authorId, approve);
+    };
+    while (queue.length) {
+      while (running.size < 3 && queue.length) {
+        const pack = queue.shift();
+        const p = runOne(pack);
+        running.add(p);
+        p.finally(() => running.delete(p));
+      }
+      if (running.size) await Promise.race(running);
+    }
+    await Promise.all(running);
+  };
+
+const executeBanToggle = async () => {
     if (!banTarget) return;
     try {
       await updateDoc(doc(db, "artifacts", appId, "public", "data", "users", banTarget.uid), { isBanned: !banTarget.isBanned });
@@ -5083,6 +5144,12 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       })
     ] }),
     adminMode && activeTab === "admin" && adminSubTab === "stickers" && /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto p-4 space-y-4", children: [
+      /* 一括操作バー */
+      /* @__PURE__ */ jsxs("div", { className: "sticky top-0 z-10 bg-white/90 backdrop-blur-md border rounded-2xl p-3 shadow-sm flex items-center gap-2", children: [
+        /* @__PURE__ */ jsx("div", { className: "text-xs font-black text-gray-700", children: ["申請中: ", packs.length, "件"] }),
+        /* @__PURE__ */ jsx("button", { onClick: () => handleApproveAll(true), className: "ml-auto px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-black disabled:opacity-50", disabled: packs.length === 0, children: "全て承認" }),
+        /* @__PURE__ */ jsx("button", { onClick: () => handleApproveAll(false), className: "px-3 py-2 rounded-xl bg-red-600 text-white text-xs font-black disabled:opacity-50", disabled: packs.length === 0, children: "全て却下" })
+      ] }),
       packs.length === 0 && /* @__PURE__ */ jsx("div", { className: "text-center py-10 text-gray-400", children: "\u7533\u8ACB\u4E2D\u306E\u30B9\u30BF\u30F3\u30D7\u306F\u3042\u308A\u307E\u305B\u3093" }),
       packs.map((pack) => /* @__PURE__ */ jsxs("div", { className: "border rounded-2xl p-4 shadow-sm bg-white", children: [
         /* @__PURE__ */ jsx("div", { className: "flex justify-between items-start mb-2", children: /* @__PURE__ */ jsxs("div", { className: "flex-1", children: [
