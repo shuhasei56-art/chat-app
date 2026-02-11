@@ -1544,8 +1544,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
       const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
       const pc = new RTCPeerConnection(buildRtcConfig(false));
-      try { pc.addTransceiver("audio", { direction: "recvonly" }); } catch (e) {}
-      try { pc.addTransceiver("video", { direction: "recvonly" }); } catch (e) {}
+      try { pc.addTransceiver("audio", { direction: "sendrecv" }); } catch (e) {}
+      if (!!isVideoEnabled) { try { pc.addTransceiver("video", { direction: "sendrecv" }); } catch (e) {} }
       pcRef.current = pc;
       try {
         setIceState(pc.iceConnectionState || "new");
@@ -4834,8 +4834,9 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
 
         // 承認の場合は作成者に報酬（ユーザードキュメント未作成でも落ちない）
         if (approve) {
-          if (!authorId) throw "Missing authorId";
-          const userRef = doc(db, "artifacts", appId, "public", "data", "users", authorId);
+          const resolvedAuthorId = authorId || packData.authorId || packData.author || packData.createdBy || "";
+          if (!resolvedAuthorId) throw "Missing authorId";
+          const userRef = doc(db, "artifacts", appId, "public", "data", "users", resolvedAuthorId);
           const userDoc = await transaction.get(userRef);
           if (userDoc.exists()) {
             transaction.update(userRef, { wallet: increment(100) });
@@ -4863,7 +4864,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       } else if (msg === "Missing authorId") {
         showNotification("作成者情報が不足しているため承認できません");
       } else {
-        showNotification("エラーが発生しました");
+        showNotification(`エラーが発生しました${msg ? ": " + msg : ""}`);
       }
     } finally {
       setApprovingPackIds((prev) => {
