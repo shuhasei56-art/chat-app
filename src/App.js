@@ -950,7 +950,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const audioPrefsRef = useRef({ noiseSuppression: true, echoCancellation: true, autoGainControl: true });
   const prevConnectedRef = useRef(false);
   const sessionId = callData && callData.sessionId || "";
-  const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData && callData.callerId === user.uid;
+  const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData === user.uid;
   const canSelectAudioOutput = typeof HTMLMediaElement !== "undefined" && typeof HTMLMediaElement.prototype && HTMLMediaElement.prototype.setSinkId === "function";
   const isIOSWebKit = (() => {
     const ua = navigator.userAgent || "";
@@ -1549,7 +1549,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           callRef,
           {
             sessionId,
-            callerId: callData && callData.callerId || user.uid,
+            callerId: callData || user.uid,
             callType: isVideoEnabled ? "video" : "audio",
             offer: { type: "offer", sdp: restartOffer.sdp },
             offerSdp: restartOffer.sdp,
@@ -1563,7 +1563,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       } finally {
         isRecoveringRef.current = false;
       }
-    }, [chatId, sessionId, isCaller, isVideoEnabled, callData && callData.callerId, user.uid]);
+    }, [chatId, sessionId, isCaller, isVideoEnabled, callData, user.uid]);
   useEffect(() => {
     isMountedRef.current = true;
     initAudioContext();
@@ -1574,10 +1574,10 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      if (!chatId || !user && user.uid) return;
+      if (!chatId || !user) return;
       if (startedRef.current) return;
       startedRef.current = true;
-      const localIsCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData && callData.callerId === user.uid;
+      const localIsCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData === user.uid;
       if (!sessionId) {
         setCallError("\u901A\u8A71\u30BB\u30C3\u30B7\u30E7\u30F3\u304C\u7121\u52B9\u3067\u3059\u3002");
         safeEndCall(1500);
@@ -1907,7 +1907,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
             callRef,
             {
               sessionId,
-              callerId: callData && callData.callerId || user.uid,
+              callerId: callData || user.uid,
               callType: isVideoEnabled ? "video" : "audio",
               status: "accepted",
               offer: { type: "offer", sdp: offer.sdp },
@@ -1931,7 +1931,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       cleanup();
       startedRef.current = false;
     };
-  }, [chatId, user && user.uid, isVideoEnabled, sessionId, isCallerProp, callData && callData.callerId, cleanup, safeEndCall, tryPlayRemoteMedia]);
+  }, [chatId, user, isVideoEnabled, sessionId, isCallerProp, callData, cleanup, safeEndCall, tryPlayRemoteMedia]);
   useEffect(() => {
     if (remoteStream && remoteAudioRef.current) {
       remoteAudioRef.current.srcObject = remoteStream;
@@ -3694,7 +3694,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
 const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, showNotification = () => {} }) => {
   const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [postPreview, setPostPreview] = useState(null);
-  const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes && post.likes.includes(user && user.uid);
+  const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes && post.likes.includes(user);
   const isMe = post.userId === user.uid;
   const handleDeletePost = useCallback(async () => {
     try {
@@ -6456,7 +6456,7 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
       scanning ? /* @__PURE__ */ jsxs("div", { className: "relative w-64 h-64 border-4 border-green-500 rounded-3xl overflow-hidden", children: [
         /* @__PURE__ */ jsx("video", { ref: videoRef, className: "w-full h-full object-cover" }),
         /* @__PURE__ */ jsx("canvas", { ref: canvasRef, className: "hidden" })
-      ] }) : /* @__PURE__ */ jsx("div", { className: "bg-white p-6 rounded-[40px] shadow-xl border", children: /* @__PURE__ */ jsx("img", { src: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user && user.uid}`, className: "w-48 h-48" }) }),
+      ] }) : /* @__PURE__ */ jsx("div", { className: "bg-white p-6 rounded-[40px] shadow-xl border", children: /* @__PURE__ */ jsx("img", { src: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user}`, className: "w-48 h-48" }) }),
       /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-4 w-full", children: [
         /* @__PURE__ */ jsxs("button", { onClick: startScanner, className: "flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border", children: [
           /* @__PURE__ */ jsx(Maximize, { className: "w-6 h-6 text-green-500" }),
@@ -6894,7 +6894,7 @@ function App() {
   };
   const handleLogout = useCallback(async (nextProfile = null) => {
     try {
-      const uid = user && user.uid;
+      const uid = user;
       const profileToSave = nextProfile || profile;
       if (uid && profileToSave) {
         const persistFields = {
@@ -6911,7 +6911,7 @@ function App() {
     } finally {
       await auth.signOut();
     }
-  }, [user && user.uid, profile]);
+  }, [user, profile]);
   useEffect(() => {
     const unlockAudio = () => {
       initAudioContext();
@@ -7302,7 +7302,7 @@ function App() {
       return syncedCallData && syncedCallData.callerId === user.uid ? "dialing" : "incoming";
     }
     return activeCall.phase || null;
-  }, [activeCall, syncedCallData, user && user.uid]);
+  }, [activeCall, syncedCallData, user]);
   useEffect(() => {
     if (!activeCall || effectiveCallPhase !== "dialing") return;
     const timeout = setTimeout(() => {
