@@ -2912,7 +2912,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       ] })
     ] })
 
-    ]
   });
 };
 const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) => {
@@ -7259,7 +7258,6 @@ var App_13_default = App;
 export {
   App_13_default as default
 };
-
 
 
 
