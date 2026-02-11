@@ -1283,7 +1283,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     const becameConnected = isConnected && !prevConnectedRef.current;
     if (becameConnected) {
       if (playConnectSound) playNotificationSound();
-      if vibrateOnConnect && navigator.vibrate navigator.vibrate([120, 60, 120]);
+      if (vibrateOnConnect && navigator.vibrate) navigator.vibrate([120, 60, 120]);
       tryPlayRemoteMedia();
     }
     prevConnectedRef.current = isConnected;
@@ -1933,10 +1933,10 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     };
   }, [chatId, user && user.uid, isVideoEnabled, sessionId, isCallerProp, callData && callData.callerId, cleanup, safeEndCall, tryPlayRemoteMedia]);
   useEffect(() => {
-    if remoteStream && remoteAudioRef.current {
+    if (remoteStream && remoteAudioRef.current) {
       remoteAudioRef.current.srcObject = remoteStream;
     }
-    if remoteStream && remoteVideoRef.current {
+    if (remoteStream && remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = remoteStream;
     }
     const hasLiveVideo = (remoteStream && remoteStream.getVideoTracks ? remoteStream.getVideoTracks() : []).some((track) => track.readyState === "live") || false;
@@ -3502,7 +3502,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
     if (m.audio) {
       new Audio(m.audio).play().catch((e2) => console.error("Audio playback error:", e2));
     }
-    if onStickerClick && m.packId {
+    if (onStickerClick && m.packId) {
       onStickerClick(m.packId);
     }
   };
@@ -3594,7 +3594,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
               /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-8 h-8 text-green-500" }),
               /* @__PURE__ */ jsx("span", { className: "text-[10px] text-gray-500 font-bold", children: "\u52D5\u753B\u3092\u53D7\u4FE1\u4E2D..." })
             ] }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy", onError: () => {
-              if hasLocalBlobContent && m.hasChunks setForceChunkLoad(true);
+              if (hasLocalBlobContent && m.hasChunks) setForceChunkLoad(true);
             } }),
             m.type === "video" && !isShowingPreview && !finalSrc && /* @__PURE__ */ jsx("div", { className: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none", children: /* @__PURE__ */ jsx("div", { className: "bg-black/30 rounded-full p-2 backdrop-blur-sm", children: /* @__PURE__ */ jsx(Play, { className: "w-8 h-8 text-white fill-white opacity-90" }) }) }),
             isShowingPreview && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-2 right-2 bg-black/60 text-white text-[9px] px-2 py-0.5 rounded-full backdrop-blur-md flex items-center gap-1", children: [
@@ -4017,7 +4017,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
   const clearCanvas = () => {
     const canvas = canvasRef.current;
     const ctx = canvas && canvas.getContext("2d");
-    if ctx && canvas {
+    if (ctx && canvas) {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       setTextObjects([]);
@@ -4036,7 +4036,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
     setDraggingTextId(id);
   };
   const handleContainerMouseMove = (e) => {
-    if draggingTextId && containerRef.current {
+    if (draggingTextId && containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       const x = (e.clientX || e.touches[0].clientX) - rect.left;
       const y = (e.clientY || e.touches[0].clientY) - rect.top;
@@ -4054,7 +4054,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
       img.onload = () => {
         const canvas = canvasRef.current;
         const ctx = canvas && canvas.getContext("2d");
-        if ctx && canvas {
+        if (ctx && canvas) {
           let width = img.width;
           let height = img.height;
           const maxSize = 250;
@@ -4113,7 +4113,7 @@ const StickerEditor = ({ user, profile, onClose, showNotification }) => {
     }
   };
   const stopStickerRecording = () => {
-    if stickerMediaRecorderRef.current && isRecordingSticker {
+    if (stickerMediaRecorderRef.current && isRecordingSticker) {
       stickerMediaRecorderRef.current.stop();
       setIsRecordingSticker(false);
     }
@@ -5344,14 +5344,14 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     }
   };
   const stopRecording = () => {
-    if mediaRecorderRef.current && isRecording {
+    if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       clearInterval(recordingIntervalRef.current);
     }
   };
   const cancelRecording = () => {
-    if mediaRecorderRef.current && isRecording {
+    if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.onstop = () => {
         if (audioStreamRef.current) {
           audioStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -5542,7 +5542,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           isUploading: false
         });
       } else if (!hasChunks) {
-        if localBlobUrl && file {
+        if (localBlobUrl && file) {
           const reader = new FileReader();
           reader.readAsDataURL(file);
           await new Promise((resolve) => {
@@ -6416,7 +6416,7 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
   };
   useEffect(() => {
     return () => {
-      if videoRef.current && videoRef.current.srcObject {
+      if (videoRef.current && videoRef.current.srcObject) {
         const stream = videoRef.current.srcObject;
         stream.getTracks().forEach((t) => t.stop());
       }
@@ -6426,7 +6426,7 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
     if (videoRef.current && videoRef.current.readyState === videoRef.current && videoRef.current.HAVE_ENOUGH_DATA) {
       const c = canvasRef.current;
       const ctx = c && c.getContext("2d");
-      if c && ctx {
+      if (c && ctx) {
         c.height = videoRef.current.videoHeight;
         c.width = videoRef.current.videoWidth;
         ctx.drawImage(videoRef.current, 0, 0, c.width, c.height);
@@ -6896,7 +6896,7 @@ function App() {
     try {
       const uid = user && user.uid;
       const profileToSave = nextProfile || profile;
-      if uid && profileToSave {
+      if (uid && profileToSave) {
         const persistFields = {
           avatar: profileToSave.avatar || "",
           cover: profileToSave.cover || "",
@@ -6944,8 +6944,7 @@ function App() {
         if (cachedProfile) {
           setProfile({ ...fallbackProfile, ...cachedProfile });
         }
-        // Keep user logged-in view even if Firestore profile fetch fails.
-        setView("home");
+        // Keep user logged-in view even if (Firestore profile fetch fails.) setView("home");
         try {
           const userRef = doc(db, "artifacts", appId, "public", "data", "users", u.uid);
           const docSnap = await getDoc(userRef);
@@ -7285,7 +7284,7 @@ function App() {
   useEffect(() => {
     if (!activeCall || !chats.length) return;
     const callChat = chats.find((c) => c.id === activeCall.chatId);
-    if callChat && callChat.backgroundImage {
+    if (callChat && callChat.backgroundImage) {
       setCurrentChatBackground(callChat.backgroundImage);
     } else {
       setCurrentChatBackground(null);
