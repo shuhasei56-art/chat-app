@@ -2920,7 +2920,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         /* @__PURE__ */ jsx("button", { onClick: () => setShowDebugHud(false), className: "px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20", children: "閉じる" })
       ] })
     ] })
-
+    ]
   });
 };
 const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) => {
