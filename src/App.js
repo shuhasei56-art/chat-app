@@ -220,12 +220,12 @@ const rtcConfig = {
   iceServers,
   iceCandidatePoolSize: 4,
   bundlePolicy: "max-bundle",
-  iceTransportPolicy: forceRelayOnly ? "relay" : "all"
+  iceTransportPolicy: (forceRelayOnly || hasTurnConfig) ? "relay" : "all"
 };
 const buildRtcConfig = (preferRelay = false) => ({
   ...rtcConfig,
   // Use TURN relay on reconnect for long-distance / strict NAT when TURN is configured.
-  iceTransportPolicy: forceRelayOnly || (preferRelay && hasTurnConfig) ? "relay" : "all"
+  iceTransportPolicy: (forceRelayOnly || hasTurnConfig || (preferRelay && hasTurnConfig)) ? "relay" : "all"
 });
 const formatTime = (timestamp) => {
   if (!timestamp) return "";
