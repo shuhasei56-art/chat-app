@@ -1596,7 +1596,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
 
       const pc = new RTCPeerConnection(buildRtcConfig(false));
       try { pc.addTransceiver("audio", { direction: "sendrecv" }); } catch (e) {}
-      if (!!isVideoEnabled) { try { pc.addTransceiver("video", { direction: "sendrecv" }); } catch (e) {} }
+      const wantsVideo = (callData?.callType !== "audio");
+      if (wantsVideo) { try { pc.addTransceiver("video", { direction: "sendrecv" }); } catch (e) {} }
       pcRef.current = pc;
 
       try {
@@ -2298,9 +2299,22 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const replaceOutgoingVideoTrack = async (newTrack) => {
     const pc = pcRef.current;
     if (!pc || !newTrack) return;
-    const sender = pc.getSenders().find((s) => s?.track?.kind === "video");
+
+    // Prefer replacing an existing sender track (stable, no renegotiation)
+    let sender = pc.getSenders().find((s) => s?.track?.kind === "video");
     if (sender) {
       await sender.replaceTrack(newTrack);
+      return;
+    }
+
+    // If the PC was created without a video sender (e.g., camera off at start),
+    // add the track so screen sharing can still work.
+    try {
+      const stream = localStreamRef.current || new MediaStream();
+      if (!localStreamRef.current) localStreamRef.current = stream;
+      sender = pc.addTrack(newTrack, stream);
+    } catch (e) {
+      console.warn("Failed to add video track to PC:", e);
     }
   };
   const attachLocalVideoTrack = async (newTrack) => {
@@ -2452,7 +2466,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     }
   };
   const toggleScreenShare = async () => {
-    if (!isVideoEnabled) return;
+    // Allow screen sharing even when camera is OFF (video call only)
     if (!navigator.mediaDevices?.getDisplayMedia) return;
     if (isScreenSharing) {
       await stopScreenShare();
@@ -2469,6 +2483,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       };
       screenTrackRef.current = displayTrack;
       setIsScreenSharing(true);
+      try { setIsVideoEnabled(true); } catch {}
       setIsVideoOff(false);
     } catch (e) {
       console.warn("Screen share start failed:", e);
@@ -2523,10 +2538,10 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     return /* @__PURE__ */ jsxs("div", { ref: callStageRef, className: "fixed inset-0 z-[1000] bg-slate-950 text-white flex flex-col", children: [
       /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "absolute w-0 h-0 opacity-0 pointer-events-none" }),
       /* ステータスバー */
-      /* @__PURE__ */ jsxs("div", { className: "absolute top-3 left-3 right-3 z-[1500] flex items-center gap-2", children: [
+      /* @__PURE__ */ jsxs("div", { className: "absolute top-3 left-3 right-3 z-[1500] flex flex-wrap items-center gap-2", children: [
         /* @__PURE__ */ jsx("div", { className: "px-3 py-2 rounded-full bg-black/45 border border-white/15 backdrop-blur-md text-[11px] font-black", children: callStatusText }),
         showTurnHint && /* @__PURE__ */ jsx("div", { className: "px-3 py-2 rounded-full bg-amber-500/80 text-black text-[11px] font-black", children: "このネットワークではTURNサーバーが必要な可能性があります（REACT_APP_TURN_URLS / REACT_APP_TURN_USERNAME / REACT_APP_TURN_CREDENTIAL を設定）" }),
-        /* @__PURE__ */ jsx("button", { onClick: retryRemotePlayback, className: "ml-auto px-3 py-2 rounded-full bg-white/15 hover:bg-white/20 border border-white/15 text-[11px] font-black", children: "再生/復帰" })
+        /* @__PURE__ */ jsx("button", { onClick: retryRemotePlayback, className: "w-full sm:w-auto sm:ml-auto px-3 py-2 rounded-full bg-white/15 hover:bg-white/20 border border-white/15 text-[11px] font-black", children: "再生/復帰" })
       ] }),
 
       /* @__PURE__ */ jsx("div", { className: "absolute inset-0 bg-[radial-gradient(circle_at_15%_15%,#1e3a8a_0%,#111827_45%,#020617_100%)]" }),
