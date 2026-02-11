@@ -1937,14 +1937,16 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     };
   // 1940行目付近にある useEffect の終わり方を確認
   }, [
-    activeCall, 
-    remoteStream, 
+    callData, // activeCall ではなく props の callData を使用
+    chatId,   // 必要な依存関係を追加
+    user.uid, // 必要な依存関係を追加
+    // remoteStream, // 無限ループの原因になりやすいため、stream自体は外すか慎重に扱う（今回は外して logic 内の ref を信用するのが安全）
     isMuted, 
     isVideoOff, 
     isScreenSharing, 
     safeEndCall, 
     tryPlayRemoteMedia
-  ]); // 正しく配列を閉じ、useEffect の引数として完結させる
+  ]);
   useEffect(() => {
     if (remoteStream && remoteAudioRef.current) {
       remoteAudioRef.current.srcObject = remoteStream;
