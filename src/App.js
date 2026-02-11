@@ -165,6 +165,15 @@ const evictOldestMessageMediaCache = () => {
   }
 };
 const isCachedMessageMediaUrl = (url) => !!url && messageMediaUrlSet.has(url);
+
+const getCachedMessageMediaUrl = ({ chatId, message }) => {
+  try {
+    const cacheKey = buildMessageMediaCacheKey(chatId, message.id, message.chunkCount, message.mimeType, message.type);
+    return messageMediaUrlCache.get(cacheKey) || null;
+  } catch {
+    return null;
+  }
+};
 const loadChunkedMessageMedia = async ({ db: db2, appId: appId2, chatId, message }) => {
   const cacheKey = buildMessageMediaCacheKey(chatId, message.id, message.chunkCount, message.mimeType, message.type);
   const cached = messageMediaUrlCache.get(cacheKey);
@@ -3479,6 +3488,13 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
   const hasLocalBlobContent = isMe && m.content?.startsWith("blob:");
   const shouldLoadFromChunks = m.hasChunks && (!hasLocalBlobContent || forceChunkLoad);
   useEffect(() => {
+    if (!forceChunkLoad && m.hasChunks && isMe) {
+      const cachedUrl = getCachedMessageMediaUrl({ chatId, message: m });
+      if (cachedUrl) {
+        setMediaSrc(cachedUrl);
+        return;
+      }
+    }
     if (hasLocalBlobContent && !forceChunkLoad) {
       setMediaSrc(m.content);
       return;
@@ -5321,6 +5337,9 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       const newMsgRef = doc(msgCol);
       let localBlobUrl = null;
       let storedContent = content;
+      // Voom同様の「チャンク保存（即閲覧）」をチャット動画にも適用
+      // - Firestoreにchunksとして保存し、閲覧側はloadChunkedMessageMediaで即再生可能
+      // - 送信者側はローカルblobをキャッシュしてアップロード完了前でもすぐ再生できる
       let previewData = null;
       const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: usersByUid.get(currentReply.senderId)?.name || "Unknown", type: currentReply.type } } : {};
       const fileData = file ? { fileName: file.name, fileSize: file.size, mimeType: file.type } : {};
@@ -5336,6 +5355,82 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           }
         });
       }
+
+      // ✅ チャットの「動画送信」はVoomと同じ仕組みで保存して“すぐ見れる”ようにする
+      if (file && type === "video") {
+        localBlobUrl = URL.createObjectURL(file);
+        if (isMountedRef.current) {
+          // 送信者側はローカルblobで即プレビュー（キャッシュ）
+          try {
+            const plannedChunkCount = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+            const cacheKey = buildMessageMediaCacheKey(activeChatId, newMsgRef.id, plannedChunkCount, file.type, "video");
+            evictOldestMessageMediaCache();
+            messageMediaUrlCache.set(cacheKey, localBlobUrl);
+            messageMediaUrlSet.add(localBlobUrl);
+          } catch {
+          }
+        }
+        previewData = await generateThumbnail(file);
+        const plannedChunkCount = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+        await setDoc(newMsgRef, {
+          senderId: user.uid,
+          content: previewData || "",
+          type: "video",
+          preview: previewData,
+          ...additionalData,
+          ...replyData,
+          fileName: file.name,
+          fileSize: file.size,
+          mimeType: file.type || "video/mp4",
+          hasChunks: true,
+          chunkCount: plannedChunkCount,
+          isUploading: true,
+          createdAt: serverTimestamp(),
+          readBy: [user.uid]
+        });
+        await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
+        if (isMountedRef.current) {
+          setText("");
+          setPlusMenuOpen(false);
+          setContactModalOpen(false);
+          setTimeout(() => {
+            scrollRef.current?.scrollIntoView({ behavior: "auto" });
+          }, 100);
+        }
+
+        // Voom同様：arrayBuffer→base64（dataURLを使わず高速＆安定）
+        const plannedChunkCount2 = plannedChunkCount;
+        const CONCURRENCY = getUploadConcurrency();
+        const executing = /* @__PURE__ */ new Set();
+        let completed = 0;
+        let lastProgressAt = 0;
+        for (let i = 0; i < plannedChunkCount2; i++) {
+          const start = i * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, file.size);
+          const blobSlice = file.slice(start, end);
+          const p = blobSlice.arrayBuffer().then(async (buf) => {
+            const base64Data = bytesToBase64(new Uint8Array(buf));
+            await setDoc(doc(msgCol, newMsgRef.id, "chunks", `${i}`), { data: base64Data, index: i });
+            completed++;
+            const now = Date.now();
+            if (completed === plannedChunkCount2 || now - lastProgressAt >= 120) {
+              lastProgressAt = now;
+              setUploadProgressSafe(Math.round(completed / plannedChunkCount2 * 100));
+            }
+          });
+          executing.add(p);
+          p.finally(() => executing.delete(p));
+          if (executing.size >= CONCURRENCY) {
+            await Promise.race(executing);
+          }
+        }
+        await Promise.all(executing);
+        await updateDoc(newMsgRef, { isUploading: false });
+        setUploadingSafe(false);
+        setUploadProgressSafe(0);
+        return;
+      }
+
       if (file && ["image", "video", "audio", "file"].includes(type)) {
         localBlobUrl = URL.createObjectURL(file);
         storedContent = localBlobUrl;
