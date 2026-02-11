@@ -3573,7 +3573,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
     }
   };
   const readCount = (m.readBy?.length || 1) - 1;
-  const finalSrc = mediaSrc || m.preview;
+  const finalSrc = m.type === "video" ? mediaSrc : mediaSrc || m.preview;
   const isShowingPreview = loading || isInvalidBlob || finalSrc === m.preview;
   const handleBubbleClick = (e) => {
     e.stopPropagation();
@@ -3647,9 +3647,19 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
             /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-8 h-8 text-green-500" }),
             /* @__PURE__ */ jsx("span", { className: "text-[10px] text-gray-500 font-bold", children: m.type === "video" ? "\u52D5\u753B\u3092\u53D7\u4FE1\u4E2D..." : "\u753B\u50CF\u3092\u53D7\u4FE1\u4E2D..." })
           ] }) : /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-            m.type === "video" ? /* @__PURE__ */ jsx("video", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md bg-black ${showMenu ? "brightness-50 transition-all" : ""}`, controls: true, playsInline: true, preload: "metadata", onError: () => {
-              if (hasLocalBlobContent && m.hasChunks) setForceChunkLoad(true);
-            } }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy", onError: () => {
+            m.type === "video" ? mediaSrc ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", poster: m.preview || "", className: `max-w-full rounded-xl border border-white/50 shadow-md bg-black ${showMenu ? "brightness-50 transition-all" : ""}`, controls: true, playsInline: true, preload: "metadata", onError: () => {
+              // senderのblobが死んだ/再生できない場合はchunks復元に切り替え
+              if (m.hasChunks) setForceChunkLoad(true);
+            } }) : m.preview ? /* @__PURE__ */ jsx("div", { className: `relative max-w-full rounded-xl border border-white/50 shadow-md bg-black overflow-hidden ${showMenu ? "brightness-50 transition-all" : ""}`, children: [
+              /* @__PURE__ */ jsx("img", { src: m.preview || "", className: "w-full h-auto block opacity-90" }),
+              /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 flex flex-col items-center justify-center gap-2", children: [
+                /* @__PURE__ */ jsx("div", { className: "w-14 h-14 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center", children: /* @__PURE__ */ jsx(Play, { className: "w-8 h-8" }) }),
+                /* @__PURE__ */ jsx("button", { onClick: () => setForceChunkLoad(true), className: "px-3 py-2 rounded-full bg-white/20 hover:bg-white/25 text-[11px] font-black", children: "動画を読み込む" })
+              ] })
+            ] }) : /* @__PURE__ */ jsxs("div", { className: "p-4 bg-gray-100 rounded-xl flex flex-col items-center justify-center gap-2 min-w-[150px] min-h-[100px] border border-gray-200", children: [
+              /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-8 h-8 text-green-500" }),
+              /* @__PURE__ */ jsx("span", { className: "text-[10px] text-gray-500 font-bold", children: "\u52D5\u753B\u3092\u53D7\u4FE1\u4E2D..." })
+            ] }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy", onError: () => {
               if (hasLocalBlobContent && m.hasChunks) setForceChunkLoad(true);
             } }),
             m.type === "video" && !isShowingPreview && !finalSrc && /* @__PURE__ */ jsx("div", { className: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none", children: /* @__PURE__ */ jsx("div", { className: "bg-black/30 rounded-full p-2 backdrop-blur-sm", children: /* @__PURE__ */ jsx(Play, { className: "w-8 h-8 text-white fill-white opacity-90" }) }) }),
