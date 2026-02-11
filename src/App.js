@@ -949,6 +949,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const remoteStreamRef = useRef(new MediaStream());
   const unsubscribersRef = useRef([]);
   const pendingCandidatesRef = useRef([]);
+  const seenSignalingCandidatesRef = useRef(new Set());
   const disconnectTimerRef = useRef(null);
   const statsTimerRef = useRef(null);
   const localVideoFreezeWatchdogRef = useRef(null);
@@ -1838,15 +1839,37 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       };
       pc.onicecandidate = async (event) => {
         if (!event.candidate) return;
+        const candJson = event.candidate.toJSON();
+        // Primary: subcollection (fast / scalable)
         try {
           await addDoc(candidatesCol, {
             sessionId,
             senderId: user.uid,
-            candidate: event.candidate.toJSON(),
+            candidate: candJson,
             createdAt: serverTimestamp()
           });
+          return;
         } catch (e) {
-          console.warn("Failed to publish ICE candidate:", e);
+          console.warn("Failed to publish ICE candidate via subcollection:", e);
+        }
+        // Fallback: store candidates on signaling doc (works even if subcollection writes are blocked)
+        try {
+          const field = isCaller ? "callerCandidates" : "calleeCandidates";
+          await setDoc(
+            signalingRef,
+            {
+              sessionId,
+              [field]: arrayUnion({
+                senderId: user.uid,
+                candidate: candJson,
+                t: Date.now()
+              }),
+              updatedAt: serverTimestamp()
+            },
+            { merge: true }
+          );
+        } catch (e2) {
+          console.warn("Failed to publish ICE candidate via signaling doc:", e2);
         }
       };
       try {
@@ -1980,6 +2003,30 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         });
       });
       unsubscribersRef.current.push(unsubCandidates);
+      // Fallback candidates (signaling doc arrays)
+      const otherField = localIsCaller ? "calleeCandidates" : "callerCandidates";
+      const unsubSigCand = onSnapshot(signalingRef, (docSnap) => {
+        const d = docSnap.data() || {};
+        const arr = Array.isArray(d[otherField]) ? d[otherField] : [];
+        arr.forEach(async (item) => {
+          try {
+            const key = (item?.senderId || "") + "|" + (item?.t || "") + "|" + JSON.stringify(item?.candidate || {});
+            if (seenSignalingCandidatesRef.current.has(key)) return;
+            seenSignalingCandidatesRef.current.add(key);
+            const cand = item?.candidate;
+            if (!cand) return;
+            if (item?.senderId === user.uid) return;
+            if (pc.remoteDescription) {
+              await pc.addIceCandidate(new RTCIceCandidate(cand));
+            } else {
+              pendingCandidatesRef.current.push(cand);
+            }
+          } catch (e) {
+            console.warn("Failed to add signaling ICE candidate:", e);
+          }
+        });
+      });
+      unsubscribersRef.current.push(unsubSigCand);
       if (localIsCaller) {
         try {
           const offer = await pc.createOffer({
@@ -3757,7 +3804,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
     ] })
   ] });
 });
-const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => {
+const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, showNotification = () => {} }) => {
   const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [postPreview, setPostPreview] = useState(null);
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
@@ -6306,7 +6353,7 @@ const VoomView = ({ user, allUsers, profile, posts = [], showNotification = () =
           /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || mediaFile ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: "\u6295\u7A3F" })
         ] })
       ] }),
-      (posts || []).map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id))
+      (posts || []).map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile, showNotification }, p.id))
     ] })
   ] });
 };
