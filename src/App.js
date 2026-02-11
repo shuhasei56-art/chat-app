@@ -1517,6 +1517,53 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       }
     }
   };
+
+  const attemptIceRecovery = useCallback(async () => {
+      if (!isCaller || !pcRef.current) return;
+      if (!chatId || !sessionId) return;
+      if (isRecoveringRef.current) return;
+      if (reconnectAttemptsRef.current >= 3) return;
+
+      const pc = pcRef.current;
+      if (!pc || pc.connectionState === "closed") return;
+      if (pc.signalingState !== "stable") return;
+
+      isRecoveringRef.current = true;
+      reconnectAttemptsRef.current += 1;
+
+      try {
+        // 2回目以降は TURN を優先（設定がある場合）
+        if (hasTurnConfig && reconnectAttemptsRef.current >= 2) {
+          try { pc.setConfiguration(buildRtcConfig(true)); } catch {}
+        }
+
+        const restartOffer = await pc.createOffer({
+          iceRestart: true,
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: !!isVideoEnabled
+        });
+        await pc.setLocalDescription(restartOffer);
+
+        const callRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "calls", sessionId);
+        await setDoc(
+          callRef,
+          {
+            sessionId,
+            callerId: callData?.callerId || user.uid,
+            callType: isVideoEnabled ? "video" : "audio",
+            offer: { type: "offer", sdp: restartOffer.sdp },
+            offerSdp: restartOffer.sdp,
+            offererId: user.uid,
+            updatedAt: serverTimestamp()
+          },
+          { merge: true }
+        );
+      } catch (e) {
+        console.warn("ICE recovery failed:", e);
+      } finally {
+        isRecoveringRef.current = false;
+      }
+    }, [chatId, sessionId, isCaller, isVideoEnabled, callData?.callerId, user.uid]);
   useEffect(() => {
     isMountedRef.current = true;
     initAudioContext();
@@ -1541,12 +1588,17 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         safeEndCall(1500);
         return;
       }
-      const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
-      const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
+            const callRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "calls", sessionId);
+      const callerCandidatesCol = collection(callRef, "callerCandidates");
+      const calleeCandidatesCol = collection(callRef, "calleeCandidates");
+      const outgoingCandidatesCol = localIsCaller ? callerCandidatesCol : calleeCandidatesCol;
+      const incomingCandidatesCol = localIsCaller ? calleeCandidatesCol : callerCandidatesCol;
+
       const pc = new RTCPeerConnection(buildRtcConfig(false));
       try { pc.addTransceiver("audio", { direction: "sendrecv" }); } catch (e) {}
       if (!!isVideoEnabled) { try { pc.addTransceiver("video", { direction: "sendrecv" }); } catch (e) {} }
       pcRef.current = pc;
+
       try {
         setIceState(pc.iceConnectionState || "new");
         setPcState(pc.connectionState || "new");
@@ -1560,8 +1612,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         pc.addEventListener("signalingstatechange", () => {
           try { setSigState(pc.signalingState || "stable"); } catch {}
         });
-      } catch {
-      }
+      } catch {}
+
       const applyAdaptiveProfile = async (profile) => {
         if (!pcRef.current) return;
         const key = `${profile.videoBitrate}-${profile.videoScale}-${profile.videoFps}-${profile.audioBitrate}`;
@@ -1572,9 +1624,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
             if (!sender?.track) return;
             const kind = sender.track.kind;
             const params = sender.getParameters?.() || {};
-            if (!params.encodings || params.encodings.length === 0) {
-              params.encodings = [{}];
-            }
+            if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
             try {
               if (kind === "video") {
                 sender.track.contentHint = "motion";
@@ -1595,21 +1645,15 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         );
         appliedProfileRef.current = key;
       };
+
       const getProfileByNetwork = (level) => {
-        if (level === "low") {
-          return { videoBitrate: 220000, videoScale: 2.4, videoFps: 10, audioBitrate: 16000 };
-        }
-        if (level === "poor") {
-          return { videoBitrate: 320000, videoScale: 2.1, videoFps: 12, audioBitrate: 22000 };
-        }
-        if (level === "medium") {
-          return { videoBitrate: 700000, videoScale: 1.5, videoFps: 18, audioBitrate: 36000 };
-        }
-        if (level === "high") {
-          return { videoBitrate: 1300000, videoScale: 1.1, videoFps: 24, audioBitrate: 64000 };
-        }
+        if (level === "low") return { videoBitrate: 220000, videoScale: 2.4, videoFps: 10, audioBitrate: 16000 };
+        if (level === "poor") return { videoBitrate: 320000, videoScale: 2.1, videoFps: 12, audioBitrate: 22000 };
+        if (level === "medium") return { videoBitrate: 700000, videoScale: 1.5, videoFps: 18, audioBitrate: 36000 };
+        if (level === "high") return { videoBitrate: 1300000, videoScale: 1.1, videoFps: 24, audioBitrate: 64000 };
         return { videoBitrate: 1000000, videoScale: 1.2, videoFps: 20, audioBitrate: 48000 };
       };
+
       const startAdaptiveBitrateController = () => {
         if (statsTimerRef.current) clearInterval(statsTimerRef.current);
         const manualMode = qualityModeRef.current;
@@ -1618,17 +1662,17 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           setNetworkQuality(level === "low" ? "poor" : level === "medium" ? "medium" : "good");
           applyAdaptiveProfile(getProfileByNetwork(level));
         } else {
-        const connType = navigator.connection?.effectiveType || "";
-        if (connType === "slow-2g" || connType === "2g") {
-          setNetworkQuality("poor");
-          applyAdaptiveProfile(getProfileByNetwork("poor"));
-        } else if (connType === "3g") {
-          setNetworkQuality("medium");
-          applyAdaptiveProfile(getProfileByNetwork("medium"));
-        } else {
-          setNetworkQuality("good");
-          applyAdaptiveProfile(getProfileByNetwork("good"));
-        }
+          const connType = navigator.connection?.effectiveType || "";
+          if (connType === "slow-2g" || connType === "2g") {
+            setNetworkQuality("poor");
+            applyAdaptiveProfile(getProfileByNetwork("poor"));
+          } else if (connType === "3g") {
+            setNetworkQuality("medium");
+            applyAdaptiveProfile(getProfileByNetwork("medium"));
+          } else {
+            setNetworkQuality("good");
+            applyAdaptiveProfile(getProfileByNetwork("good"));
+          }
         }
         statsTimerRef.current = setInterval(async () => {
           if (!pcRef.current || pcRef.current.connectionState === "closed") return;
@@ -1645,9 +1689,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
             let outboundPacketsLost = 0;
             let rtt = 0;
             report.forEach((stat) => {
-              if (stat.type === "outbound-rtp" && !stat.isRemote) {
-                outboundPacketsSent += stat.packetsSent || 0;
-              }
+              if (stat.type === "outbound-rtp" && !stat.isRemote) outboundPacketsSent += stat.packetsSent || 0;
               if (stat.type === "remote-inbound-rtp") {
                 outboundPacketsLost += stat.packetsLost || 0;
                 if (!rtt && stat.roundTripTime) rtt = stat.roundTripTime;
@@ -1669,101 +1711,20 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           } catch (e) {
             console.warn("Adaptive bitrate stats failed:", e);
           }
-        }, 3e3);
+        }, 3000);
       };
-      const attemptIceRecovery = async () => {
-        if (!localIsCaller || !pcRef.current) return;
-        if (isRecoveringRef.current) return;
-        if (reconnectAttemptsRef.current >= 3) return;
-        if (pc.signalingState !== "stable") return;
-        isRecoveringRef.current = true;
-        reconnectAttemptsRef.current += 1;
-        try {
-          if (hasTurnConfig && reconnectAttemptsRef.current >= 2) {
-            try {
-              pc.setConfiguration(buildRtcConfig(true));
-            } catch {
-            }
-          }
-          const restartOffer = await pc.createOffer({
-            iceRestart: true,
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: !!isVideoEnabled
-          });
-          await pc.setLocalDescription(restartOffer);
-          await setDoc(
-            signalingRef,
-            {
-              sessionId,
-              callerId: callData?.callerId || user.uid,
-              offerSdp: restartOffer.sdp,
-              offererId: user.uid,
-              updatedAt: serverTimestamp()
-            },
-            { merge: true }
-          );
-        } catch (e) {
-          isRecoveringRef.current = false;
-          console.warn("ICE restart failed:", e);
-        }
-      };
-      pc.onconnectionstatechange = () => {
-        const state = pc.connectionState;
-        if (state === "connected" || state === "connecting") {
-          if (state === "connected") {
-            setIsConnected(true);
-            if (!callStartedAtRef.current) callStartedAtRef.current = Date.now();
-          }
-          reconnectAttemptsRef.current = 0;
-          isRecoveringRef.current = false;
-          if (disconnectTimerRef.current) {
-            clearTimeout(disconnectTimerRef.current);
-            disconnectTimerRef.current = null;
-          }
-          return;
-        }
-        if (state === "disconnected" || state === "failed") {
-          setIsConnected(false);
-          attemptIceRecovery();
-          if (disconnectTimerRef.current) return;
-          disconnectTimerRef.current = setTimeout(() => {
-            disconnectTimerRef.current = null;
-            if (!pcRef.current) return;
-            const currentState = pcRef.current.connectionState;
-            const iceState = pcRef.current.iceConnectionState;
-            if (currentState === "connected" || currentState === "connecting") return;
-            if (iceState === "connected" || iceState === "completed") return;
-            setCallError("\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
-            safeEndCall(1200);
-          }, 45e3);
-          return;
-        }
-        if (state === "closed") {
-          setIsConnected(false);
-          setCallError("\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
-          safeEndCall(1200);
-        }
-      };
-      pc.oniceconnectionstatechange = () => {
-        const iceState = pc.iceConnectionState;
-        if (iceState === "connected" || iceState === "completed") {
-          reconnectAttemptsRef.current = 0;
-          isRecoveringRef.current = false;
-        } else if (iceState === "disconnected" || iceState === "failed") {
-          attemptIceRecovery();
-        }
-      };
+
       pc.ontrack = async (event) => {
         try {
-          const s0 = event.streams?.[0];
-          const attachStream = s0 || remoteStreamRef.current;
+          const attachStream = event.streams?.[0] || null;
+          if (attachStream) remoteStreamRef.current = attachStream;
           if (attachStream && remoteVideoRef.current && remoteVideoRef.current.srcObject !== attachStream) {
             remoteVideoRef.current.srcObject = attachStream;
           }
           if (attachStream && remoteAudioRef.current && remoteAudioRef.current.srcObject !== attachStream) {
             remoteAudioRef.current.srcObject = attachStream;
           }
-        } catch (e) {}
+        } catch {}
 
         const directStream = event.streams?.[0];
         const stream = directStream || remoteStreamRef.current;
@@ -1773,10 +1734,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         }
         remoteStreamRef.current = stream;
         if (event.track) {
-          event.track.onunmute = () => {
-            if (!isMountedRef.current) return;
-            tryPlayRemoteMedia();
-          };
+          event.track.onunmute = () => { if (!isMountedRef.current) return; tryPlayRemoteMedia(); };
           event.track.onmute = () => {
             const hasLiveVideo2 = stream.getVideoTracks().some((track) => track.readyState === "live");
             hasRemoteVideoTrackRef.current = hasLiveVideo2;
@@ -1792,59 +1750,32 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         hasRemoteVideoTrackRef.current = hasLiveVideo;
         setHasRemoteVideoTrack(hasLiveVideo);
         setRemoteStream(stream);
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = stream;
-        }
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = stream;
-        }
+        if (remoteAudioRef.current) remoteAudioRef.current.srcObject = stream;
+        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
+
         const played = await tryPlayRemoteMedia();
-        if (!played) {
-          setTimeout(() => {
-            if (isMountedRef.current) tryPlayRemoteMedia();
-          }, 800);
-        }
+        if (!played) setTimeout(() => { if (isMountedRef.current) tryPlayRemoteMedia(); }, 800);
       };
+
       pc.onicecandidate = async (event) => {
         if (!event.candidate) return;
-        const candJson = event.candidate.toJSON();
-        // Primary: subcollection (fast / scalable)
         try {
-          await addDoc(candidatesCol, {
-            sessionId,
+          await addDoc(outgoingCandidatesCol, {
             senderId: user.uid,
-            candidate: candJson,
+            candidate: event.candidate.toJSON(),
             createdAt: serverTimestamp()
           });
-          return;
         } catch (e) {
-          console.warn("Failed to publish ICE candidate via subcollection:", e);
-        }
-        // Fallback: store candidates on signaling doc (works even if subcollection writes are blocked)
-        try {
-          const field = isCaller ? "callerCandidates" : "calleeCandidates";
-          await setDoc(
-            signalingRef,
-            {
-              sessionId,
-              [field]: arrayUnion({
-                senderId: user.uid,
-                candidate: candJson,
-                t: Date.now()
-              }),
-              updatedAt: serverTimestamp()
-            },
-            { merge: true }
-          );
-        } catch (e2) {
-          console.warn("Failed to publish ICE candidate via signaling doc:", e2);
+          console.warn("Failed to publish ICE candidate:", e);
         }
       };
+
       try {
         const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
         const hasVideoInput = devices.some((d) => d.kind === "videoinput");
         const wantVideo = !!isVideoEnabled && hasVideoInput;
         let stream = null;
+
         try {
           const ap = audioPrefsRef.current || {};
           stream = await navigator.mediaDevices.getUserMedia({
@@ -1863,13 +1794,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           });
         } catch (err) {
           try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              audio: true,
-              video: wantVideo ? { facingMode: "user" } : false
-            });
-            if (wantVideo && stream.getVideoTracks().length === 0) {
-              setIsVideoOff(true);
-            }
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: wantVideo ? { facingMode: "user" } : false });
+            if (wantVideo && stream.getVideoTracks().length === 0) setIsVideoOff(true);
           } catch (fallbackErr) {
             if (wantVideo) {
               stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -1879,20 +1805,17 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
             }
           }
         }
+
         if (!stream) throw new Error("No local stream");
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+
         localStreamRef.current = stream;
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
           localVideoRef.current.muted = true;
-          try {
-            await localVideoRef.current.play();
-          } catch {
-          }
+          try { await localVideoRef.current.play(); } catch {}
         }
+
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
         startAdaptiveBitrateController();
       } catch (err) {
@@ -1901,19 +1824,21 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         safeEndCall(2500);
         return;
       }
-      const unsubSignal = onSnapshot(signalingRef, async (snap) => {
+
+      const unsubCall = onSnapshot(callRef, async (snap) => {
         if (!pcRef.current) return;
         const data = snap.data();
-        if (!data || data.sessionId !== sessionId) return;
+        if (!data) return;
         try {
           if (localIsCaller) {
+            const ans = data.answer?.sdp || data.answerSdp || "";
             const canApplyAnswer = pc.signalingState === "have-local-offer";
-            const hasNewAnswer = data.answerSdp && data.answerSdp !== lastRemoteAnswerSdpRef.current;
+            const hasNewAnswer = ans && ans !== lastRemoteAnswerSdpRef.current;
             if (hasNewAnswer && canApplyAnswer && !applyingRemoteAnswerRef.current) {
               applyingRemoteAnswerRef.current = true;
               try {
-                await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: data.answerSdp }));
-                lastRemoteAnswerSdpRef.current = data.answerSdp;
+                await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: ans }));
+                lastRemoteAnswerSdpRef.current = ans;
                 isRecoveringRef.current = false;
                 await flushPendingCandidates(pc);
               } finally {
@@ -1921,22 +1846,26 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
               }
             }
           } else {
+            const off = data.offer?.sdp || data.offerSdp || "";
             const canApplyOffer = pc.signalingState === "stable";
-            const hasNewOffer = data.offerSdp && data.offerSdp !== lastRemoteOfferSdpRef.current;
+            const hasNewOffer = off && off !== lastRemoteOfferSdpRef.current;
             if (hasNewOffer && canApplyOffer && !applyingRemoteOfferRef.current) {
               applyingRemoteOfferRef.current = true;
               try {
-                await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: data.offerSdp }));
-                lastRemoteOfferSdpRef.current = data.offerSdp;
+                await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: off }));
+                lastRemoteOfferSdpRef.current = off;
                 await flushPendingCandidates(pc);
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 await setDoc(
-                  signalingRef,
+                  callRef,
                   {
                     sessionId,
+                    answer: { type: "answer", sdp: answer.sdp },
                     answerSdp: answer.sdp,
                     answererId: user.uid,
+                    acceptedBy: user.uid,
+                    acceptedAt: Date.now(),
                     updatedAt: serverTimestamp()
                   },
                   { merge: true }
@@ -1949,77 +1878,52 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         } catch (e) {
           const msg = e?.message || "";
           if (e?.name === "InvalidStateError" && /wrong state:\s*stable/i.test(msg)) return;
-          console.warn("Signaling sync failed:", e);
+          console.warn("Call signaling sync failed:", e);
         }
       });
-      unsubscribersRef.current.push(unsubSignal);
-      const candidateQuery = query(candidatesCol, where("sessionId", "==", sessionId));
-      const unsubCandidates = onSnapshot(candidateQuery, (snapshot) => {
+      unsubscribersRef.current.push(unsubCall);
+
+      const unsubIncomingCandidates = onSnapshot(incomingCandidatesCol, (snapshot) => {
         snapshot.docChanges().forEach(async (change) => {
           if (change.type !== "added") return;
           const data = change.doc.data();
           if (!data || data.senderId === user.uid || !data.candidate) return;
           try {
-            if (pc.remoteDescription) {
-              await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-            } else {
-              pendingCandidatesRef.current.push(data.candidate);
-            }
+            if (pc.remoteDescription) await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            else pendingCandidatesRef.current.push(data.candidate);
           } catch (e) {
             console.warn("Failed to add ICE candidate:", e);
           }
         });
       });
-      unsubscribersRef.current.push(unsubCandidates);
-      // Fallback candidates (signaling doc arrays)
-      const otherField = localIsCaller ? "calleeCandidates" : "callerCandidates";
-      const unsubSigCand = onSnapshot(signalingRef, (docSnap) => {
-        const d = docSnap.data() || {};
-        const arr = Array.isArray(d[otherField]) ? d[otherField] : [];
-        arr.forEach(async (item) => {
-          try {
-            const key = (item?.senderId || "") + "|" + (item?.t || "") + "|" + JSON.stringify(item?.candidate || {});
-            if (seenSignalingCandidatesRef.current.has(key)) return;
-            seenSignalingCandidatesRef.current.add(key);
-            const cand = item?.candidate;
-            if (!cand) return;
-            if (item?.senderId === user.uid) return;
-            if (pc.remoteDescription) {
-              await pc.addIceCandidate(new RTCIceCandidate(cand));
-            } else {
-              pendingCandidatesRef.current.push(cand);
-            }
-          } catch (e) {
-            console.warn("Failed to add signaling ICE candidate:", e);
-          }
-        });
-      });
-      unsubscribersRef.current.push(unsubSigCand);
+      unsubscribersRef.current.push(unsubIncomingCandidates);
+
       if (localIsCaller) {
         try {
-          const offer = await pc.createOffer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: !!isVideoEnabled
-          });
+          const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: !!isVideoEnabled });
           await pc.setLocalDescription(offer);
           await setDoc(
-            signalingRef,
+            callRef,
             {
               sessionId,
               callerId: callData?.callerId || user.uid,
+              callType: isVideoEnabled ? "video" : "audio",
+              status: "accepted",
+              offer: { type: "offer", sdp: offer.sdp },
               offerSdp: offer.sdp,
               offererId: user.uid,
+              createdAt: serverTimestamp(),
               updatedAt: serverTimestamp()
             },
             { merge: true }
           );
         } catch (e) {
           console.error("Failed to create offer:", e);
-          setCallError("\u901A\u8A71\u306E\u958B\u59CB\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002");
+          setCallError("通話の開始に失敗しました。");
           safeEndCall(1500);
         }
       }
-    };
+
     run();
     return () => {
       cancelled = true;
@@ -7190,35 +7094,43 @@ function App() {
   };
   const cleanupCallSignaling = async (chatId, targetSessionId = null) => {
     try {
-      const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
-      const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
-      try {
-        if (!targetSessionId) {
-          await deleteDoc(signalingRef);
-        } else {
-          const signalingSnap = await getDoc(signalingRef).catch(() => null);
-          const signalingData = signalingSnap?.data?.();
-          if (signalingData?.sessionId === targetSessionId) {
-            await deleteDoc(signalingRef);
+      if (!chatId) return;
+
+      const deleteCandidates = async (callRef) => {
+        const cols = ["callerCandidates", "calleeCandidates"];
+        for (const colName of cols) {
+          const colRef = collection(callRef, colName);
+          const snap = await getDocs(colRef).catch(() => null);
+          if (!snap) continue;
+          const BATCH_LIMIT = 450;
+          let batch = writeBatch(db);
+          let i = 0;
+          for (const d of snap.docs) {
+            batch.delete(d.ref);
+            i++;
+            if (i % BATCH_LIMIT === 0) {
+              await batch.commit();
+              batch = writeBatch(db);
+            }
           }
-        }
-      } catch {
-      }
-      const candidatesQuery = targetSessionId ? query(candidatesCol, where("sessionId", "==", targetSessionId)) : candidatesCol;
-      const snap = await getDocs(candidatesQuery).catch(() => null);
-      if (!snap) return;
-      const BATCH_LIMIT = 450;
-      let batch = writeBatch(db);
-      let i = 0;
-      for (const d of snap.docs) {
-        batch.delete(d.ref);
-        i++;
-        if (i % BATCH_LIMIT === 0) {
           await batch.commit();
-          batch = writeBatch(db);
+        }
+      };
+
+      if (targetSessionId) {
+        const callRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "calls", targetSessionId);
+        await deleteCandidates(callRef);
+        await deleteDoc(callRef).catch(() => {});
+      } else {
+        // 全セッション掃除（古い呼び出しが残っていると join が混乱するため）
+        const callsCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "calls");
+        const snap = await getDocs(callsCol).catch(() => null);
+        if (!snap) return;
+        for (const d of snap.docs) {
+          await deleteCandidates(d.ref);
+          await deleteDoc(d.ref).catch(() => {});
         }
       }
-      await batch.commit();
     } catch (e) {
       console.warn("cleanupCallSignaling failed (non-fatal):", e);
     }
@@ -7244,9 +7156,10 @@ function App() {
       let sessionId = latestSessionId || joinSessionId || "";
       if (!sessionId) {
         try {
-          const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
-          const signalingSnap = await getDoc(signalingRef);
-          sessionId = signalingSnap.data()?.sessionId || "";
+          const callsCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "calls");
+          const snap = await getDocs(query(callsCol, orderBy("createdAt", "desc"), limit(1)));
+          const first = snap.docs?.[0] || null;
+          sessionId = first?.id || first?.data?.()?.sessionId || "";
         } catch {
         }
       }
