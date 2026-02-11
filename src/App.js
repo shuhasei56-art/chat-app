@@ -5274,12 +5274,27 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   const handleJoinCall = (isVideo, callerId, sessionId = "") => {
     startVideoCall(activeChatId, isVideo, true, callerId, sessionId);
   };
-  const joinCurrentCall = () => {
+  const joinCurrentCall = async () => {
     if (!activeChatCallStatus?.sessionId) {
-      showNotification("\u53C2\u52A0\u3067\u304D\u308B\u901A\u8A71\u304C\u3042\u308A\u307E\u305B\u3093");
+      showNotification("参加できる通話がありません");
       return;
     }
     const isVideoCall = activeChatCallStatus.callType !== "audio";
+    try {
+      // 1対1の着信（ringing）の場合は、参加時にacceptedへ更新して相手側のUI/処理を安定化
+      if (!isGroup && activeChatCallStatus.status === "ringing") {
+        await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), {
+          callStatus: {
+            ...activeChatCallStatus,
+            status: "accepted",
+            acceptedBy: user.uid,
+            acceptedAt: Date.now()
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to mark call as accepted:", e);
+    }
     startVideoCall(activeChatId, isVideoCall, true, activeChatCallStatus.callerId, activeChatCallStatus.sessionId);
   };
   useEffect(() => {
@@ -7119,7 +7134,7 @@ function App() {
       });
     });
     const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(50)), (snap) => {
-      setPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((p) => !p.deleted));
     });
     return () => {
       unsubProfile();
