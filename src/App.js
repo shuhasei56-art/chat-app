@@ -38,6 +38,7 @@ import {
   increment,
   runTransaction
 } from "firebase/firestore";
+import jsQR from "jsqr";
 import {
   Search,
   UserPlus,
@@ -4659,8 +4660,9 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
         c.width = videoRef.current.videoWidth;
         ctx.drawImage(videoRef.current, 0, 0, c.width, c.height);
         const win = window;
-        if (win.jsQR) {
-          const code = win.jsQR(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
+        const decoder = win.jsQR || jsQR;
+        if (decoder) {
+          const code = decoder(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
           if (code) {
             if (videoRef.current.srcObject) {
               const stream = videoRef.current.srcObject;
@@ -4704,7 +4706,9 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
                   c.height = img.height;
                   ctx.drawImage(img, 0, 0);
                   const win = window;
-                  const code = win.jsQR(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
+                  const decoder = win.jsQR || jsQR;
+                  if (!decoder) return;
+                  const code = decoder(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
                   if (code) addFriendById(code.data);
                 }
               };
