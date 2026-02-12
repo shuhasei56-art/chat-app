@@ -224,20 +224,19 @@ const iceServers = [
     urls: [
       "stun:stun.l.google.com:19302",
       "stun:stun1.l.google.com:19302",
-      "stun:stun2.l.google.com:19302",
-      "stun:stun3.l.google.com:19302",
-      "stun:stun4.l.google.com:19302",
-      // 以下を追加
-      "stun:stun.ekiga.net",
-      "stun:stun.ideasip.com",
-      "stun:stun.schlund.de",
-      "stun:stun.voiparound.com",
-      "stun:stun.voipbuster.com",
-      "stun:stun.voipstunt.com",
-      "stun:stun.voxgratia.org"
+      "stun:stun.l.google.com:19305", // ポートのバリエーションを追加
+      "stun:stun.services.mozilla.com" // Mozillaのサーバーも信頼性が高い
     ]
   }
 ];
+// TURNサーバーの設定がある場合、優先的に使用するようにします
+if (hasTurnConfig) {
+  iceServers.unshift({ // 配列の先頭に追加して優先度を上げる
+    urls: turnUrls,
+    username: turnUsername,
+    credential: turnCredential
+  });
+}
 if (hasTurnConfig) {
   iceServers.push({
     urls: turnUrls,
@@ -6615,44 +6614,35 @@ function App() {
       });
       setChats(chatList);
      setActiveCall((prev) => {
-  // 1. 新規着信の検知（自分が発信者でない、かつ ringing 状態）
-  const incoming = chatList.find((c) => 
-    c.callStatus?.status === "ringing" && 
-    c.callStatus.callerId !== user.uid
-  );
+  // 1. まず現在のチャットリストから通話情報を探す
+  const activeChat = chatList.find(c => c.callStatus && (c.callStatus.status === "ringing" || c.callStatus.status === "accepted"));
 
-  // 通話中でない、かつ新規着信があればセット
-  if (!prev && incoming) {
+  // 通話データが消えた、または終了（ended）していたら通話終了
+  if (!activeChat || activeChat.callStatus?.status === "ended") {
+    return null;
+  }
+
+  const callStatus = activeChat.callStatus;
+
+  // 新規着信または発信の開始
+  if (!prev) {
+    const isCaller = callStatus.callerId === user.uid;
     return {
-      chatId: incoming.id,
-      callData: incoming.callStatus,
-      isVideo: incoming.callStatus?.callType !== "audio",
-      isGroupCall: !!incoming.isGroup,
-      isCaller: false,
-      phase: "incoming"
+      chatId: activeChat.id,
+      callData: callStatus,
+      isVideo: callStatus.callType !== "audio",
+      isGroupCall: !!activeChat.isGroup,
+      isCaller: isCaller,
+      phase: isCaller ? "inCall" : "incoming"
     };
   }
 
-  // 2. 既存通話の状態更新
-  if (prev) {
-    const currentChat = chatList.find((c) => c.id === prev.chatId);
-    const status = currentChat?.callStatus?.status;
-
-    // 通話データが消えた（終了した）場合
-    if (!currentChat?.callStatus) {
-      return null;
-    }
-
-    // ステータスが変化した場合のみ更新 (accepted になった等)
-    if (status === "accepted" && prev.phase !== "inCall") {
-      return { ...prev, phase: "inCall", callData: currentChat.callStatus };
-    }
-
-    // 変更がない場合は今のstateを維持
-    return prev;
+  // 既存通話のフェーズ更新 (ringing -> inCall)
+  if (callStatus.status === "accepted" && prev.phase === "incoming") {
+    return { ...prev, phase: "inCall", callData: callStatus };
   }
 
-  return null;
+  return { ...prev, callData: callStatus }; // 常に最新のSDP情報を保持
 });
     });
     const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(50)), (snap) => {
