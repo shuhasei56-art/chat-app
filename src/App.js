@@ -424,19 +424,24 @@ const AuthView = ({ onLogin, showNotification }) => {
       googleProvider.setCustomParameters({ prompt: "select_account" });
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
-      await setDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), {
-        uid: user.uid,
-        name: user.displayName || "No Name",
-        avatar: user.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + user.uid,
-        id: user.uid,
-        friends: [],
-        hiddenFriends: [],
-        hiddenChats: [],
-        wallet: 1e3,
-        isBanned: false,
-        status: "\u3088\u308D\u3057\u304F\u304A\u9858\u3044\u3057\u307E\u3059\uFF01",
-        cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80"
-      }, { merge: true });
+      // Do not overwrite an existing profile on every login
+      const existing = await getDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid));
+      if (!existing.exists()) {
+        await setDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), {
+          uid: user.uid,
+          name: user.displayName || "No Name",
+          avatar: user.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + user.uid,
+          id: user.uid,
+          friends: [],
+          hiddenFriends: [],
+          hiddenChats: [],
+          wallet: 1e3,
+          isBanned: false,
+          status: "よろしくお願いします！",
+          cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80"
+        }, { merge: true });
+      }
+
     } catch (error) {
       console.error("Login Error:", error);
       const code = error?.code || "";
