@@ -1609,6 +1609,408 @@ const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }) => {
     ] })
   ] });
 };
+const GroupVideoCallView = \(\{ user, chatId, callData, onEndCall, isCaller: isCallerProp, isVideoEnabled = true, activeEffect, backgroundUrl, effects = \[\] \}\) => \{
+  void callData;
+  void isCallerProp;
+  void activeEffect;
+  void backgroundUrl;
+  void effects;
+  const [remoteStreams, setRemoteStreams] = useState({});
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
+  const [callError, setCallError] = useState(null);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [needsRemotePlay, setNeedsRemotePlay] = useState(false);
+
+  const localVideoRef = useRef(null);
+  const pcsRef = useRef(new Map());
+  const localStreamRef = useRef(null);
+  const screenStreamRef = useRef(null);
+  const cameraDeviceIdsRef = useRef([]);
+  const cameraIndexRef = useRef(0);
+  const unsubscribersRef = useRef([]);
+  const isMountedRef = useRef(true);
+  const startedRef = useRef(false);
+
+  const safeSetState = (setter) => {
+    if (!isMountedRef.current) return;
+    setter();
+  };
+
+  const cleanup = () => {
+    unsubscribersRef.current.forEach((u) => {
+      try { u && u(); } catch {}
+    });
+    unsubscribersRef.current = [];
+    pcsRef.current.forEach((pc) => {
+      try { pc.ontrack = null; pc.onicecandidate = null; pc.onconnectionstatechange = null; pc.close(); } catch {}
+    });
+    pcsRef.current.clear();
+    if (screenStreamRef.current) {
+      try { screenStreamRef.current.getTracks().forEach((t) => t.stop()); } catch {}
+      screenStreamRef.current = null;
+    }
+    if (localStreamRef.current) {
+      try { localStreamRef.current.getTracks().forEach((t) => t.stop()); } catch {}
+      localStreamRef.current = null;
+    }
+    safeSetState(() => setRemoteStreams({}));
+  };
+
+  const end = () => {
+    cleanup();
+    try { onEndCall && onEndCall(); } catch {}
+  };
+
+  const ensureCameras = async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter((d) => d.kind === "videoinput").map((d) => d.deviceId).filter(Boolean);
+      cameraDeviceIdsRef.current = cams;
+      if (cameraIndexRef.current >= cams.length) cameraIndexRef.current = 0;
+    } catch {
+      cameraDeviceIdsRef.current = [];
+      cameraIndexRef.current = 0;
+    }
+  };
+
+  const getCameraStream = async (deviceId) => {
+    const constraints = {
+      audio: true,
+      video: isVideoOff ? false : (deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "user" })
+    };
+    return await navigator.mediaDevices.getUserMedia(constraints);
+  };
+
+  const replaceVideoTrackForAll = async (newTrack) => {
+    pcsRef.current.forEach((pc) => {
+      try {
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video") || pc.getSenders().find((s) => s.track?.kind === "video");
+        if (sender) sender.replaceTrack(newTrack);
+      } catch {}
+    });
+  };
+
+  const attachLocalPreview = (stream) => {
+    const el = localVideoRef.current;
+    if (!el) return;
+    try {
+      el.srcObject = stream;
+      el.muted = true;
+      const p = el.play?.();
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    } catch {}
+  };
+
+  const upsertRemoteStream = (peerId, stream) => {
+    safeSetState(() => setRemoteStreams((prev) => {
+      if (prev[peerId] === stream) return prev;
+      return { ...prev, [peerId]: stream };
+    }));
+  };
+
+  const createPeerConnection = async ({ peerId, isOfferer, connDocRef, offerCandidatesCol, answerCandidatesCol }) => {
+    const pc = new RTCPeerConnection(rtcConfig);
+    pcsRef.current.set(peerId, pc);
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      if (state === "failed") {
+        try { pc.restartIce && pc.restartIce(); } catch {}
+      }
+    };
+
+    pc.onicecandidate = (event) => {
+      if (!event.candidate) return;
+      try {
+        addDoc(isOfferer ? offerCandidatesCol : answerCandidatesCol, event.candidate.toJSON());
+      } catch {}
+    };
+
+    pc.ontrack = (event) => {
+      const [stream] = event.streams || [];
+      if (!stream) return;
+      upsertRemoteStream(peerId, stream);
+      safeSetState(() => setNeedsRemotePlay(true));
+    };
+
+    // Add local tracks
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        try { pc.addTrack(track, localStreamRef.current); } catch {}
+      });
+    }
+
+    // Listen candidates from the other side
+    const otherCandidatesCol = isOfferer ? answerCandidatesCol : offerCandidatesCol;
+    const unsubCand = onSnapshot(otherCandidatesCol, (snap) => {
+      snap.docChanges().forEach((change) => {
+        if (change.type !== "added") return;
+        const data = change.doc.data();
+        try { pc.addIceCandidate(new RTCIceCandidate(data)); } catch {}
+      });
+    });
+    unsubscribersRef.current.push(unsubCand);
+
+    // Listen for offer/answer updates
+    const unsubConn = onSnapshot(connDocRef, async (snap) => {
+      const data = snap.data();
+      if (!data) return;
+      try {
+        if (!isOfferer && data.offer && !pc.currentRemoteDescription) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await setDoc(connDocRef, { answer: { type: answer.type, sdp: answer.sdp }, answeredAt: serverTimestamp() }, { merge: true });
+        }
+        if (isOfferer && data.answer && !pc.currentRemoteDescription) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        }
+      } catch {}
+    });
+    unsubscribersRef.current.push(unsubConn);
+
+    if (isOfferer) {
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await setDoc(connDocRef, {
+          offer: { type: offer.type, sdp: offer.sdp },
+          offerer: user.uid,
+          answerer: peerId,
+          createdAt: serverTimestamp()
+        }, { merge: true });
+      } catch (e) {
+        safeSetState(() => setCallError("通話の開始に失敗しました。"));
+      }
+    }
+  };
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
+  useEffect(() => {
+    const run = async () => {
+      if (startedRef.current) return;
+      startedRef.current = true;
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCallError("このブラウザは通話に対応していません。");
+        return;
+      }
+
+      await ensureCameras();
+
+      // local stream
+      try {
+        const deviceId = cameraDeviceIdsRef.current[cameraIndexRef.current];
+        const stream = await getCameraStream(deviceId);
+        localStreamRef.current = stream;
+        attachLocalPreview(stream);
+      } catch {
+        setCallError("カメラ/マイクにアクセスできません。");
+        return;
+      }
+
+      const basePath = ["artifacts", appId, "public", "data", "chats", chatId, "call_signaling"];
+      const participantsCol = collection(db, ...basePath, "participants");
+      const connectionsCol = collection(db, ...basePath, "connections");
+
+      // join
+      try {
+        await setDoc(doc(participantsCol, user.uid), { joinedAt: serverTimestamp() }, { merge: true });
+      } catch {}
+
+      const unsubParts = onSnapshot(participantsCol, async (snap) => {
+        const ids = snap.docs.map((d) => d.id).filter((id) => id && id !== user.uid);
+        for (const peerId of ids) {
+          if (pcsRef.current.has(peerId)) continue;
+
+          const sorted = [user.uid, peerId].sort();
+          const connId = `${sorted[0]}__${sorted[1]}`;
+          const connDocRef = doc(connectionsCol, connId);
+          const offerCandidatesCol = collection(connDocRef, "offerCandidates");
+          const answerCandidatesCol = collection(connDocRef, "answerCandidates");
+          const isOfferer = user.uid === sorted[0];
+
+          await createPeerConnection({ peerId, isOfferer, connDocRef, offerCandidatesCol, answerCandidatesCol });
+        }
+
+        // remove streams for peers that left
+        safeSetState(() => setRemoteStreams((prev) => {
+          const next = { ...prev };
+          Object.keys(next).forEach((pid) => {
+            if (!ids.includes(pid)) delete next[pid];
+          });
+          return next;
+        }));
+      });
+      unsubscribersRef.current.push(unsubParts);
+    };
+
+    run();
+
+    return () => {
+      // leave participant
+      const basePath = ["artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "participants"];
+      try { deleteDoc(doc(db, ...basePath, user.uid)); } catch {}
+      cleanup();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId]);
+
+  useEffect(() => {
+    if (!needsRemotePlay) return;
+    // attempt play on all remote videos via a tick; actual video elements handle this
+    const t = setTimeout(() => setNeedsRemotePlay(false), 300);
+    return () => clearTimeout(t);
+  }, [needsRemotePlay]);
+
+  const toggleMute = () => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      try {
+        localStreamRef.current?.getAudioTracks()?.forEach((t) => (t.enabled = !next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const toggleVideo = () => {
+    setIsVideoOff((prev) => {
+      const next = !prev;
+      try {
+        localStreamRef.current?.getVideoTracks()?.forEach((t) => (t.enabled = !next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleSwitchCamera = async () => {
+    try {
+      await ensureCameras();
+      const cams = cameraDeviceIdsRef.current;
+      if (!cams || cams.length === 0) return;
+
+      cameraIndexRef.current = (cameraIndexRef.current + 1) % cams.length;
+      const deviceId = cams[cameraIndexRef.current];
+
+      const newStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } }, audio: true });
+      const newVideoTrack = newStream.getVideoTracks()[0];
+
+      // keep existing audio track if present
+      const oldAudio = localStreamRef.current?.getAudioTracks?.()[0] || newStream.getAudioTracks()[0];
+
+      const composed = new MediaStream();
+      if (oldAudio) composed.addTrack(oldAudio);
+      if (newVideoTrack) composed.addTrack(newVideoTrack);
+
+      // stop old video tracks
+      try { localStreamRef.current?.getVideoTracks()?.forEach((t) => t.stop()); } catch {}
+      localStreamRef.current = composed;
+      attachLocalPreview(composed);
+
+      if (newVideoTrack) await replaceVideoTrackForAll(newVideoTrack);
+    } catch {}
+  };
+
+  const startScreenShare = async () => {
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      screenStreamRef.current = screenStream;
+      const screenTrack = screenStream.getVideoTracks()[0];
+      if (!screenTrack) return;
+
+      await replaceVideoTrackForAll(screenTrack);
+      // update local preview to screen
+      attachLocalPreview(screenStream);
+
+      setIsScreenSharing(true);
+
+      screenTrack.onended = async () => {
+        try { await stopScreenShare(); } catch {}
+      };
+    } catch {}
+  };
+
+  const stopScreenShare = async () => {
+    try {
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach((t) => t.stop());
+        screenStreamRef.current = null;
+      }
+      const cams = cameraDeviceIdsRef.current;
+      const deviceId = cams && cams.length ? cams[cameraIndexRef.current] : null;
+      const stream = await getCameraStream(deviceId);
+      const camTrack = stream.getVideoTracks()[0];
+
+      // keep audio from existing stream if possible
+      const audio = localStreamRef.current?.getAudioTracks?.()[0] || stream.getAudioTracks()[0];
+
+      const composed = new MediaStream();
+      if (audio) composed.addTrack(audio);
+      if (camTrack) composed.addTrack(camTrack);
+
+      // stop old video tracks
+      try { localStreamRef.current?.getVideoTracks()?.forEach((t) => t.stop()); } catch {}
+      localStreamRef.current = composed;
+
+      attachLocalPreview(composed);
+      if (camTrack) await replaceVideoTrackForAll(camTrack);
+
+      setIsScreenSharing(false);
+    } catch {}
+  };
+
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) return await stopScreenShare();
+    return await startScreenShare();
+  };
+
+  const remoteEntries = Object.entries(remoteStreams || {});
+  const tiles = 1 + remoteEntries.length;
+  const cols = Math.max(1, Math.min(3, Math.ceil(Math.sqrt(tiles))));
+  const gridStyle = { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: "8px" };
+
+  return /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 bg-black z-[9999] flex flex-col", children: [
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 p-3", children: [
+      callError ? /* @__PURE__ */ jsxs("div", { className: "text-white text-sm", children: [
+        /* @__PURE__ */ jsx("div", { className: "font-bold mb-2", children: "通話エラー" }),
+        /* @__PURE__ */ jsx("div", { className: "opacity-80", children: callError })
+      ] }) : null,
+      /* @__PURE__ */ jsxs("div", { style: gridStyle, className: "w-full h-full", children: [
+        /* local tile */
+        /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover rounded-xl", style: { willChange: "transform, filter" } }),
+        /* remote tiles */
+        ...remoteEntries.map(([peerId, stream]) => /* @__PURE__ */ jsx("video", {
+          autoPlay: true,
+          playsInline: true,
+          className: "w-full h-full object-cover rounded-xl",
+          ref: (el) => {
+            if (!el) return;
+            try {
+              if (el.srcObject !== stream) el.srcObject = stream;
+              const p = el.play?.();
+              if (p && typeof p.catch === "function") p.catch(() => {});
+            } catch {}
+          }
+        }, peerId))
+      ] })
+    ] }),
+    /* controls (reuse existing style classes as-is) */
+    /* @__PURE__ */ jsxs("div", { className: "p-3 flex items-center justify-center gap-2 bg-black/60", children: [
+      /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: "px-3 py-2 rounded-full bg-white/10 text-white text-xs font-bold", children: isMuted ? "ミュート解除" : "ミュート" }),
+      /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: "px-3 py-2 rounded-full bg-white/10 text-white text-xs font-bold", children: isVideoOff ? "ビデオON" : "ビデオOFF" }),
+      /* @__PURE__ */ jsx("button", { onClick: handleSwitchCamera, className: "px-3 py-2 rounded-full bg-white/10 text-white text-xs font-bold", children: "カメラ切替" }),
+      /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, className: "px-3 py-2 rounded-full bg-white/10 text-white text-xs font-bold", children: isScreenSharing ? "共有停止" : "画面共有" }),
+      /* @__PURE__ */ jsx("button", { onClick: end, className: "px-3 py-2 rounded-full bg-red-600 text-white text-xs font-bold", children: "終了" })
+    ] })
+  ] });
+};
+
+
 const OutgoingCallOverlay = ({ callData, onCancel, allUsers }) => /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[500] bg-gray-900 flex flex-col items-center justify-between py-24 px-6 animate-in fade-in duration-300", children: [
   /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center gap-6 mt-10", children: [
     /* @__PURE__ */ jsxs("div", { className: "relative", children: [
@@ -5225,7 +5627,7 @@ const handleLogout = async () => {
         }
       ) : /* @__PURE__ */ jsxs("div", { className: "relative w-full h-full", children: [
         /* @__PURE__ */ jsx(
-          VideoCallView,
+          activeCall.isGroupCall ? GroupVideoCallView : VideoCallView,
           {
             user,
             chatId: activeCall.chatId,
