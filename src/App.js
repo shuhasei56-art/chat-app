@@ -6990,7 +6990,5 @@ function App() {
     /* @__PURE__ */ jsx("style", { children: `.scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }` })
   ] }) });
 }
-var App_13_default = App;
-export {
-  App_13_default as default
-};
+
+export default App;
