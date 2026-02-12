@@ -4202,7 +4202,7 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
             /* @__PURE__ */ jsx("input", { className: "w-full border-b py-2 outline-none", value: edit.status || "", onChange: (e) => setEdit({ ...edit, status: e.target.value }) })
           ] }),
           /* @__PURE__ */ jsx("button", { onClick: handleSave, className: "w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg", children: "\u4FDD\u5B58" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => signOut(auth), className: "w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4", children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })
+          /* @__PURE__ */ jsx("button", { onClick: () => handleLogout(), className: "w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4", children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })
         ] })
       ] })
     ] })
@@ -4748,8 +4748,29 @@ function App() {
           } catch {
           }
         } else {
-          const initialProfile = {
-            uid: u.uid,
+let lastCachedProfile = null;
+try {
+  const last = localStorage.getItem(`profile_cache_last_${appId}`);
+  if (last) lastCachedProfile = JSON.parse(last);
+} catch {
+}
+const initialProfile = lastCachedProfile ? {
+  ...lastCachedProfile,
+  uid: u.uid,
+  // keep a stable public id if already set, otherwise derive from the new uid
+  id: lastCachedProfile.id || `user_${u.uid.slice(0, 6)}`,
+  name: lastCachedProfile.name || u.displayName || `User_${u.uid.slice(0, 4)}`,
+  status: lastCachedProfile.status || "よろしくお願いします！",
+  birthday: lastCachedProfile.birthday || "",
+  avatar: lastCachedProfile.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
+  cover: lastCachedProfile.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
+  friends: Array.isArray(lastCachedProfile.friends) ? lastCachedProfile.friends : [],
+  hiddenFriends: Array.isArray(lastCachedProfile.hiddenFriends) ? lastCachedProfile.hiddenFriends : [],
+  hiddenChats: Array.isArray(lastCachedProfile.hiddenChats) ? lastCachedProfile.hiddenChats : [],
+  wallet: typeof lastCachedProfile.wallet === "number" ? lastCachedProfile.wallet : 1000,
+  isBanned: false
+} : {
+  uid: u.uid,
             name: u.displayName || `User_${u.uid.slice(0, 4)}`,
             id: `user_${u.uid.slice(0, 6)}`,
             status: "\u3088\u308D\u3057\u304F\u304A\u9858\u3044\u3057\u307E\u3059\uFF01",
@@ -4786,6 +4807,21 @@ function App() {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3e3);
   };
+
+// Logout without losing locally saved profile details
+const handleLogout = async () => {
+  try {
+    if (profile) {
+      localStorage.setItem(`profile_cache_last_${appId}`, JSON.stringify(profile));
+    }
+  } catch {
+  }
+  try {
+    await signOut(auth);
+  } catch {
+  }
+};
+
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
     showNotification("ID\u3092\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F");
