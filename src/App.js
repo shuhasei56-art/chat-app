@@ -7061,16 +7061,47 @@ function App() {
         const currentChat = chatList.find((c) => c.id === prev.chatId);
         const status = (currentChat && currentChat.callStatus && currentChat.callStatus.status) || null;
         if (!currentChat || !currentChat.callStatus) return null;
+        setActiveCall((prev) => {
+        const incoming = chatList.find((c) => c.callStatus && c.callStatus.status === "ringing" && c.callStatus.callerId !== user.uid);
+        
+        // 着信検知ロジック
+        if (incoming && (!prev || prev.chatId !== incoming.id || (prev.callData && prev.callData.sessionId) !== incoming.callStatus.sessionId)) {
+          return {
+            chatId: incoming.id,
+            callData: incoming.callStatus,
+            isVideo: incoming.callStatus && incoming.callStatus.callType !== "audio",
+            isGroupCall: false,
+            isCaller: false,
+            phase: "incoming"
+          };
+        }
+
+        if (!prev) return prev;
+        if (prev.isGroupCall) return prev; // グループ通話中は個別のステータス更新で上書きしないようにする
+
+        const currentChat = chatList.find((c) => c.id === prev.chatId);
+        const status = (currentChat && currentChat.callStatus && currentChat.callStatus.status) || null;
+        if (!currentChat || !currentChat.callStatus) return null;
+
+        // 差分チェック関数
+        const isSame = (prevData, newData) => {
+             return prevData.sessionId === newData.sessionId && prevData.status === newData.status;
+        };
+
         if (status === "accepted") {
-          return { ...prev, phase: "inCall", callData: currentChat.callStatus, isVideo: currentChat.callStatus && currentChat.callStatus.callType !== "audio", isCaller: currentChat.callStatus && currentChat.callStatus.callerId === user.uid };
+          // データが変わっていないなら prev を返して再レンダリングを防ぐ
+          if (isSame(prev.callData, currentChat.callStatus)) return prev;
+
+          return { ...prev, phase: "inCall", callData: currentChat.callStatus, isVideo: currentChat.callStatus.callType !== "audio", isCaller: currentChat.callStatus.callerId === user.uid };
         }
         if (status === "ringing") {
-          const incomingCall = currentChat.callStatus && currentChat.callStatus.callerId !== user.uid;
-          return { ...prev, phase: incomingCall ? "incoming" : "dialing", callData: currentChat.callStatus, isVideo: currentChat.callStatus && currentChat.callStatus.callType !== "audio", isCaller: !incomingCall };
+          if (isSame(prev.callData, currentChat.callStatus)) return prev;
+
+          const incomingCall = currentChat.callStatus.callerId !== user.uid;
+          return { ...prev, phase: incomingCall ? "incoming" : "dialing", callData: currentChat.callStatus, isVideo: currentChat.callStatus.callType !== "audio", isCaller: !incomingCall };
         }
         return null;
       });
-    });
     const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(50)), (snap) => {
       setPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((p) => !p.deleted));
     });
