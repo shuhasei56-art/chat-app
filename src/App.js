@@ -131,6 +131,24 @@ const rtcConfig = {
   iceCandidatePoolSize: 10,
   bundlePolicy: "max-bundle"
 };
+
+// Optional custom TURN (より安定させたい場合): .env に以下を設定すると優先利用します。
+// REACT_APP_TURN_URLS=turn:your.turn.server:3478,turns:your.turn.server:5349?transport=tcp
+// REACT_APP_TURN_USERNAME=xxx
+// REACT_APP_TURN_CREDENTIAL=yyy
+try {
+  const _turnUrls = (process.env.REACT_APP_TURN_URLS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (_turnUrls.length) {
+    const _turn = {
+      urls: _turnUrls,
+      username: process.env.REACT_APP_TURN_USERNAME || undefined,
+      credential: process.env.REACT_APP_TURN_CREDENTIAL || undefined
+    };
+    rtcConfig.iceServers = [_turn, ...(rtcConfig.iceServers || [])];
+  }
+} catch {}
+
+
 const formatTime = (timestamp) => {
   if (!timestamp) return "";
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -5506,7 +5524,7 @@ const handleLogout = async () => {
   };
   const startVideoCall = async (chatId, isVideo = true, isJoin = false, joinCallerId) => {
     const chat = chats.find((c) => c.id === chatId);
-    const isGroup = chat?.isGroup;
+    const isGroup = !!(chat?.isGroup || (Array.isArray(chat?.members) && chat.members.length > 2) || (Array.isArray(chat?.participants) && chat.participants.length > 2) || (Array.isArray(chat?.memberIds) && chat.memberIds.length > 2) || (Array.isArray(chat?.userIds) && chat.userIds.length > 2));
     if (isJoin) {
       const callerId = joinCallerId || chat?.callStatus?.callerId || user.uid;
       const sessionId = chat?.callStatus?.sessionId || `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
