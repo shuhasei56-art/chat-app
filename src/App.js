@@ -5170,20 +5170,25 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   const handlePreviewMedia = useCallback((src, type) => {
     setPreviewMedia({ src, type });
   }, []);
-  const handleReaction = async (messageId, emoji) => {
-    try {
-      const msgRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", messageId);
-      const msg = messages.find((m) => m.id === messageId);
-      const currentReactions = msg.reactions?.[emoji] || [];
-      if (currentReactions.includes(user.uid)) {
-        await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayRemove(user.uid) });
-      } else {
-        await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayUnion(user.uid) });
-      }
-    } catch (e) {
-      console.error("Reaction error", e);
+  // useCallbackで関数をメモ化
+const handleReaction = useCallback(async (messageId, emoji) => {
+  try {
+    const msgRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", messageId);
+    // messages全体に依存すると更新頻度が高いため、最低限の依存にするか、
+    // ここではシンプルにmessagesが変わった時のみ関数を更新するようにします
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg) return; // 安全策
+
+    const currentReactions = msg.reactions?.[emoji] || [];
+    if (currentReactions.includes(user.uid)) {
+      await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayRemove(user.uid) });
+    } else {
+      await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayUnion(user.uid) });
     }
-  };
+  } catch (e) {
+    console.error("Reaction error", e);
+  }
+}, [db2, appId2, activeChatId, messages, user.uid]); // 依存配列を追加
   const submitEditMessage = async () => {
     if (!editingText.trim() || !editingMsgId) return;
     try {
