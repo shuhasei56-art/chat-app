@@ -34,6 +34,8 @@ import {
   limitToLast,
   writeBatch,
   getDocs,
+  getDocsFromCache,
+  getDocsFromServer,
   deleteField,
   increment,
   runTransaction
@@ -119,6 +121,17 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = "messenger-app-v9-integrated";
 const CHUNK_SIZE = 716799;
+
+// Fast media caches (no UI change)
+const __mediaUrlCache = new Map();
+const __mediaDataCache = new Map();
+const __cacheSet = (map, key, val, max=60) => {
+  map.set(key, val);
+  if (map.size > max) {
+    const firstKey = map.keys().next().value;
+    map.delete(firstKey);
+  }
+};
 const REACTION_EMOJIS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F525}"];
 const rtcConfig = {
   iceServers: [
@@ -2202,8 +2215,26 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
       (async () => {
         try {
           let base64Data = "";
-          const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc")));
-          snap.forEach((d) => base64Data += d.data().data);
+          const cacheKey = `msg:${chatId}:${m.id}`;
+          const cachedData = __mediaDataCache.get(cacheKey);
+          if (cachedData) {
+            base64Data = cachedData;
+          } else {
+            const chunksQ = query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc"));
+            let snap;
+            try {
+              snap = await getDocsFromCache(chunksQ);
+            } catch (e) {
+              snap = await getDocsFromServer(chunksQ);
+            }
+            const parts = [];
+            snap.forEach((d) => {
+              const v = d.data()?.data;
+              if (v) parts.push(v);
+            });
+            base64Data = parts.join("");
+            if (base64Data) __cacheSet(__mediaDataCache, cacheKey, base64Data);
+          }
           if (base64Data) {
             let mimeType = m.mimeType;
             if (!mimeType) {
@@ -2250,8 +2281,26 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
       let dataUrl = mediaSrc;
       if (!dataUrl && m.hasChunks) {
         let base64Data = "";
-          const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc")));
-          snap.forEach((d) => base64Data += d.data().data);
+        const cacheKey = `msg:${chatId}:${m.id}`;
+        const cachedData = __mediaDataCache.get(cacheKey);
+        if (cachedData) {
+          base64Data = cachedData;
+        } else {
+          const chunksQ = query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc"));
+          let snap;
+          try {
+            snap = await getDocsFromCache(chunksQ);
+          } catch (e) {
+            snap = await getDocsFromServer(chunksQ);
+          }
+          const parts = [];
+          snap.forEach((d) => {
+            const v = d.data()?.data;
+            if (v) parts.push(v);
+          });
+          base64Data = parts.join("");
+          if (base64Data) __cacheSet(__mediaDataCache, cacheKey, base64Data);
+        }
         if (base64Data) {
           const mimeType = m.mimeType || "application/octet-stream";
           const byteCharacters = atob(base64Data);
@@ -2462,37 +2511,60 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
   const isMe = post.userId === user.uid;
   useEffect(() => {
     if (post.hasChunks && !mediaSrc) {
+      const cacheKey = `post:${post.id}`;
+      const cached = __mediaDataCache.get(cacheKey);
+      const cachedUrl = __mediaUrlCache.get(cacheKey);
+      if (cachedUrl) {
+        setMediaSrc(cachedUrl);
+        return;
+      }
+      if (cached) {
+        setMediaSrc(cached);
+        return;
+      }
       setIsLoadingMedia(true);
       (async () => {
-        let mergedData = "";
-        if (post.chunkCount) {
-          const chunkPromises = [];
-          for (let i = 0; i < post.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks", `${i}`)));
-          const chunkDocs = await Promise.all(chunkPromises);
-          chunkDocs.forEach((d) => {
-            if (d.exists()) mergedData += d.data().data;
-          });
-        } else {
-          const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"), orderBy("index", "asc")));
-          snap.forEach((d) => mergedData += d.data().data);
-        }
-        if (mergedData) {
+        try {
+          let base64Data = "";
+          const chunksQ = query(
+            collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"),
+            orderBy("index", "asc")
+          );
+          // Prefer local cache first; fall back to server if needed (faster on repeat views)
+          let snap;
           try {
-            if (mergedData.startsWith("data:")) {
-              setMediaSrc(mergedData);
-            } else {
-              const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
-              const byteCharacters = atob(mergedData);
-              const byteNumbers = new Array(byteCharacters.length);
-              for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
-              const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
-              setMediaSrc(URL.createObjectURL(blob));
-            }
+            snap = await getDocsFromCache(chunksQ);
           } catch (e) {
-            console.error("Post media load error", e);
+            snap = await getDocsFromServer(chunksQ);
           }
+          const parts = [];
+          snap.forEach((d) => {
+            const v = d.data()?.data;
+            if (v) parts.push(v);
+          });
+          const mergedData = parts.join("");
+          if (mergedData) {
+            try {
+              if (mergedData.startsWith("data:")) {
+                __cacheSet(__mediaDataCache, cacheKey, mergedData);
+                setMediaSrc(mergedData);
+              } else {
+                const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
+                // Faster than manual charCode loop in many browsers
+                const blob = await (await fetch(`data:${mimeType};base64,${mergedData}`)).blob();
+                const url = URL.createObjectURL(blob);
+                __cacheSet(__mediaUrlCache, cacheKey, url);
+                setMediaSrc(url);
+              }
+            } catch (e) {
+              console.error("Post media decode error", e);
+            }
+          }
+        } catch (e) {
+          console.error("Post media load error", e);
+        } finally {
+          setIsLoadingMedia(false);
         }
-        setIsLoadingMedia(false);
       })();
     }
   }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, mediaSrc]);
