@@ -1614,7 +1614,7 @@ const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }) => {
     ] })
   ] });
 };
-const GroupVideoCallView = \(\{ user, chatId, callData, onEndCall, isCaller: isCallerProp, isVideoEnabled = true, activeEffect, backgroundUrl, effects = \[\] \}\) => \{
+const GroupVideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerProp, isVideoEnabled = true, activeEffect, backgroundUrl, effects = [] }) => {
   void callData;
   void isCallerProp;
   void activeEffect;
