@@ -136,6 +136,7 @@ const bytesToBase64 = (bytes) => {
   for (let i = 0; i < bytes.length; i += step) {
     const chunk = bytes.subarray(i, i + step);
     binary += String.fromCharCode(...chunk);
+
   }
   return btoa(binary);
 };
@@ -6474,7 +6475,7 @@ function App() {
   const processedMsgIds = useRef(/* @__PURE__ */ new Set());
   const toggleMuteChat = (chatId) => {
     setMutedChats((prev) => {
-      const next = prev.includes(chatId) ? prev.filter((id) => id !== chatId) : [...prev, chatId];
+     const next = prev.includes(chatId) ? prev.filter((id) => id !== chatId) : [...prev, chatId];
       localStorage.setItem("mutedChats", JSON.stringify(next));
       return next;
     });
