@@ -227,8 +227,14 @@ const iceServers = [
       "stun:stun2.l.google.com:19302",
       "stun:stun3.l.google.com:19302",
       "stun:stun4.l.google.com:19302",
-      "stun:stun.cloudflare.com:3478",
-      "stun:global.stun.twilio.com:3478"
+      // 以下を追加
+      "stun:stun.ekiga.net",
+      "stun:stun.ideasip.com",
+      "stun:stun.schlund.de",
+      "stun:stun.voiparound.com",
+      "stun:stun.voipbuster.com",
+      "stun:stun.voipstunt.com",
+      "stun:stun.voxgratia.org"
     ]
   }
 ];
@@ -2408,6 +2414,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       label: `参加者${idx + 3}`
     }))
   ];
+  const localPreviewClass = "absolute bottom-4 right-4 w-32 h-48 bg-black rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl z-20 transition-all hover:scale-105";
   const showModernGroupLayout = true;
   if (callError) {
     return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center text-white flex-col gap-4", children: [
@@ -6595,30 +6602,42 @@ function App() {
         }
       });
       setChats(chatList);
-      setActiveCall((prev) => {
+     setActiveCall((prev) => {
         const incoming = chatList.find((c) => c.callStatus?.status === "ringing" && c.callStatus.callerId !== user.uid);
-        if (incoming && (!prev || prev.chatId !== incoming.id || prev?.callData?.sessionId !== incoming.callStatus?.sessionId)) {
-          return {
-            chatId: incoming.id,
-            callData: incoming.callStatus,
-            isVideo: incoming.callStatus?.callType !== "audio",
-            isGroupCall: false,
-            isCaller: false,
-            phase: "incoming"
-          };
+        
+        // 1. 新しい着信の処理
+        if (incoming) {
+          if (!prev || prev.callData?.sessionId !== incoming.callStatus?.sessionId) {
+             return {
+              chatId: incoming.id,
+              callData: incoming.callStatus,
+              isVideo: incoming.callStatus?.callType !== "audio",
+              isGroupCall: false,
+              isCaller: false,
+              phase: "incoming"
+            };
+          }
         }
-        if (!prev) return prev;
-        if (prev.isGroupCall) return prev;
-        const currentChat = chatList.find((c) => c.id === prev.chatId);
-        const status = currentChat?.callStatus?.status;
-        if (!currentChat || !currentChat.callStatus) return null;
-        if (status === "accepted") {
-          return { ...prev, phase: "inCall", callData: currentChat.callStatus, isVideo: currentChat.callStatus?.callType !== "audio", isCaller: currentChat.callStatus?.callerId === user.uid };
+
+        // 2. 通話中の状態維持ロジック（ここが重要）
+        if (prev) {
+          const currentChat = chatList.find((c) => c.id === prev.chatId);
+          const status = currentChat?.callStatus?.status;
+          
+          // 通話終了判定（データが消えた、またはnullになった場合）
+          if (!currentChat || !currentChat.callStatus) {
+             return null; 
+          }
+
+          // 「接続中」へのステータス移行のみ更新し、それ以外はprev（既存オブジェクト）を返して再レンダリングを防ぐ
+          if (status === "accepted" && prev.phase !== "inCall") {
+            return { ...prev, phase: "inCall", callData: currentChat.callStatus };
+          }
+          
+          // 状態が変わっていない場合は、Reactに「変更なし」と伝えるために prev をそのまま返す
+          return prev;
         }
-        if (status === "ringing") {
-          const incomingCall = currentChat.callStatus?.callerId !== user.uid;
-          return { ...prev, phase: incomingCall ? "incoming" : "dialing", callData: currentChat.callStatus, isVideo: currentChat.callStatus?.callType !== "audio", isCaller: !incomingCall };
-        }
+        
         return null;
       });
     });
