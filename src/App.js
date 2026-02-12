@@ -3471,7 +3471,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
             setMediaSrc(m.preview);
           }
         } catch (e) {
-          console.error("Failed to load chunks", e);
+          console.error("Failed to load chunks", e);　
           if (m.preview) setMediaSrc(m.preview);
         } finally {
           setLoading(false);
