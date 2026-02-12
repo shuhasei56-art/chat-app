@@ -121,7 +121,11 @@ const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F525}"];
 const rtcConfig = {
   iceServers: [
-    { urls: ["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302","stun:stun2.l.google.com:19302","stun:stun3.l.google.com:19302","stun:stun4.l.google.com:19302"] }
+    { urls: ["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302","stun:stun2.l.google.com:19302","stun:stun3.l.google.com:19302","stun:stun4.l.google.com:19302"] },
+    // TURN (NAT越え安定化). 公開リレーを使用（無料枠/制限がある場合あり）
+    { urls: ["turn:openrelay.metered.ca:80"], username: "openrelayproject", credential: "openrelayproject" },
+    { urls: ["turn:openrelay.metered.ca:443"], username: "openrelayproject", credential: "openrelayproject" },
+    { urls: ["turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" }
   ],
   iceCandidatePoolSize: 10,
   bundlePolicy: "max-bundle"
@@ -1014,7 +1018,15 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const replaceOutgoingVideoTrack = useCallback(async (newVideoTrack) => {
     const pc = pcRef.current;
     if (!pc || !newVideoTrack) return;
-    const sender = pc.getSenders?.().find((s) => s.track && s.track.kind === "video");
+
+    // trackが一時的にnullになっても「ビデオの送信者」を見失わないようにする
+    let sender = pc.getSenders?.().find((s) => s?.track?.kind === "video");
+    if (!sender && pc.getTransceivers) {
+      const t = pc.getTransceivers().find((tr) => tr?.sender && (tr.sender?.track?.kind === "video" || tr?.receiver?.track?.kind === "video"));
+      sender = t?.sender || null;
+    }
+    if (!sender) return;
+
     try {
       if (sender?.replaceTrack) await sender.replaceTrack(newVideoTrack);
     } catch (e) {
@@ -1764,17 +1776,8 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
       (async () => {
         try {
           let base64Data = "";
-          if (m.chunkCount) {
-            const chunkPromises = [];
-            for (let i = 0; i < m.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks", `${i}`)));
-            const chunkDocs = await Promise.all(chunkPromises);
-            chunkDocs.forEach((d) => {
-              if (d.exists()) base64Data += d.data().data;
-            });
-          } else {
-            const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc")));
-            snap.forEach((d) => base64Data += d.data().data);
-          }
+          const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc")));
+          snap.forEach((d) => base64Data += d.data().data);
           if (base64Data) {
             let mimeType = m.mimeType;
             if (!mimeType) {
@@ -1821,17 +1824,8 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
       let dataUrl = mediaSrc;
       if (!dataUrl && m.hasChunks) {
         let base64Data = "";
-        if (m.chunkCount) {
-          const chunkPromises = [];
-          for (let i = 0; i < m.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks", `${i}`)));
-          const chunkDocs = await Promise.all(chunkPromises);
-          chunkDocs.forEach((d) => {
-            if (d.exists()) base64Data += d.data().data;
-          });
-        } else {
           const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc")));
           snap.forEach((d) => base64Data += d.data().data);
-        }
         if (base64Data) {
           const mimeType = m.mimeType || "application/octet-stream";
           const byteCharacters = atob(base64Data);
@@ -4079,7 +4073,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   ] });
 };
 const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, appId: appId2 }) => {
-  const [content, setContent] = useState(""), [media, setMedia] = useState(null), [mediaType, setMediaType] = useState("image"), [isUploading, setIsUploading] = useState(false);
+  const [content, setContent] = useState(""), [media, setMedia] = useState(null), [mediaType, setMediaType] = useState("image"), [isUploading, setIsUploading] = useState(false), [uploadProgress, setUploadProgress] = useState(0);
   const postMessage = async () => {
     if (profile?.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     if (!content && !media || isUploading) return;
@@ -4093,20 +4087,34 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
       }
       const newPostRef = doc(collection(db2, "artifacts", appId2, "public", "data", "posts"));
       if (hasChunks && media) {
-        const CONCURRENCY = 100;
+        const CONCURRENCY = Math.min(250, Math.max(10, chunkCount));
         const executing = /* @__PURE__ */ new Set();
+        let done = 0;
+        setUploadProgress(0);
+
         for (let i = 0; i < chunkCount; i++) {
           const start = i * CHUNK_SIZE;
           const end = Math.min(start + CHUNK_SIZE, media.length);
           const chunkData = media.slice(start, end);
+
           const p = setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: chunkData, index: i });
-          const pWrapper = p.then(() => executing.delete(pWrapper));
+          const pWrapper = p.then(() => {
+            executing.delete(pWrapper);
+            done++;
+            setUploadProgress(Math.min(100, Math.floor(done / chunkCount * 100)));
+          }).catch(() => {
+            executing.delete(pWrapper);
+            done++;
+            setUploadProgress(Math.min(100, Math.floor(done / chunkCount * 100)));
+          });
+
           executing.add(pWrapper);
           if (executing.size >= CONCURRENCY) {
             await Promise.race(executing);
           }
         }
         await Promise.all(executing);
+        setUploadProgress(100);
       }
       let mimeType = null;
       if (media && media.startsWith("data:")) {
@@ -4118,6 +4126,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
       showNotification("\u6295\u7A3F\u3057\u307E\u3057\u305F");
     } finally {
       setIsUploading(false);
+      setUploadProgress(0);
     }
   };
   const handleVoomFileUpload = (e) => {
@@ -4144,7 +4153,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
             /* @__PURE__ */ jsx(ImageIcon, { className: "w-5 h-5 text-gray-400" }),
             /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*,video/*", onChange: handleVoomFileUpload })
           ] }),
-          /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || media ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: "\u6295\u7A3F" })
+          /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || media ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: isUploading ? `投稿 ${uploadProgress}%` : "投稿" })
         ] })
       ] }),
       posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id))
