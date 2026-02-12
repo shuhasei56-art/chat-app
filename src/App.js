@@ -9,7 +9,7 @@ import {
   browserLocalPersistence,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  fetchSignInMethodsForEmail,
+  signOut,
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect
@@ -117,138 +117,15 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = "messenger-app-v9-integrated";
-const CHUNK_SIZE = 740000;
-const getUploadConcurrency = () => {
-  const net = navigator.connection?.effectiveType || "";
-  const hw = navigator.hardwareConcurrency || 8;
-  let base = 12;
-  if (net === "slow-2g" || net === "2g") base = 4;
-  else if (net === "3g") base = 7;
-  else if (net === "4g") base = 12;
-  if (navigator.connection?.saveData) base = Math.min(base, 6);
-  const hwBoost = Math.max(1, Math.min(10, Math.floor(hw / 2)));
-  return Math.max(4, Math.min(28, base + hwBoost));
-};
-const bytesToBase64 = (bytes) => {
-  let binary = "";
-  const step = 32768;
-  for (let i = 0; i < bytes.length; i += step) {
-    const chunk = bytes.subarray(i, i + step);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
-};
-const MAX_MEDIA_CACHE_SIZE = 180;
-const messageMediaUrlCache = /* @__PURE__ */ new Map();
-const messageMediaPromiseCache = /* @__PURE__ */ new Map();
-const messageMediaUrlSet = /* @__PURE__ */ new Set();
-const getDefaultMimeTypeByMessageType = (type) => {
-  if (type === "video") return "video/mp4";
-  if (type === "image") return "image/jpeg";
-  if (type === "audio") return "audio/webm";
-  return "application/octet-stream";
-};
-const buildMessageMediaCacheKey = (chatId, msgId, chunkCount, mimeType, type) => {
-  const resolvedMimeType = mimeType || getDefaultMimeTypeByMessageType(type);
-  return `${chatId}:${msgId}:${chunkCount || 0}:${resolvedMimeType}`;
-};
-const evictOldestMessageMediaCache = () => {
-  if (messageMediaUrlCache.size < MAX_MEDIA_CACHE_SIZE) return;
-  const oldestKey = messageMediaUrlCache.keys().next().value;
-  if (!oldestKey) return;
-  const oldestUrl = messageMediaUrlCache.get(oldestKey);
-  messageMediaUrlCache.delete(oldestKey);
-  if (oldestUrl) {
-    messageMediaUrlSet.delete(oldestUrl);
-    if (oldestUrl.startsWith("blob:")) URL.revokeObjectURL(oldestUrl);
-  }
-};
-const isCachedMessageMediaUrl = (url) => !!url && messageMediaUrlSet.has(url);
-const loadChunkedMessageMedia = async ({ db: db2, appId: appId2, chatId, message }) => {
-  const cacheKey = buildMessageMediaCacheKey(chatId, message.id, message.chunkCount, message.mimeType, message.type);
-  const cached = messageMediaUrlCache.get(cacheKey);
-  if (cached) return cached;
-  const inFlight = messageMediaPromiseCache.get(cacheKey);
-  if (inFlight) return inFlight;
-  const loadPromise = (async () => {
-    let base64Data = "";
-    if (message.chunkCount) {
-      const chunkPromises = [];
-      for (let i = 0; i < message.chunkCount; i++) {
-        chunkPromises.push(
-          getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", message.id, "chunks", `${i}`))
-        );
-      }
-      const chunkDocs = await Promise.all(chunkPromises);
-      chunkDocs.forEach((d) => {
-        if (d.exists()) base64Data += d.data().data;
-      });
-    } else {
-      const snap = await getDocs(
-        query(
-          collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", message.id, "chunks"),
-          orderBy("index", "asc")
-        )
-      );
-      snap.forEach((d) => base64Data += d.data().data);
-    }
-    if (!base64Data) return null;
-    const mimeType = message.mimeType || getDefaultMimeTypeByMessageType(message.type);
-    const byteCharacters = atob(base64Data);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
-    const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
-    const objectUrl = URL.createObjectURL(blob);
-    evictOldestMessageMediaCache();
-    messageMediaUrlCache.set(cacheKey, objectUrl);
-    messageMediaUrlSet.add(objectUrl);
-    return objectUrl;
-  })();
-  messageMediaPromiseCache.set(cacheKey, loadPromise);
-  try {
-    return await loadPromise;
-  } finally {
-    messageMediaPromiseCache.delete(cacheKey);
-  }
-};
+const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F525}"];
-const parseEnvCsv = (value) => (value || "").split(",").map((v) => v.trim()).filter(Boolean);
-const turnUrls = parseEnvCsv(process.env.REACT_APP_TURN_URLS);
-const turnUsername = process.env.REACT_APP_TURN_USERNAME || "";
-const turnCredential = process.env.REACT_APP_TURN_CREDENTIAL || "";
-const forceRelayOnly = process.env.REACT_APP_FORCE_RELAY === "1";
-const hasTurnConfig = turnUrls.length > 0 && !!turnUsername && !!turnCredential;
-const iceServers = [
-  {
-    urls: [
-      "stun:stun.l.google.com:19302",
-      "stun:stun1.l.google.com:19302",
-      "stun:stun2.l.google.com:19302",
-      "stun:stun3.l.google.com:19302",
-      "stun:stun4.l.google.com:19302",
-      "stun:stun.cloudflare.com:3478",
-      "stun:global.stun.twilio.com:3478"
-    ]
-  }
-];
-if (hasTurnConfig) {
-  iceServers.push({
-    urls: turnUrls,
-    username: turnUsername,
-    credential: turnCredential
-  });
-}
 const rtcConfig = {
-  iceServers,
-  iceCandidatePoolSize: 4,
-  bundlePolicy: "max-bundle",
-  iceTransportPolicy: forceRelayOnly ? "relay" : "all"
+  iceServers: [
+    { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] }
+  ],
+  iceCandidatePoolSize: 10,
+  bundlePolicy: "max-bundle"
 };
-const buildRtcConfig = (preferRelay = false) => ({
-  ...rtcConfig,
-  // Use TURN relay on reconnect for long-distance / strict NAT when TURN is configured.
-  iceTransportPolicy: forceRelayOnly || (preferRelay && hasTurnConfig) ? "relay" : "all"
-});
 const formatTime = (timestamp) => {
   if (!timestamp) return "";
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -269,43 +146,6 @@ const formatDateTime = (timestamp) => {
   const min = String(date.getMinutes()).padStart(2, "0");
   return `${yyyy}/${mm}/${dd} ${hh}:${min}`;
 };
-const getProfileCacheKey = (uid) => `profileCache:${uid}`;
-const normalizeProfileForCache = (uid, profile) => {
-  if (!uid || !profile) return null;
-  return {
-    uid,
-    name: profile.name || "",
-    id: profile.id || "",
-    status: profile.status || "",
-    birthday: profile.birthday || "",
-    avatar: profile.avatar || "",
-    cover: profile.cover || "",
-    friends: Array.isArray(profile.friends) ? profile.friends : [],
-    hiddenFriends: Array.isArray(profile.hiddenFriends) ? profile.hiddenFriends : [],
-    hiddenChats: Array.isArray(profile.hiddenChats) ? profile.hiddenChats : [],
-    wallet: Number.isFinite(profile.wallet) ? profile.wallet : 1000,
-    isBanned: !!profile.isBanned
-  };
-};
-const readCachedProfile = (uid) => {
-  if (!uid) return null;
-  try {
-    const raw = localStorage.getItem(getProfileCacheKey(uid));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return normalizeProfileForCache(uid, parsed);
-  } catch {
-    return null;
-  }
-};
-const writeCachedProfile = (uid, profile) => {
-  const normalized = normalizeProfileForCache(uid, profile);
-  if (!normalized) return;
-  try {
-    localStorage.setItem(getProfileCacheKey(uid), JSON.stringify(normalized));
-  } catch {
-  }
-};
 const getEffectOwnerUidFromRefPath = (refPath) => {
   if (!refPath || typeof refPath !== "string") return "";
   const parts = refPath.split("/");
@@ -319,126 +159,6 @@ const isTodayBirthday = (birthdayString) => {
   const [y, m, d] = birthdayString.split("-").map(Number);
   return today.getMonth() + 1 === m && today.getDate() === d;
 };
-const toTitleCase = (value) => value.replace(/\S+/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
-const shuffleText = (value) => value.split("").sort(() => Math.random() - 0.5).join("");
-const rot13 = (value) => value.replace(/[a-zA-Z]/g, (ch) => {
-  const base = ch <= "Z" ? 65 : 97;
-  return String.fromCharCode((ch.charCodeAt(0) - base + 13) % 26 + base);
-});
-const calcExpression = (expr) => {
-  const sanitized = (expr || "").trim();
-  if (!sanitized) return null;
-  if (!/^[0-9+\-*/().%\s]+$/.test(sanitized)) return null;
-  try {
-    const result = Function(`"use strict"; return (${sanitized});`)();
-    if (typeof result !== "number" || !Number.isFinite(result)) return null;
-    return result;
-  } catch {
-    return null;
-  }
-};
-const encodeBase64Utf8 = (value) => {
-  try {
-    return btoa(unescape(encodeURIComponent(value)));
-  } catch {
-    return "";
-  }
-};
-const decodeBase64Utf8 = (value) => {
-  try {
-    return decodeURIComponent(escape(atob(value)));
-  } catch {
-    return "";
-  }
-};
-const toBinaryText = (value) => {
-  try {
-    const bytes = new TextEncoder().encode(value);
-    return Array.from(bytes).map((n) => n.toString(2).padStart(8, "0")).join(" ");
-  } catch {
-    return "";
-  }
-};
-const toHexText = (value) => {
-  try {
-    const bytes = new TextEncoder().encode(value);
-    return Array.from(bytes).map((n) => n.toString(16).padStart(2, "0")).join(" ");
-  } catch {
-    return "";
-  }
-};
-const MORSE_MAP = {
-  a: ".-",
-  b: "-...",
-  c: "-.-.",
-  d: "-..",
-  e: ".",
-  f: "..-.",
-  g: "--.",
-  h: "....",
-  i: "..",
-  j: ".---",
-  k: "-.-",
-  l: ".-..",
-  m: "--",
-  n: "-.",
-  o: "---",
-  p: ".--.",
-  q: "--.-",
-  r: ".-.",
-  s: "...",
-  t: "-",
-  u: "..-",
-  v: "...-",
-  w: ".--",
-  x: "-..-",
-  y: "-.--",
-  z: "--..",
-  "0": "-----",
-  "1": ".----",
-  "2": "..---",
-  "3": "...--",
-  "4": "....-",
-  "5": ".....",
-  "6": "-....",
-  "7": "--...",
-  "8": "---..",
-  "9": "----.",
-  ".": ".-.-.-",
-  ",": "--..--",
-  "?": "..--..",
-  "!": "-.-.--",
-  "-": "-....-",
-  "/": "-..-.",
-  "@": ".--.-.",
-  "(": "-.--.",
-  ")": "-.--.-"
-};
-const MORSE_REVERSE_MAP = Object.fromEntries(Object.entries(MORSE_MAP).map(([k, v]) => [v, k]));
-const toMorse = (value) => value.toLowerCase().split("").map((ch) => {
-  if (ch === " ") return "/";
-  return MORSE_MAP[ch] || ch;
-}).join(" ");
-const fromMorse = (value) => value.split(/\s+/).map((token) => {
-  if (!token) return "";
-  if (token === "/") return " ";
-  return MORSE_REVERSE_MAP[token] || token;
-}).join("");
-const RAINBOW_CHARS = ["R", "A", "I", "N", "B", "O", "W"];
-const rainbowText = (value) => value.split("").map((ch, idx) => ch === " " ? " " : `${RAINBOW_CHARS[idx % RAINBOW_CHARS.length]}:${ch}`).join(" ");
-const SLASH_COMMAND_HELP_LINES = [
-  "/help, /time, /date, /datetime",
-  "/shrug, /tableflip, /unflip, /lenny, /me",
-  "/echo, /upper, /lower, /title, /reverse, /shuffle",
-  "/repeat n text, /len text, /trim text, /calc expr",
-  "/urlencode text, /urldecode text",
-  "/base64 text, /unbase64 text",
-  "/binary text, /hex text, /rot13 text",
-  "/morse text, /unmorse code, /rainbow text",
-  "/random [min] [max], /uuid, /copy text",
-  "/plus, /stickers, /record [start|stop|cancel]",
-  "/bgreset, /joincall, /voice, /video"
-];
 let audioCtx = null;
 const initAudioContext = () => {
   if (!audioCtx) {
@@ -678,56 +398,49 @@ const AuthView = ({ onLogin, showNotification }) => {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
-  const buildLoginEmail = (rawId) => {
-    const input = (rawId || "").trim().normalize("NFKC");
-    if (!input) return "";
-    if (input.includes("@")) {
-      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input) ? input.toLowerCase() : "";
-    }
-    if (!/^[A-Za-z0-9._-]+$/.test(input)) return "";
-    return `${input.toLowerCase()}@voom-persistent.app`;
-  };
-  const getAuthErrorMessage = (error, mode = "login") => {
-    const code = error?.code || "";
-    if (code === "auth/invalid-email") return "ID\u5F62\u5F0F\u304C\u4E0D\u6B63\u3067\u3059\u3002\u82F1\u6570\u5B57\u3068 . _ - \u306E\u307F\u4F7F\u7528\u3067\u304D\u307E\u3059\u3002";
-    if (code === "auth/user-not-found") return "\u3053\u306EID\u306F\u767B\u9332\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002";
-    if (code === "auth/wrong-password" || code === "auth/invalid-credential" || code === "auth/invalid-login-credentials") return "ID\u307E\u305F\u306F\u30D1\u30B9\u30EF\u30FC\u30C9\u304C\u9055\u3044\u307E\u3059\u3002";
-    if (code === "auth/account-exists-with-different-credential") return "\u3053\u306EID\u306F\u30D1\u30B9\u30EF\u30FC\u30C9\u30ED\u30B0\u30A4\u30F3\u3067\u306F\u306A\u304F\u3001\u5225\u306E\u30ED\u30B0\u30A4\u30F3\u65B9\u6CD5\uFF08Google\u7B49\uFF09\u3067\u4F5C\u6210\u3055\u308C\u3066\u3044\u307E\u3059\u3002";
-    if (code === "auth/email-already-in-use") return "\u3053\u306EID\u306F\u65E2\u306B\u4F7F\u308F\u308C\u3066\u3044\u307E\u3059\u3002";
-    if (code === "auth/weak-password") return "\u30D1\u30B9\u30EF\u30FC\u30C9\u306F6\u6587\u5B57\u4EE5\u4E0A\u3067\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
-    if (code === "auth/too-many-requests") return "\u8A66\u884C\u56DE\u6570\u304C\u591A\u3059\u304E\u307E\u3059\u3002\u3057\u3070\u3089\u304F\u5F85\u3063\u3066\u304B\u3089\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
-    if (code === "auth/network-request-failed") return "\u30CD\u30C3\u30C8\u30EF\u30FC\u30AF\u30A8\u30E9\u30FC\u3067\u3059\u3002\u63A5\u7D9A\u3092\u78BA\u8A8D\u3057\u3066\u518D\u8A66\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
-    if (code === "auth/operation-not-allowed") return "Firebase Authentication\u3067\u3053\u306E\u30ED\u30B0\u30A4\u30F3\u65B9\u6CD5\u304C\u7121\u52B9\u3067\u3059\u3002Sign-in method \u3092\u6709\u52B9\u5316\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
-    return `${mode === "signup" ? "\u767B\u9332" : "\u30ED\u30B0\u30A4\u30F3"}\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${error?.message || "\u4E0D\u660E\u306A\u30A8\u30E9\u30FC"}`;
-  };
   const getGoogleLoginErrorMessage = (error) => {
     const code = error?.code || "";
     if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
-      return "\u30DD\u30C3\u30D7\u30A2\u30C3\u30D7\u304C\u30D6\u30ED\u30C3\u30AF\u3055\u308C\u305F\u305F\u3081\u3001\u30EA\u30C0\u30A4\u30EC\u30AF\u30C8\u3067\u30ED\u30B0\u30A4\u30F3\u3057\u307E\u3059\u3002";
+      return "ポップアップがブロックされたため、リダイレクトでログインします。";
     }
     if (code === "auth/popup-closed-by-user") {
-      return "Google\u30ED\u30B0\u30A4\u30F3\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002";
+      return "Googleログインがキャンセルされました。";
     }
     if (code === "auth/unauthorized-domain") {
-      return "\u3053\u306E\u30C9\u30E1\u30A4\u30F3\u306FFirebase Authentication\u3067\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002Firebase\u30B3\u30F3\u30BD\u30FC\u30EB\u3067\u627F\u8A8D\u6E08\u307F\u30C9\u30E1\u30A4\u30F3\u3092\u8FFD\u52A0\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
+      return "このドメインはFirebase Authenticationで許可されていません。Firebaseコンソールで承認済みドメインを追加してください。";
     }
     if (code === "auth/operation-not-allowed") {
-      return "Firebase\u3067Google\u30ED\u30B0\u30A4\u30F3\u304C\u6709\u52B9\u5316\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002Authentication > Sign-in method \u3067\u6709\u52B9\u306B\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
+      return "FirebaseでGoogleログインが有効化されていません。Authentication > Sign-in method で有効にしてください。";
     }
-    return `Google\u30ED\u30B0\u30A4\u30F3\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${error?.message || "\u4E0D\u660E\u306A\u30A8\u30E9\u30FC"}`;
+    return `Googleログインに失敗しました: ${error?.message || "不明なエラー"}`;
   };
   const handleGoogleLogin = async () => {
-    const googleProvider = new GoogleAuthProvider();
-    googleProvider.setCustomParameters({ prompt: "select_account" });
     try {
-      await signInWithPopup(auth, googleProvider);
-      return;
+      const googleProvider = new GoogleAuthProvider();
+      googleProvider.setCustomParameters({ prompt: "select_account" });
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      await setDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), {
+        uid: user.uid,
+        name: user.displayName || "No Name",
+        avatar: user.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + user.uid,
+        id: user.uid,
+        friends: [],
+        hiddenFriends: [],
+        hiddenChats: [],
+        wallet: 1e3,
+        isBanned: false,
+        status: "\u3088\u308D\u3057\u304F\u304A\u9858\u3044\u3057\u307E\u3059\uFF01",
+        cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80"
+      }, { merge: true });
     } catch (error) {
-      console.error("Popup Login Error:", error);
+      console.error("Login Error:", error);
       const code = error?.code || "";
-      if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request" || code === "auth/operation-not-supported-in-this-environment") {
+      if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
         try {
-          showNotification("\u30DD\u30C3\u30D7\u30A2\u30C3\u30D7\u304C\u4F7F\u3048\u306A\u3044\u305F\u3081\u3001\u30EA\u30C0\u30A4\u30EC\u30AF\u30C8\u3067\u30ED\u30B0\u30A4\u30F3\u3057\u307E\u3059\u3002");
+          const googleProvider = new GoogleAuthProvider();
+          googleProvider.setCustomParameters({ prompt: "select_account" });
+          showNotification("ポップアップが使えないため、リダイレクトでログインします。");
           await signInWithRedirect(auth, googleProvider);
           return;
         } catch (redirectError) {
@@ -735,10 +448,6 @@ const AuthView = ({ onLogin, showNotification }) => {
           showNotification(getGoogleLoginErrorMessage(redirectError));
           return;
         }
-      }
-      if (code === "auth/operation-not-supported-in-this-environment") {
-        showNotification("\u3053\u306E\u74B0\u5883\u3067\u306FGoogle\u30ED\u30B0\u30A4\u30F3\u304C\u4F7F\u3048\u307E\u305B\u3093\u3002");
-        return;
       }
       showNotification(getGoogleLoginErrorMessage(error));
     }
@@ -749,7 +458,7 @@ const AuthView = ({ onLogin, showNotification }) => {
       await signInAnonymously(auth);
       showNotification("\u30B2\u30B9\u30C8\u30ED\u30B0\u30A4\u30F3\u3057\u307E\u3057\u305F");
     } catch (e) {
-      showNotification(getAuthErrorMessage(e, "login"));
+      showNotification("\u30B2\u30B9\u30C8\u30ED\u30B0\u30A4\u30F3\u5931\u6557");
     } finally {
       setLoading(false);
     }
@@ -757,38 +466,14 @@ const AuthView = ({ onLogin, showNotification }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!userId || !password) return showNotification("ID\u3068\u30D1\u30B9\u30EF\u30FC\u30C9\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
-    if (!isLoginMode && password.length < 6) {
-      showNotification("\u30D1\u30B9\u30EF\u30FC\u30C9\u306F6\u6587\u5B57\u4EE5\u4E0A\u3067\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
-      return;
-    }
-    const normalizedUserId = userId.trim().normalize("NFKC");
-    const email = buildLoginEmail(normalizedUserId);
-    if (!email) {
-      showNotification("ID\u306F\u82F1\u6570\u5B57\u3068 . _ - \u306E\u307F\u4F7F\u7528\u3067\u304D\u307E\u3059\u3002\u30E1\u30FC\u30EB\u30A2\u30C9\u30EC\u30B9\u5165\u529B\u3082\u53EF\u80FD\u3067\u3059\u3002");
-      return;
-    }
+    const email = `${userId}@voom-persistent.app`;
     setLoading(true);
     try {
       if (isLoginMode) {
-        try {
-          await signInWithEmailAndPassword(auth, email, password);
-          showNotification("\u30ED\u30B0\u30A4\u30F3\u3057\u307E\u3057\u305F");
-        } catch (loginError) {
-          const loginCode = loginError?.code || "";
-          if (["auth/user-not-found", "auth/wrong-password", "auth/invalid-credential", "auth/invalid-login-credentials"].includes(loginCode)) {
-            try {
-              const methods = await fetchSignInMethodsForEmail(auth, email);
-              if (Array.isArray(methods) && methods.length > 0 && !methods.includes("password")) {
-                showNotification(getAuthErrorMessage({ code: "auth/account-exists-with-different-credential" }, "login"));
-                return;
-              }
-            } catch {
-            }
-          }
-          throw loginError;
-        }
+        await signInWithEmailAndPassword(auth, email, password);
+        showNotification("\u30ED\u30B0\u30A4\u30F3\u3057\u307E\u3057\u305F");
       } else {
-        if (!displayName.trim()) {
+        if (!displayName) {
           showNotification("\u30CB\u30C3\u30AF\u30CD\u30FC\u30E0\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
           setLoading(false);
           return;
@@ -796,13 +481,12 @@ const AuthView = ({ onLogin, showNotification }) => {
         const cred = await createUserWithEmailAndPassword(auth, email, password);
         await setDoc(doc(db, "artifacts", appId, "public", "data", "users", cred.user.uid), {
           uid: cred.user.uid,
-          name: displayName.trim() || normalizedUserId,
-          id: normalizedUserId,
+          name: displayName || userId,
+          id: userId,
           status: "\u3088\u308D\u3057\u304F\u304A\u9858\u3044\u3057\u307E\u3059\uFF01",
           birthday: "",
           avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cred.user.uid}`,
           cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
-          loginEmail: email,
           friends: [],
           hiddenFriends: [],
           hiddenChats: [],
@@ -812,7 +496,7 @@ const AuthView = ({ onLogin, showNotification }) => {
         showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u4F5C\u6210\u5B8C\u4E86");
       }
     } catch (e2) {
-      showNotification(getAuthErrorMessage(e2, isLoginMode ? "login" : "signup"));
+      showNotification("\u30A8\u30E9\u30FC: " + e2.message);
     } finally {
       setLoading(false);
     }
@@ -835,14 +519,14 @@ const AuthView = ({ onLogin, showNotification }) => {
         /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-gray-400 ml-2", children: "\u30E6\u30FC\u30B6\u30FCID" }),
         /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border", children: [
           /* @__PURE__ */ jsx(AtSign, { className: "w-4 h-4 text-gray-400" }),
-          /* @__PURE__ */ jsx("input", { className: "bg-transparent w-full outline-none text-sm font-bold", placeholder: "user_id", autoComplete: "username", value: userId, onChange: (e) => setUserId(e.target.value) })
+          /* @__PURE__ */ jsx("input", { className: "bg-transparent w-full outline-none text-sm font-bold", placeholder: "user_id", value: userId, onChange: (e) => setUserId(e.target.value) })
         ] })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
         /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-gray-400 ml-2", children: "\u30D1\u30B9\u30EF\u30FC\u30C9" }),
         /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border", children: [
           /* @__PURE__ */ jsx(KeyRound, { className: "w-4 h-4 text-gray-400" }),
-          /* @__PURE__ */ jsx("input", { className: "bg-transparent w-full outline-none text-sm font-bold", type: "password", autoComplete: isLoginMode ? "current-password" : "new-password", placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022", value: password, onChange: (e) => setPassword(e.target.value) })
+          /* @__PURE__ */ jsx("input", { className: "bg-transparent w-full outline-none text-sm font-bold", type: "password", placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022", value: password, onChange: (e) => setPassword(e.target.value) })
         ] })
       ] }),
       /* @__PURE__ */ jsx("button", { type: "submit", disabled: loading, className: "w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl flex items-center justify-center", children: loading ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin" }) : isLoginMode ? "\u30ED\u30B0\u30A4\u30F3" : "\u767B\u9332" })
@@ -862,52 +546,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const [hasRemoteVideoTrack, setHasRemoteVideoTrack] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
-  const [isConnected, setIsConnected] = useState(false);
-  const [callDurationSec, setCallDurationSec] = useState(0);
-  const [networkQuality, setNetworkQuality] = useState("checking");
-  const [remoteVolume, setRemoteVolume] = useState(1);
-  const [isRemoteMuted, setIsRemoteMuted] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isRemotePip, setIsRemotePip] = useState(false);
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
-  const [currentFacingMode, setCurrentFacingMode] = useState("user");
-  const [audioOutputs, setAudioOutputs] = useState([]);
-  const [selectedAudioOutput, setSelectedAudioOutput] = useState("default");
-  const [isRecordingCall, setIsRecordingCall] = useState(false);
-  const [recordingDurationSec, setRecordingDurationSec] = useState(0);
-  const [isLocalMirror, setIsLocalMirror] = useState(true);
   const [callError, setCallError] = useState(null);
   const [needsRemotePlay, setNeedsRemotePlay] = useState(false);
-  const [disableLocalFilter, setDisableLocalFilter] = useState(false);
-  const [showAdvancedPanel, setShowAdvancedPanel] = useState(false);
-  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
-  const [confirmBeforeHangup, setConfirmBeforeHangup] = useState(false);
-  const [autoHideControls, setAutoHideControls] = useState(false);
-  const [controlsVisible, setControlsVisible] = useState(true);
-  const [keepAwake, setKeepAwake] = useState(false);
-  const [qualityMode, setQualityMode] = useState("auto");
-  const [noiseSuppressionEnabled, setNoiseSuppressionEnabled] = useState(true);
-  const [echoCancellationEnabled, setEchoCancellationEnabled] = useState(true);
-  const [autoGainControlEnabled, setAutoGainControlEnabled] = useState(true);
-  const [micGain, setMicGain] = useState(1);
-  const [remoteBoost, setRemoteBoost] = useState(1);
-  const [remoteBrightness, setRemoteBrightness] = useState(100);
-  const [remoteContrast, setRemoteContrast] = useState(100);
-  const [remoteSaturation, setRemoteSaturation] = useState(100);
-  const [isRemoteMirror, setIsRemoteMirror] = useState(false);
-  const [remoteZoom, setRemoteZoom] = useState(1);
-  const [localZoom, setLocalZoom] = useState(1);
-  const [showClock, setShowClock] = useState(false);
-  const [snapshotCountdownSec, setSnapshotCountdownSec] = useState(0);
-  const [snapshotTimestampEnabled, setSnapshotTimestampEnabled] = useState(false);
-  const [autoSnapshotSec, setAutoSnapshotSec] = useState(0);
-  const [callNotes, setCallNotes] = useState("");
-  const [bookmarks, setBookmarks] = useState([]);
-  const [isHold, setIsHold] = useState(false);
-  const [playConnectSound, setPlayConnectSound] = useState(true);
-  const [vibrateOnConnect, setVibrateOnConnect] = useState(false);
-  const callStageRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
@@ -917,69 +557,19 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const unsubscribersRef = useRef([]);
   const pendingCandidatesRef = useRef([]);
   const disconnectTimerRef = useRef(null);
-  const statsTimerRef = useRef(null);
-  const localVideoFreezeWatchdogRef = useRef(null);
-  const localVideoTimeProbeRef = useRef(null);
-  const localVideoFrameCallbackIdRef = useRef(null);
-  const lastLocalFrameAtRef = useRef(0);
-  const prevOutboundStatsRef = useRef({ packetsSent: 0, packetsLost: 0 });
-  const callRecorderRef = useRef(null);
-  const callRecordingChunksRef = useRef([]);
-  const callRecordingTimerRef = useRef(null);
-  const appliedProfileRef = useRef("");
-  const applyingRemoteOfferRef = useRef(false);
-  const applyingRemoteAnswerRef = useRef(false);
-  const reconnectAttemptsRef = useRef(0);
-  const isRecoveringRef = useRef(false);
-  const lastRemoteOfferSdpRef = useRef("");
-  const lastRemoteAnswerSdpRef = useRef("");
   const isMountedRef = useRef(true);
   const startedRef = useRef(false);
   const hasRemoteVideoTrackRef = useRef(false);
-  const remoteVolumeRef = useRef(1);
-  const remoteMutedRef = useRef(false);
-  const callStartedAtRef = useRef(null);
-  const screenTrackRef = useRef(null);
-  const controlsTimerRef = useRef(null);
-  const autoSnapshotTimerRef = useRef(null);
-  const wakeLockRef = useRef(null);
-  const preHoldStateRef = useRef({ isMuted: false, isVideoOff: false });
-  const qualityModeRef = useRef("auto");
-  const audioPrefsRef = useRef({ noiseSuppression: true, echoCancellation: true, autoGainControl: true });
-  const prevConnectedRef = useRef(false);
   const sessionId = callData?.sessionId || "";
   const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData?.callerId === user.uid;
-  const canSelectAudioOutput = typeof HTMLMediaElement !== "undefined" && typeof HTMLMediaElement.prototype?.setSinkId === "function";
-  const isIOSWebKit = (() => {
-    const ua = navigator.userAgent || "";
-    const iOS = /iP(hone|ad|od)/.test(ua) || navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
-    const webkit = /AppleWebKit/i.test(ua) && !/CriOS|FxiOS|EdgiOS/i.test(ua);
-    return iOS && webkit;
-  })();
-  const isAndroidDevice = /Android/i.test(navigator.userAgent || "");
-  const isLowSpecDevice = (() => {
-    const cores = navigator.hardwareConcurrency || 8;
-    const memory = navigator.deviceMemory || 8;
-    return cores <= 4 || memory <= 4;
-  })();
-  const forceStablePreviewMode = isIOSWebKit || isAndroidDevice || isLowSpecDevice;
   const getFilterStyle = (effectName) => {
     if (!effectName || effectName === "Normal") return "none";
     const sanitizeFilter = (filterValue) => {
       if (typeof filterValue !== "string") return "none";
-      const v = filterValue.trim().toLowerCase();
-      // Allow only a single lightweight filter function during live calls.
-      const m = v.match(/^(sepia|grayscale|brightness|contrast)\s*\(\s*(-?\d+(?:\.\d+)?)\s*(%)?\s*\)$/i);
-      if (!m) return "none";
-      const name = m[1].toLowerCase();
-      const num = Number(m[2]);
-      if (!Number.isFinite(num)) return "none";
-      const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
-      if (name === "brightness") return `brightness(${clamp(num, 60, 170)}%)`;
-      if (name === "contrast") return `contrast(${clamp(num, 80, 200)}%)`;
-      if (name === "sepia") return `sepia(${clamp(num, 0, 100)}%)`;
-      if (name === "grayscale") return `grayscale(${clamp(num, 0, 100)}%)`;
-      return "none";
+      const v = filterValue.trim();
+      // Avoid expensive/unsupported filters that can freeze video rendering on some devices.
+      if (!v || v.length > 120 || /blur\s*\(|drop-shadow\s*\(|url\s*\(/i.test(v)) return "none";
+      return v;
     };
     const match = (effects || []).find(
       (e) => e?.name === effectName && typeof e?.filter === "string" && e.filter.trim() !== ""
@@ -991,9 +581,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       case "Grayscale":
         return "grayscale(100%)";
       case "Invert":
-        return "none";
+        return "invert(100%)";
       case "Hue":
-        return "none";
+        return "hue-rotate(90deg)";
       case "Contrast":
         return "contrast(200%)";
       case "Blur":
@@ -1001,396 +591,27 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       case "Bright":
         return "brightness(150%)";
       case "Fire":
-        return "none";
+        return "sepia(100%) hue-rotate(-35deg) saturate(180%)";
       case "Ice":
-        return "none";
+        return "sepia(40%) hue-rotate(170deg) saturate(160%)";
       case "Rainbow":
-        return "none";
+        return "hue-rotate(80deg) saturate(150%)";
       default:
         return "none";
     }
   };
-  const onEndCallRef = useRef(onEndCall);
-  useEffect(() => {
-    onEndCallRef.current = onEndCall;
-  }, [onEndCall]);
-  const safeEndCall = useCallback((delay = 0) => {
-    const endCall = () => onEndCallRef.current?.();
-    if (delay <= 0) {
-      endCall();
-      return;
-    }
-    setTimeout(() => {
-      if (isMountedRef.current) endCall();
-    }, delay);
-  }, []);
-  useEffect(() => {
-    setDisableLocalFilter(forceStablePreviewMode);
-  }, [activeEffect, forceStablePreviewMode]);
-  useEffect(() => {
-    remoteVolumeRef.current = remoteVolume;
-    remoteMutedRef.current = isRemoteMuted;
-    const volume = isRemoteMuted ? 0 : remoteVolume;
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.volume = volume;
-      remoteAudioRef.current.muted = false;
-    }
-  }, [remoteVolume, isRemoteMuted]);
-  useEffect(() => {
-    const onFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener("fullscreenchange", onFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
-  }, []);
-  useEffect(() => {
-    const videoEl = remoteVideoRef.current;
-    if (!videoEl) return;
-    const onEnterPip = () => setIsRemotePip(true);
-    const onLeavePip = () => setIsRemotePip(false);
-    videoEl.addEventListener("enterpictureinpicture", onEnterPip);
-    videoEl.addEventListener("leavepictureinpicture", onLeavePip);
-    return () => {
-      videoEl.removeEventListener("enterpictureinpicture", onEnterPip);
-      videoEl.removeEventListener("leavepictureinpicture", onLeavePip);
-    };
-  }, [remoteStream]);
-  useEffect(() => {
-    const md = navigator.mediaDevices;
-    if (!md?.enumerateDevices) return;
-    let cancelled = false;
-    const loadOutputs = async () => {
-      try {
-        const devices = await md.enumerateDevices();
-        if (cancelled) return;
-        const outputs = devices.filter((d) => d.kind === "audiooutput");
-        setAudioOutputs(outputs);
-        if (outputs.length > 0 && !outputs.some((d) => d.deviceId === selectedAudioOutput)) {
-          setSelectedAudioOutput(outputs[0].deviceId || "default");
-        }
-      } catch (e) {
-        console.warn("Failed to enumerate audio outputs:", e);
-      }
-    };
-    loadOutputs();
-    md.addEventListener?.("devicechange", loadOutputs);
-    return () => {
-      cancelled = true;
-      md.removeEventListener?.("devicechange", loadOutputs);
-    };
-  }, [selectedAudioOutput]);
-  useEffect(() => {
-    if (!canSelectAudioOutput) return;
-    const applySink = async (el) => {
-      if (!el || typeof el.setSinkId !== "function") return;
-      try {
-        await el.setSinkId(selectedAudioOutput || "default");
-      } catch (e) {
-        console.warn("setSinkId failed:", e);
-      }
-    };
-    applySink(remoteAudioRef.current);
-    applySink(remoteVideoRef.current);
-  }, [selectedAudioOutput, canSelectAudioOutput, remoteStream]);
-  useEffect(() => {
-    if (!isConnected) {
-      setCallDurationSec(0);
-      return;
-    }
-    const timer = setInterval(() => {
-      if (!callStartedAtRef.current) return;
-      const elapsed = Math.floor((Date.now() - callStartedAtRef.current) / 1e3);
-      setCallDurationSec(elapsed);
-    }, 1e3);
-    return () => clearInterval(timer);
-  }, [isConnected]);
-  useEffect(() => {
-    qualityModeRef.current = qualityMode;
-  }, [qualityMode]);
-  useEffect(() => {
-    audioPrefsRef.current = {
-      noiseSuppression: noiseSuppressionEnabled,
-      echoCancellation: echoCancellationEnabled,
-      autoGainControl: autoGainControlEnabled
-    };
-    const stream = localStreamRef.current;
-    const track = stream?.getAudioTracks?.()[0];
-    if (!track?.applyConstraints) return;
-    track.applyConstraints({
-      advanced: [
-        {
-          noiseSuppression: noiseSuppressionEnabled,
-          echoCancellation: echoCancellationEnabled,
-          autoGainControl: autoGainControlEnabled,
-          volume: micGain
-        }
-      ]
-    }).catch(() => null);
-  }, [noiseSuppressionEnabled, echoCancellationEnabled, autoGainControlEnabled, micGain]);
-  useEffect(() => {
-    const effectiveVolume = isRemoteMuted ? 0 : Math.min(1, remoteVolume * remoteBoost);
-    if (remoteAudioRef.current) remoteAudioRef.current.volume = effectiveVolume;
-  }, [remoteVolume, remoteBoost, isRemoteMuted]);
-  useEffect(() => {
-    if (!autoHideControls || showAdvancedPanel) {
-      setControlsVisible(true);
-      if (controlsTimerRef.current) {
-        clearTimeout(controlsTimerRef.current);
-        controlsTimerRef.current = null;
-      }
-      return;
-    }
-    const showTemporarily = () => {
-      setControlsVisible(true);
-      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-      controlsTimerRef.current = setTimeout(() => {
-        if (isMountedRef.current && !showAdvancedPanel) setControlsVisible(false);
-      }, 2800);
-    };
-    showTemporarily();
-    window.addEventListener("pointermove", showTemporarily);
-    window.addEventListener("pointerdown", showTemporarily);
-    window.addEventListener("keydown", showTemporarily);
-    return () => {
-      window.removeEventListener("pointermove", showTemporarily);
-      window.removeEventListener("pointerdown", showTemporarily);
-      window.removeEventListener("keydown", showTemporarily);
-      if (controlsTimerRef.current) {
-        clearTimeout(controlsTimerRef.current);
-        controlsTimerRef.current = null;
-      }
-    };
-  }, [autoHideControls, showAdvancedPanel]);
-  useEffect(() => {
-    if (showAdvancedPanel) setControlsVisible(true);
-  }, [showAdvancedPanel]);
-  useEffect(() => {
-    let cancelled = false;
-    const applyWakeLock = async () => {
-      if (!("wakeLock" in navigator)) return;
-      if (!keepAwake || !isConnected) {
-        if (wakeLockRef.current) {
-          try {
-            await wakeLockRef.current.release();
-          } catch {
-          }
-          wakeLockRef.current = null;
-        }
+  const safeEndCall = useCallback(
+    (delay = 0) => {
+      if (delay <= 0) {
+        onEndCall?.();
         return;
       }
-      try {
-        const sentinel = await navigator.wakeLock.request("screen");
-        if (cancelled) {
-          await sentinel.release().catch(() => null);
-          return;
-        }
-        wakeLockRef.current = sentinel;
-      } catch {
-      }
-    };
-    applyWakeLock();
-    return () => {
-      cancelled = true;
-    };
-  }, [keepAwake, isConnected]);
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.repeat) return;
-      if (e.target && ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName)) return;
-      if (e.key === "m" || e.key === "M") toggleMute();
-      if (e.key === "v" || e.key === "V") toggleVideo();
-      if (e.key === "f" || e.key === "F") toggleFullscreen();
-      if (e.key === "p" || e.key === "P") togglePictureInPicture();
-      if (e.key === "s" || e.key === "S") captureCallSnapshot();
-      if (e.key === "h" || e.key === "H") toggleHold();
-      if (e.key === "?") setShowShortcutHelp((v) => !v);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-  useEffect(() => {
-    if (autoSnapshotTimerRef.current) {
-      clearInterval(autoSnapshotTimerRef.current);
-      autoSnapshotTimerRef.current = null;
-    }
-    if (autoSnapshotSec <= 0) return;
-    const hasRemoteVideoNow = hasRemoteVideoTrack || remoteStream?.getVideoTracks?.().some((track) => track.readyState === "live");
-    if (!hasRemoteVideoNow) return;
-    autoSnapshotTimerRef.current = setInterval(() => {
-      captureCallSnapshot();
-    }, autoSnapshotSec * 1e3);
-    return () => {
-      if (autoSnapshotTimerRef.current) {
-        clearInterval(autoSnapshotTimerRef.current);
-        autoSnapshotTimerRef.current = null;
-      }
-    };
-  }, [autoSnapshotSec, hasRemoteVideoTrack, remoteStream]);
-  const tryPlayRemoteMedia = useCallback(async () => {
-    let audioFailed = false;
-    let videoFailed = false;
-    const audioEl = remoteAudioRef.current;
-    const videoEl = remoteVideoRef.current;
-    const mediaStream = videoEl?.srcObject || audioEl?.srcObject || remoteStreamRef.current;
-    const hasVideoTrack = hasRemoteVideoTrackRef.current || !!mediaStream?.getVideoTracks?.().some((track) => track.readyState === "live");
-    const hasAudioTrack = !!mediaStream?.getAudioTracks?.().some((track) => track.readyState === "live");
-    if (audioEl) {
-      audioEl.muted = false;
-      audioEl.volume = remoteMutedRef.current ? 0 : remoteVolumeRef.current;
-      if (hasAudioTrack) {
-        try {
-          await audioEl.play();
-        } catch {
-          audioFailed = true;
-        }
-      } else {
-        audioEl.pause();
-      }
-    }
-    if (videoEl) {
-      // Keep video muted so autoplay succeeds across browsers; audio is handled by remoteAudioRef.
-      videoEl.muted = true;
-      if (hasVideoTrack) {
-        try {
-          await videoEl.play();
-        } catch {
-          videoFailed = true;
-        }
-      } else {
-        videoEl.pause();
-      }
-    }
-    // Fallback: if audio element playback fails, try routing audio through video element.
-    if (audioFailed && hasAudioTrack && hasVideoTrack && videoEl) {
-      try {
-        videoEl.muted = false;
-        await videoEl.play();
-        audioFailed = false;
-      } catch {
-        videoFailed = true;
-      }
-    }
-    setNeedsRemotePlay(audioFailed || videoFailed);
-    return !(audioFailed || videoFailed);
-  }, []);
-  useEffect(() => {
-    const becameConnected = isConnected && !prevConnectedRef.current;
-    if (becameConnected) {
-      if (playConnectSound) playNotificationSound();
-      if (vibrateOnConnect && navigator.vibrate) navigator.vibrate([120, 60, 120]);
-      tryPlayRemoteMedia();
-    }
-    prevConnectedRef.current = isConnected;
-  }, [isConnected, playConnectSound, vibrateOnConnect, tryPlayRemoteMedia]);
-  const recoverLocalPreviewPlayback = useCallback(() => {
-    const videoEl = localVideoRef.current;
-    const stream = localStreamRef.current;
-    if (!videoEl || !stream) return;
-    try {
-      videoEl.pause();
-    } catch {
-    }
-    try {
-      videoEl.srcObject = null;
-    } catch {
-    }
-    const reattach = () => {
-      if (!isMountedRef.current) return;
-      try {
-        videoEl.srcObject = stream;
-        videoEl.muted = true;
-        const p = videoEl.play?.();
-        if (p?.catch) p.catch(() => null);
-      } catch {
-      }
-    };
-    if (typeof requestAnimationFrame === "function") {
-      requestAnimationFrame(reattach);
-    } else {
-      setTimeout(reattach, 0);
-    }
-  }, []);
-  const handleLocalVideoRenderIssue = useCallback(() => {
-    if (activeEffect && activeEffect !== "Normal") {
-      setDisableLocalFilter(true);
-      recoverLocalPreviewPlayback();
-    }
-  }, [activeEffect, recoverLocalPreviewPlayback]);
-  const localFilter = disableLocalFilter || forceStablePreviewMode ? "none" : getFilterStyle(activeEffect);
-  const isEffectSuppressed = !!(activeEffect && activeEffect !== "Normal" && (disableLocalFilter || forceStablePreviewMode));
-  const hasRemoteVideo = hasRemoteVideoTrack || remoteStream?.getVideoTracks?.().some((track) => track.readyState === "live");
-  useEffect(() => {
-    if (disableLocalFilter) {
-      recoverLocalPreviewPlayback();
-    }
-  }, [disableLocalFilter, recoverLocalPreviewPlayback]);
-  useEffect(() => {
-    if (localVideoFreezeWatchdogRef.current) {
-      clearInterval(localVideoFreezeWatchdogRef.current);
-      localVideoFreezeWatchdogRef.current = null;
-    }
-    if (localVideoTimeProbeRef.current) {
-      clearInterval(localVideoTimeProbeRef.current);
-      localVideoTimeProbeRef.current = null;
-    }
-    const videoEl = localVideoRef.current;
-    if (!videoEl || localFilter === "none") return;
-    let stopped = false;
-    lastLocalFrameAtRef.current = performance.now();
-    const hasRVFC = typeof videoEl.requestVideoFrameCallback === "function";
-    const onFrame = () => {
-      if (stopped) return;
-      lastLocalFrameAtRef.current = performance.now();
-      if (hasRVFC) {
-        localVideoFrameCallbackIdRef.current = videoEl.requestVideoFrameCallback(onFrame);
-      }
-    };
-    if (hasRVFC) {
-      localVideoFrameCallbackIdRef.current = videoEl.requestVideoFrameCallback(onFrame);
-    } else {
-      let lastCurrentTime = Number.isFinite(videoEl.currentTime) ? videoEl.currentTime : -1;
-      const timeProbe = setInterval(() => {
-        if (stopped) return;
-        const t = videoEl.currentTime;
-        if (!Number.isFinite(t)) return;
-        if (t !== lastCurrentTime) {
-          lastCurrentTime = t;
-          lastLocalFrameAtRef.current = performance.now();
-        }
-      }, 250);
-      localVideoTimeProbeRef.current = timeProbe;
-    }
-    const watchdog = setInterval(() => {
-      if (stopped) return;
-      const stream = localStreamRef.current;
-      const hasLiveEnabledVideo = !!stream?.getVideoTracks?.().some((t) => t.readyState === "live" && t.enabled);
-      if (!hasLiveEnabledVideo || videoEl.paused || videoEl.ended) return;
-      if (videoEl.readyState < 2) return;
-      if (performance.now() - lastLocalFrameAtRef.current > 1800) {
-        setDisableLocalFilter(true);
-        recoverLocalPreviewPlayback();
-      }
-    }, 700);
-    if (localVideoFreezeWatchdogRef.current) {
-      clearInterval(localVideoFreezeWatchdogRef.current);
-    }
-    localVideoFreezeWatchdogRef.current = watchdog;
-    return () => {
-      stopped = true;
-      if (localVideoFreezeWatchdogRef.current) {
-        clearInterval(localVideoFreezeWatchdogRef.current);
-        localVideoFreezeWatchdogRef.current = null;
-      }
-      if (localVideoTimeProbeRef.current) {
-        clearInterval(localVideoTimeProbeRef.current);
-        localVideoTimeProbeRef.current = null;
-      }
-      if (hasRVFC && localVideoFrameCallbackIdRef.current != null && typeof videoEl.cancelVideoFrameCallback === "function") {
-        videoEl.cancelVideoFrameCallback(localVideoFrameCallbackIdRef.current);
-        localVideoFrameCallbackIdRef.current = null;
-      }
-    };
-  }, [localFilter, recoverLocalPreviewPlayback]);
+      setTimeout(() => {
+        if (isMountedRef.current) onEndCall?.();
+      }, delay);
+    },
+    [onEndCall]
+  );
   const cleanup = useCallback(() => {
     unsubscribersRef.current.forEach((u) => {
       try {
@@ -1404,54 +625,15 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         pcRef.current.onicecandidate = null;
         pcRef.current.ontrack = null;
         pcRef.current.onconnectionstatechange = null;
-        pcRef.current.oniceconnectionstatechange = null;
         pcRef.current.close();
       }
     } catch {
     }
     pcRef.current = null;
-    if (statsTimerRef.current) {
-      clearInterval(statsTimerRef.current);
-      statsTimerRef.current = null;
-    }
-    if (localVideoFreezeWatchdogRef.current) {
-      clearInterval(localVideoFreezeWatchdogRef.current);
-      localVideoFreezeWatchdogRef.current = null;
-    }
-    if (localVideoTimeProbeRef.current) {
-      clearInterval(localVideoTimeProbeRef.current);
-      localVideoTimeProbeRef.current = null;
-    }
     if (disconnectTimerRef.current) {
       clearTimeout(disconnectTimerRef.current);
       disconnectTimerRef.current = null;
     }
-    if (callRecordingTimerRef.current) {
-      clearInterval(callRecordingTimerRef.current);
-      callRecordingTimerRef.current = null;
-    }
-    if (controlsTimerRef.current) {
-      clearTimeout(controlsTimerRef.current);
-      controlsTimerRef.current = null;
-    }
-    if (autoSnapshotTimerRef.current) {
-      clearInterval(autoSnapshotTimerRef.current);
-      autoSnapshotTimerRef.current = null;
-    }
-    if (wakeLockRef.current) {
-      wakeLockRef.current.release?.().catch(() => null);
-      wakeLockRef.current = null;
-    }
-    try {
-      if (callRecorderRef.current && callRecorderRef.current.state !== "inactive") {
-        callRecorderRef.current.stop();
-      }
-    } catch {
-    }
-    callRecorderRef.current = null;
-    callRecordingChunksRef.current = [];
-    setIsRecordingCall(false);
-    setRecordingDurationSec(0);
     try {
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -1471,27 +653,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     setHasRemoteVideoTrack(false);
     setNeedsRemotePlay(false);
     pendingCandidatesRef.current = [];
-    applyingRemoteOfferRef.current = false;
-    applyingRemoteAnswerRef.current = false;
-    reconnectAttemptsRef.current = 0;
-    isRecoveringRef.current = false;
-    lastRemoteOfferSdpRef.current = "";
-    lastRemoteAnswerSdpRef.current = "";
-    prevOutboundStatsRef.current = { packetsSent: 0, packetsLost: 0 };
-    appliedProfileRef.current = "";
-    callStartedAtRef.current = null;
-    setIsConnected(false);
-    setCallDurationSec(0);
-    setNetworkQuality("checking");
-    setIsScreenSharing(false);
-    if (screenTrackRef.current) {
-      try {
-        screenTrackRef.current.onended = null;
-        screenTrackRef.current.stop();
-      } catch {
-      }
-      screenTrackRef.current = null;
-    }
   }, []);
   const getMediaErrorMessage = (err) => {
     const name = err?.name || "";
@@ -1511,9 +672,39 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       }
     }
   };
+  const tryPlayRemoteMedia = useCallback(async () => {
+    let audioFailed = false;
+    let videoFailed = false;
+    const audioEl = remoteAudioRef.current;
+    const videoEl = remoteVideoRef.current;
+    const hasVideoTrack = hasRemoteVideoTrackRef.current || !!videoEl?.srcObject?.getVideoTracks?.().some((track) => track.readyState === "live");
+    if (audioEl) {
+      audioEl.muted = false;
+      audioEl.volume = 1;
+      if (hasVideoTrack) {
+        audioEl.pause();
+      } else {
+        try {
+          await audioEl.play();
+        } catch {
+          audioFailed = true;
+        }
+      }
+    }
+    if (videoEl) {
+      videoEl.muted = false;
+      videoEl.volume = 1;
+      try {
+        await videoEl.play();
+      } catch {
+        videoFailed = true;
+      }
+    }
+    setNeedsRemotePlay(audioFailed || videoFailed);
+    return !(audioFailed || videoFailed);
+  }, []);
   useEffect(() => {
     isMountedRef.current = true;
-    initAudioContext();
     return () => {
       isMountedRef.current = false;
     };
@@ -1524,7 +715,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       if (!chatId || !user?.uid) return;
       if (startedRef.current) return;
       startedRef.current = true;
-      const localIsCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData?.callerId === user.uid;
       if (!sessionId) {
         setCallError("\u901A\u8A71\u30BB\u30C3\u30B7\u30E7\u30F3\u304C\u7121\u52B9\u3067\u3059\u3002");
         safeEndCall(1500);
@@ -1537,202 +727,30 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       }
       const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
       const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
-      const pc = new RTCPeerConnection(buildRtcConfig(false));
+      const pc = new RTCPeerConnection(rtcConfig);
       pcRef.current = pc;
-      try {
-        pc.addTransceiver("audio", { direction: "sendrecv" });
-        if (isVideoEnabled) pc.addTransceiver("video", { direction: "sendrecv" });
-      } catch {
-      }
-      const applyAdaptiveProfile = async (profile) => {
-        if (!pcRef.current) return;
-        const key = `${profile.videoBitrate}-${profile.videoScale}-${profile.videoFps}-${profile.audioBitrate}`;
-        if (appliedProfileRef.current === key) return;
-        const senders = pcRef.current.getSenders();
-        await Promise.all(
-          senders.map(async (sender) => {
-            if (!sender?.track) return;
-            const kind = sender.track.kind;
-            const params = sender.getParameters?.() || {};
-            if (!params.encodings || params.encodings.length === 0) {
-              params.encodings = [{}];
-            }
-            try {
-              if (kind === "video") {
-                sender.track.contentHint = "motion";
-                params.degradationPreference = "balanced";
-                params.encodings[0].maxBitrate = profile.videoBitrate;
-                params.encodings[0].scaleResolutionDownBy = profile.videoScale;
-                params.encodings[0].maxFramerate = profile.videoFps;
-                await sender.setParameters(params);
-              } else if (kind === "audio") {
-                sender.track.contentHint = "speech";
-                params.encodings[0].maxBitrate = profile.audioBitrate;
-                await sender.setParameters(params);
-              }
-            } catch (e) {
-              console.warn("Failed to set sender params:", e);
-            }
-          })
-        );
-        appliedProfileRef.current = key;
-      };
-      const getProfileByNetwork = (level) => {
-        if (level === "low") {
-          return { videoBitrate: 220000, videoScale: 2.4, videoFps: 10, audioBitrate: 16000 };
-        }
-        if (level === "poor") {
-          return { videoBitrate: 320000, videoScale: 2.1, videoFps: 12, audioBitrate: 22000 };
-        }
-        if (level === "medium") {
-          return { videoBitrate: 700000, videoScale: 1.5, videoFps: 18, audioBitrate: 36000 };
-        }
-        if (level === "high") {
-          return { videoBitrate: 1300000, videoScale: 1.1, videoFps: 24, audioBitrate: 64000 };
-        }
-        return { videoBitrate: 1000000, videoScale: 1.2, videoFps: 20, audioBitrate: 48000 };
-      };
-      const startAdaptiveBitrateController = () => {
-        if (statsTimerRef.current) clearInterval(statsTimerRef.current);
-        const manualMode = qualityModeRef.current;
-        if (manualMode !== "auto") {
-          const level = manualMode === "low" ? "low" : manualMode === "medium" ? "medium" : "high";
-          setNetworkQuality(level === "low" ? "poor" : level === "medium" ? "medium" : "good");
-          applyAdaptiveProfile(getProfileByNetwork(level));
-        } else {
-        const connType = navigator.connection?.effectiveType || "";
-        if (connType === "slow-2g" || connType === "2g") {
-          setNetworkQuality("poor");
-          applyAdaptiveProfile(getProfileByNetwork("poor"));
-        } else if (connType === "3g") {
-          setNetworkQuality("medium");
-          applyAdaptiveProfile(getProfileByNetwork("medium"));
-        } else {
-          setNetworkQuality("good");
-          applyAdaptiveProfile(getProfileByNetwork("good"));
-        }
-        }
-        statsTimerRef.current = setInterval(async () => {
-          if (!pcRef.current || pcRef.current.connectionState === "closed") return;
-          try {
-            const manual = qualityModeRef.current;
-            if (manual !== "auto") {
-              const manualLevel = manual === "low" ? "low" : manual === "medium" ? "medium" : "high";
-              setNetworkQuality(manualLevel === "low" ? "poor" : manualLevel === "medium" ? "medium" : "good");
-              await applyAdaptiveProfile(getProfileByNetwork(manualLevel));
-              return;
-            }
-            const report = await pcRef.current.getStats();
-            let outboundPacketsSent = 0;
-            let outboundPacketsLost = 0;
-            let rtt = 0;
-            report.forEach((stat) => {
-              if (stat.type === "outbound-rtp" && !stat.isRemote) {
-                outboundPacketsSent += stat.packetsSent || 0;
-              }
-              if (stat.type === "remote-inbound-rtp") {
-                outboundPacketsLost += stat.packetsLost || 0;
-                if (!rtt && stat.roundTripTime) rtt = stat.roundTripTime;
-              }
-              if (stat.type === "candidate-pair" && stat.state === "succeeded" && stat.currentRoundTripTime && !rtt) {
-                rtt = stat.currentRoundTripTime;
-              }
-            });
-            const prev = prevOutboundStatsRef.current;
-            const sentDelta = Math.max(0, outboundPacketsSent - prev.packetsSent);
-            const lostDelta = Math.max(0, outboundPacketsLost - prev.packetsLost);
-            const lossRate = sentDelta > 0 ? lostDelta / sentDelta : 0;
-            prevOutboundStatsRef.current = { packetsSent: outboundPacketsSent, packetsLost: outboundPacketsLost };
-            let level = "good";
-            if (rtt > 0.8 || lossRate > 0.08) level = "poor";
-            else if (rtt > 0.35 || lossRate > 0.03) level = "medium";
-            setNetworkQuality(level);
-            await applyAdaptiveProfile(getProfileByNetwork(level));
-          } catch (e) {
-            console.warn("Adaptive bitrate stats failed:", e);
-          }
-        }, 3e3);
-      };
-      const attemptIceRecovery = async () => {
-        if (!localIsCaller || !pcRef.current) return;
-        if (isRecoveringRef.current) return;
-        if (reconnectAttemptsRef.current >= 3) return;
-        if (pc.signalingState !== "stable") return;
-        isRecoveringRef.current = true;
-        reconnectAttemptsRef.current += 1;
-        try {
-          if (hasTurnConfig && reconnectAttemptsRef.current >= 2) {
-            try {
-              pc.setConfiguration(buildRtcConfig(true));
-            } catch {
-            }
-          }
-          const restartOffer = await pc.createOffer({
-            iceRestart: true,
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: !!isVideoEnabled
-          });
-          await pc.setLocalDescription(restartOffer);
-          await setDoc(
-            signalingRef,
-            {
-              sessionId,
-              callerId: callData?.callerId || user.uid,
-              offerSdp: restartOffer.sdp,
-              offererId: user.uid,
-              updatedAt: serverTimestamp()
-            },
-            { merge: true }
-          );
-        } catch (e) {
-          isRecoveringRef.current = false;
-          console.warn("ICE restart failed:", e);
-        }
-      };
       pc.onconnectionstatechange = () => {
         const state = pc.connectionState;
-        if (state === "connected" || state === "connecting") {
-          if (state === "connected") {
-            setIsConnected(true);
-            if (!callStartedAtRef.current) callStartedAtRef.current = Date.now();
-          }
-          reconnectAttemptsRef.current = 0;
-          isRecoveringRef.current = false;
+        if (state === "connected") {
           if (disconnectTimerRef.current) {
             clearTimeout(disconnectTimerRef.current);
             disconnectTimerRef.current = null;
           }
           return;
         }
-        if (state === "disconnected" || state === "failed") {
-          setIsConnected(false);
-          attemptIceRecovery();
+        if (state === "disconnected") {
           if (disconnectTimerRef.current) return;
           disconnectTimerRef.current = setTimeout(() => {
             disconnectTimerRef.current = null;
-            if (!pcRef.current) return;
-            const currentState = pcRef.current.connectionState;
-            const iceState = pcRef.current.iceConnectionState;
-            if (currentState === "connected" || currentState === "connecting") return;
-            if (iceState === "connected" || iceState === "completed") return;
+            if (!pcRef.current || pcRef.current.connectionState === "connected") return;
             setCallError("\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
             safeEndCall(1200);
-          }, 45e3);
+          }, 5e3);
           return;
         }
-        if (state === "closed") {
-          setIsConnected(false);
+        if (state === "failed" || state === "closed") {
           setCallError("\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
           safeEndCall(1200);
-        }
-      };
-      pc.oniceconnectionstatechange = () => {
-        const iceState = pc.iceConnectionState;
-        if (iceState === "connected" || iceState === "completed") {
-          reconnectAttemptsRef.current = 0;
-          isRecoveringRef.current = false;
-        } else if (iceState === "disconnected" || iceState === "failed") {
-          attemptIceRecovery();
         }
       };
       pc.ontrack = async (event) => {
@@ -1741,13 +759,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         if (!directStream && event.track) {
           const exists = stream.getTracks().some((track) => track.id === event.track.id);
           if (!exists) stream.addTrack(event.track);
-        }
-        remoteStreamRef.current = stream;
-        if (event.track) {
-          event.track.onunmute = () => {
-            if (!isMountedRef.current) return;
-            tryPlayRemoteMedia();
-          };
         }
         const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState === "live");
         hasRemoteVideoTrackRef.current = hasLiveVideo;
@@ -1759,12 +770,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = stream;
         }
-        const played = await tryPlayRemoteMedia();
-        if (!played) {
-          setTimeout(() => {
-            if (isMountedRef.current) tryPlayRemoteMedia();
-          }, 800);
-        }
+        await tryPlayRemoteMedia();
       };
       pc.onicecandidate = async (event) => {
         if (!event.candidate) return;
@@ -1785,19 +791,13 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         const wantVideo = !!isVideoEnabled && hasVideoInput;
         let stream = null;
         try {
-          const ap = audioPrefsRef.current || {};
           stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: ap.echoCancellation !== false,
-              noiseSuppression: ap.noiseSuppression !== false,
-              autoGainControl: ap.autoGainControl !== false,
-              channelCount: 1
-            },
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
             video: wantVideo ? {
               facingMode: "user",
-              width: { ideal: 480, max: 960 },
-              height: { ideal: 270, max: 540 },
-              frameRate: { ideal: 20, max: 24 }
+              width: { ideal: 640, max: 1280 },
+              height: { ideal: 360, max: 720 },
+              frameRate: { ideal: 24, max: 30 }
             } : false
           });
         } catch (err) {
@@ -1833,7 +833,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           }
         }
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-        startAdaptiveBitrateController();
       } catch (err) {
         console.error("Failed to start local media:", err);
         setCallError(getMediaErrorMessage(err));
@@ -1845,49 +844,30 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         const data = snap.data();
         if (!data || data.sessionId !== sessionId) return;
         try {
-          if (localIsCaller) {
-            const canApplyAnswer = pc.signalingState === "have-local-offer";
-            const hasNewAnswer = data.answerSdp && data.answerSdp !== lastRemoteAnswerSdpRef.current;
-            if (hasNewAnswer && canApplyAnswer && !applyingRemoteAnswerRef.current) {
-              applyingRemoteAnswerRef.current = true;
-              try {
-                await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: data.answerSdp }));
-                lastRemoteAnswerSdpRef.current = data.answerSdp;
-                isRecoveringRef.current = false;
-                await flushPendingCandidates(pc);
-              } finally {
-                applyingRemoteAnswerRef.current = false;
-              }
+          if (isCaller) {
+            if (!pc.currentRemoteDescription && data.answerSdp) {
+              await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: data.answerSdp }));
+              await flushPendingCandidates(pc);
             }
           } else {
-            const canApplyOffer = pc.signalingState === "stable";
-            const hasNewOffer = data.offerSdp && data.offerSdp !== lastRemoteOfferSdpRef.current;
-            if (hasNewOffer && canApplyOffer && !applyingRemoteOfferRef.current) {
-              applyingRemoteOfferRef.current = true;
-              try {
-                await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: data.offerSdp }));
-                lastRemoteOfferSdpRef.current = data.offerSdp;
-                await flushPendingCandidates(pc);
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                await setDoc(
-                  signalingRef,
-                  {
-                    sessionId,
-                    answerSdp: answer.sdp,
-                    answererId: user.uid,
-                    updatedAt: serverTimestamp()
-                  },
-                  { merge: true }
-                );
-              } finally {
-                applyingRemoteOfferRef.current = false;
-              }
+            if (!pc.currentRemoteDescription && data.offerSdp) {
+              await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: data.offerSdp }));
+              await flushPendingCandidates(pc);
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              await setDoc(
+                signalingRef,
+                {
+                  sessionId,
+                  answerSdp: answer.sdp,
+                  answererId: user.uid,
+                  updatedAt: serverTimestamp()
+                },
+                { merge: true }
+              );
             }
           }
         } catch (e) {
-          const msg = e?.message || "";
-          if (e?.name === "InvalidStateError" && /wrong state:\s*stable/i.test(msg)) return;
           console.warn("Signaling sync failed:", e);
         }
       });
@@ -1910,7 +890,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         });
       });
       unsubscribersRef.current.push(unsubCandidates);
-      if (localIsCaller) {
+      if (isCaller) {
         try {
           const offer = await pc.createOffer({
             offerToReceiveAudio: true,
@@ -1941,7 +921,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       cleanup();
       startedRef.current = false;
     };
-  }, [chatId, user?.uid, isVideoEnabled, sessionId, isCallerProp, callData?.callerId, cleanup, safeEndCall, tryPlayRemoteMedia]);
+  }, [chatId, user?.uid, isCaller, callData?.callerId, isVideoEnabled, sessionId, cleanup, safeEndCall, tryPlayRemoteMedia]);
   useEffect(() => {
     if (remoteStream && remoteAudioRef.current) {
       remoteAudioRef.current.srcObject = remoteStream;
@@ -1956,195 +936,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       tryPlayRemoteMedia();
     }
   }, [remoteStream, tryPlayRemoteMedia]);
-  useEffect(() => {
-    const tryResume = () => {
-      if (!needsRemotePlay) return;
-      tryPlayRemoteMedia();
-    };
-    window.addEventListener("pointerdown", tryResume);
-    window.addEventListener("keydown", tryResume);
-    return () => {
-      window.removeEventListener("pointerdown", tryResume);
-      window.removeEventListener("keydown", tryResume);
-    };
-  }, [needsRemotePlay, tryPlayRemoteMedia]);
-  const networkQualityLabel = networkQuality === "good" ? "\u56DE\u7DDA: \u826F\u597D" : networkQuality === "medium" ? "\u56DE\u7DDA: \u666E\u901A" : networkQuality === "poor" ? "\u56DE\u7DDA: \u4E0D\u5B89\u5B9A" : "\u56DE\u7DDA: \u78BA\u8A8D\u4E2D";
-  const networkQualityClass = networkQuality === "good" ? "bg-emerald-500/80 text-white" : networkQuality === "medium" ? "bg-yellow-500/80 text-black" : networkQuality === "poor" ? "bg-red-500/80 text-white" : "bg-gray-500/80 text-white";
-  const qualityModeLabel = qualityMode === "auto" ? "\u753B\u8CEA: \u81EA\u52D5" : qualityMode === "low" ? "\u753B\u8CEA: \u4F4E" : qualityMode === "medium" ? "\u753B\u8CEA: \u4E2D" : "\u753B\u8CEA: \u9AD8";
-  const remoteVideoTransform = `${isRemoteMirror ? "scaleX(-1) " : ""}scale(${remoteZoom})`.trim();
-  const remoteVideoFilter = `brightness(${remoteBrightness}%) contrast(${remoteContrast}%) saturate(${remoteSaturation}%)`;
-  const localVideoTransform = `${isLocalMirror ? "scaleX(-1) " : ""}scale(${localZoom})`.trim();
-  const formatCallDuration = (sec) => {
-    const mm = String(Math.floor(sec / 60)).padStart(2, "0");
-    const ss = String(sec % 60).padStart(2, "0");
-    return `${mm}:${ss}`;
-  };
-  const startCallRecording = () => {
-    if (isRecordingCall || typeof MediaRecorder === "undefined") return;
-    try {
-      let recordStream = null;
-      if (callStageRef.current?.captureStream) {
-        recordStream = callStageRef.current.captureStream(24);
-      } else if (remoteStreamRef.current?.getTracks?.().length) {
-        recordStream = remoteStreamRef.current;
-      }
-      if (!recordStream || !recordStream.getTracks || recordStream.getTracks().length === 0) return;
-      let recorder = null;
-      const supportedMime = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find((m) => MediaRecorder.isTypeSupported?.(m));
-      try {
-        recorder = supportedMime ? new MediaRecorder(recordStream, { mimeType: supportedMime }) : new MediaRecorder(recordStream);
-      } catch {
-        recorder = new MediaRecorder(recordStream);
-      }
-      callRecorderRef.current = recorder;
-      callRecordingChunksRef.current = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          callRecordingChunksRef.current.push(event.data);
-        }
-      };
-      recorder.onstop = () => {
-        const chunks = callRecordingChunksRef.current;
-        if (chunks.length > 0) {
-          const blob = new Blob(chunks, { type: recorder.mimeType || "video/webm" });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `call_${sessionId || Date.now()}.webm`;
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1e3);
-        }
-        callRecordingChunksRef.current = [];
-      };
-      recorder.start(1e3);
-      setIsRecordingCall(true);
-      setRecordingDurationSec(0);
-      if (callRecordingTimerRef.current) clearInterval(callRecordingTimerRef.current);
-      callRecordingTimerRef.current = setInterval(() => {
-        setRecordingDurationSec((prev) => prev + 1);
-      }, 1e3);
-    } catch (e) {
-      console.warn("Call recording failed:", e);
-    }
-  };
-  const stopCallRecording = () => {
-    if (callRecordingTimerRef.current) {
-      clearInterval(callRecordingTimerRef.current);
-      callRecordingTimerRef.current = null;
-    }
-    setIsRecordingCall(false);
-    setRecordingDurationSec(0);
-    try {
-      if (callRecorderRef.current && callRecorderRef.current.state !== "inactive") {
-        callRecorderRef.current.stop();
-      }
-    } catch (e) {
-      console.warn("Stop recording failed:", e);
-    }
-  };
-  const toggleCallRecording = () => {
-    if (isRecordingCall) {
-      stopCallRecording();
-    } else {
-      startCallRecording();
-    }
-  };
-  const captureCallSnapshotNow = () => {
-    const source = hasRemoteVideo ? remoteVideoRef.current : localVideoRef.current;
-    if (!source) return;
-    const w = source.videoWidth || 0;
-    const h = source.videoHeight || 0;
-    if (!w || !h) return;
-    try {
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.drawImage(source, 0, 0, w, h);
-      if (snapshotTimestampEnabled) {
-        const stamp = new Date().toLocaleString();
-        ctx.fillStyle = "rgba(0,0,0,0.45)";
-        ctx.fillRect(8, h - 34, 220, 24);
-        ctx.fillStyle = "white";
-        ctx.font = "bold 12px sans-serif";
-        ctx.fillText(stamp, 14, h - 17);
-      }
-      const dataUrl = canvas.toDataURL("image/png");
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = `call_snapshot_${Date.now()}.png`;
-      a.click();
-    } catch (e) {
-      console.warn("Snapshot failed:", e);
-    }
-  };
-  const captureCallSnapshot = () => {
-    if (snapshotCountdownSec <= 0) {
-      captureCallSnapshotNow();
-      return;
-    }
-    setTimeout(() => {
-      if (isMountedRef.current) captureCallSnapshotNow();
-    }, snapshotCountdownSec * 1e3);
-  };
-  const addBookmark = () => {
-    const mark = { id: Date.now(), sec: callDurationSec };
-    setBookmarks((prev) => [...prev, mark].slice(-20));
-  };
-  const removeBookmark = (id) => {
-    setBookmarks((prev) => prev.filter((b) => b.id !== id));
-  };
-  const copyCallDebugInfo = async () => {
-    const info = [
-      `chatId=${chatId}`,
-      `sessionId=${sessionId}`,
-      `isCaller=${isCaller ? "1" : "0"}`,
-      `connected=${isConnected ? "1" : "0"}`,
-      `durationSec=${callDurationSec}`,
-      `network=${networkQuality}`,
-      `audioMuted=${isMuted ? "1" : "0"}`,
-      `videoEnabled=${isVideoOff ? "0" : "1"}`,
-      `screenShare=${isScreenSharing ? "1" : "0"}`,
-      `timestamp=${new Date().toISOString()}`
-    ].join("\n");
-    try {
-      await navigator.clipboard.writeText(info);
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = info;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-    }
-  };
-  const toggleFullscreen = async () => {
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else if (callStageRef.current?.requestFullscreen) {
-        await callStageRef.current.requestFullscreen();
-      }
-    } catch (e) {
-      console.warn("Fullscreen toggle failed:", e);
-    }
-  };
-  const retryRemotePlayback = async () => {
-    initAudioContext();
-    await tryPlayRemoteMedia();
-  };
+  const hasRemoteVideo = hasRemoteVideoTrack || remoteStream?.getVideoTracks?.().some((track) => track.readyState === "live");
   const resumeRemotePlayback = async () => {
     await tryPlayRemoteMedia();
-  };
-  const openAdvancedSettingsPanel = () => {
-    if (controlsTimerRef.current) {
-      clearTimeout(controlsTimerRef.current);
-      controlsTimerRef.current = null;
-    }
-    setAutoHideControls(false);
-    setControlsVisible(true);
-    setShowAdvancedPanel(true);
   };
   const toggleMute = () => {
     const stream = localStreamRef.current;
@@ -2164,246 +958,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     });
     setIsVideoOff(shouldDisableVideo);
   };
-  const toggleHold = () => {
-    const stream = localStreamRef.current;
-    if (!stream) return;
-    const next = !isHold;
-    if (next) {
-      preHoldStateRef.current = { isMuted, isVideoOff };
-    }
-    stream.getAudioTracks().forEach((track) => {
-      track.enabled = !(next ? true : preHoldStateRef.current.isMuted);
-    });
-    stream.getVideoTracks().forEach((track) => {
-      track.enabled = !(next ? true : preHoldStateRef.current.isVideoOff);
-    });
-    setIsMuted(next ? true : preHoldStateRef.current.isMuted);
-    setIsVideoOff(next ? true : preHoldStateRef.current.isVideoOff);
-    setIsHold(next);
-  };
-  const handleEndCallRequest = () => {
-    if (confirmBeforeHangup) {
-      const ok = window.confirm("\u901A\u8A71\u3092\u7D42\u4E86\u3057\u307E\u3059\u304B\uFF1F");
-      if (!ok) return;
-    }
-    onEndCall?.();
-  };
-  const resetAdvancedSettings = () => {
-    setConfirmBeforeHangup(false);
-    setAutoHideControls(false);
-    setKeepAwake(false);
-    setQualityMode("auto");
-    setNoiseSuppressionEnabled(true);
-    setEchoCancellationEnabled(true);
-    setAutoGainControlEnabled(true);
-    setMicGain(1);
-    setRemoteBoost(1);
-    setRemoteBrightness(100);
-    setRemoteContrast(100);
-    setRemoteSaturation(100);
-    setIsRemoteMirror(false);
-    setRemoteZoom(1);
-    setLocalZoom(1);
-    setShowClock(false);
-    setSnapshotCountdownSec(0);
-    setSnapshotTimestampEnabled(false);
-    setAutoSnapshotSec(0);
-    setCallNotes("");
-    setBookmarks([]);
-    setPlayConnectSound(true);
-    setVibrateOnConnect(false);
-  };
-  const replaceOutgoingVideoTrack = async (newTrack) => {
-    const pc = pcRef.current;
-    if (!pc || !newTrack) return;
-    const sender = pc.getSenders().find((s) => s?.track?.kind === "video");
-    if (sender) {
-      await sender.replaceTrack(newTrack);
-    }
-  };
-  const attachLocalVideoTrack = async (newTrack) => {
-    const stream = localStreamRef.current;
-    if (!stream || !newTrack) return;
-    stream.getVideoTracks().forEach((track) => {
-      try {
-        track.stop();
-      } catch {
-      }
-      stream.removeTrack(track);
-    });
-    stream.addTrack(newTrack);
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream;
-      try {
-        await localVideoRef.current.play();
-      } catch {
-      }
-    }
-  };
-  const switchCameraFacing = async () => {
-    if (!isVideoEnabled || isScreenSharing) return;
-    if (!navigator.mediaDevices?.getUserMedia) return;
-    setIsSwitchingCamera(true);
-    const nextFacingMode = currentFacingMode === "user" ? "environment" : "user";
-    try {
-      const cameraStream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: { ideal: nextFacingMode },
-          width: { ideal: 480, max: 960 },
-          height: { ideal: 270, max: 540 },
-          frameRate: { ideal: 20, max: 24 }
-        }
-      });
-      const newTrack = cameraStream.getVideoTracks()[0];
-      if (!newTrack) throw new Error("No camera track");
-      await replaceOutgoingVideoTrack(newTrack);
-      await attachLocalVideoTrack(newTrack);
-      setCurrentFacingMode(nextFacingMode);
-      setIsVideoOff(false);
-    } catch (e) {
-      console.warn("Camera switch failed:", e);
-    } finally {
-      setIsSwitchingCamera(false);
-    }
-  };
-  const restoreCameraAfterShare = async () => {
-    const cameraStream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        facingMode: { ideal: currentFacingMode },
-        width: { ideal: 480, max: 960 },
-        height: { ideal: 270, max: 540 },
-        frameRate: { ideal: 20, max: 24 }
-      }
-    });
-    const cameraTrack = cameraStream.getVideoTracks()[0];
-    if (!cameraTrack) throw new Error("No camera track");
-    await replaceOutgoingVideoTrack(cameraTrack);
-    await attachLocalVideoTrack(cameraTrack);
-    setIsVideoOff(false);
-  };
-  const stopScreenShare = async () => {
-    if (screenTrackRef.current) {
-      try {
-        screenTrackRef.current.onended = null;
-        screenTrackRef.current.stop();
-      } catch {
-      }
-      screenTrackRef.current = null;
-    }
-    try {
-      await restoreCameraAfterShare();
-    } catch (e) {
-      console.warn("Restore camera after share failed:", e);
-      setIsVideoOff(true);
-    } finally {
-      setIsScreenSharing(false);
-    }
-  };
-  const toggleScreenShare = async () => {
-    if (!isVideoEnabled) return;
-    if (!navigator.mediaDevices?.getDisplayMedia) return;
-    if (isScreenSharing) {
-      await stopScreenShare();
-      return;
-    }
-    try {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-      const displayTrack = displayStream.getVideoTracks()[0];
-      if (!displayTrack) throw new Error("No display track");
-      await replaceOutgoingVideoTrack(displayTrack);
-      await attachLocalVideoTrack(displayTrack);
-      displayTrack.onended = () => {
-        if (isMountedRef.current) stopScreenShare();
-      };
-      screenTrackRef.current = displayTrack;
-      setIsScreenSharing(true);
-      setIsVideoOff(false);
-    } catch (e) {
-      console.warn("Screen share start failed:", e);
-    }
-  };
-  const togglePictureInPicture = async () => {
-    const videoEl = remoteVideoRef.current;
-    if (!videoEl || !hasRemoteVideo) return;
-    try {
-      if (document.pictureInPictureElement) {
-        await document.exitPictureInPicture();
-      } else if (document.pictureInPictureEnabled && !videoEl.disablePictureInPicture) {
-        await videoEl.requestPictureInPicture();
-      }
-    } catch (e) {
-      console.warn("PiP toggle failed:", e);
-    }
-  };
-  const resolveCallParticipantCount = (data) => {
-    if (!data) return 2;
-    let inferred = 0;
-    const shapeCandidates = [
-      data.participants,
-      data.participantIds,
-      data.participantUids,
-      data.memberIds,
-      data.members,
-      data.attendees
-    ];
-    shapeCandidates.forEach((v) => {
-      if (Array.isArray(v)) {
-        inferred = Math.max(inferred, v.length);
-        return;
-      }
-      if (v && typeof v === "object") {
-        inferred = Math.max(inferred, Object.keys(v).length);
-      }
-    });
-    const numericCandidates = [
-      data.participantCount,
-      data.membersCount,
-      data.groupSize,
-      data.attendeeCount
-    ];
-    numericCandidates.forEach((v) => {
-      const n = Number(v);
-      if (Number.isFinite(n) && n > 0) inferred = Math.max(inferred, Math.floor(n));
-    });
-    if (inferred > 0) return inferred;
-    return data.isGroupCall ? 4 : 2;
-  };
-  const rawParticipantCount = resolveCallParticipantCount(callData);
-  const participantCount = Math.max(2, Math.min(12, rawParticipantCount));
-  const tileCount = participantCount;
-  const tileColumns = tileCount <= 2 ? 2 : tileCount <= 4 ? 2 : tileCount <= 9 ? 3 : 4;
-  const tileMinHeightClass = tileCount <= 2 ? "min-h-[200px] md:min-h-[420px]" : tileCount <= 4 ? "min-h-[140px] md:min-h-[220px]" : tileCount <= 6 ? "min-h-[120px] md:min-h-[180px]" : "min-h-[100px] md:min-h-[150px]";
-  const memberRows = [
-    {
-      key: "self",
-      label: "\u3042\u306A\u305F",
-      status: isHold ? "\u4FDD\u7559\u4E2D" : isMuted ? "\u30DF\u30E5\u30FC\u30C8\u4E2D" : "\u53C2\u52A0\u4E2D",
-      icon: User
-    },
-    {
-      key: "remote",
-      label: "\u76F8\u624B",
-      status: isConnected ? "\u63A5\u7D9A\u6E08\u307F" : "\u63A5\u7D9A\u4E2D...",
-      icon: User
-    },
-    ...Array.from({ length: Math.max(0, participantCount - 2) }, (_, idx) => ({
-      key: `member-waiting-${idx}`,
-      label: `\u53C2\u52A0\u8005${idx + 3}`,
-      status: "\u5F85\u6A5F\u4E2D",
-      icon: Users
-    }))
-  ];
-  const callTiles = [
-    { key: "remote", type: "remote", label: "\u76F8\u624B" },
-    { key: "local", type: "local", label: "\u3042\u306A\u305F" },
-    ...Array.from({ length: Math.max(0, tileCount - 2) }, (_, idx) => ({
-      key: `placeholder-${idx}`,
-      type: "placeholder",
-      label: `\u53C2\u52A0\u8005${idx + 3}`
-    }))
-  ];
   if (callError) {
     return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center text-white flex-col gap-4", children: [
       /* @__PURE__ */ jsx(AlertCircle, { className: "w-16 h-16 text-red-500" }),
@@ -2411,160 +965,29 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       /* @__PURE__ */ jsx("p", { className: "text-sm text-gray-400", children: "\u901A\u8A71\u3092\u7D42\u4E86\u3057\u307E\u3059..." })
     ] });
   }
-  return /* @__PURE__ */ jsxs("div", { ref: callStageRef, className: "fixed inset-0 z-[1000] bg-slate-100 flex flex-col animate-in fade-in", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : "radial-gradient(circle at 15% 15%, #e2e8f0 0%, #cbd5e1 45%, #94a3b8 100%)", backgroundSize: "cover" }, children: [
-    /* @__PURE__ */ jsxs("div", { className: "relative flex-1 flex items-center justify-center p-3 md:p-8", children: [
-      /* @__PURE__ */ jsxs("div", { className: "absolute top-4 left-4 z-20 flex items-center gap-2", children: [
-        /* @__PURE__ */ jsx("div", { className: "bg-black/50 text-white text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur", children: formatCallDuration(callDurationSec) }),
-        isRecordingCall && /* @__PURE__ */ jsxs("div", { className: "bg-red-600/90 text-white text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur flex items-center gap-1", children: [
-          /* @__PURE__ */ jsx(Disc, { className: "w-3 h-3 animate-pulse" }),
-          "REC ",
-          formatCallDuration(recordingDurationSec)
-        ] }),
-        /* @__PURE__ */ jsx("div", { className: `text-[10px] font-bold px-2 py-1 rounded-full backdrop-blur ${isConnected ? "bg-green-500/80 text-white" : "bg-yellow-500/80 text-black"}`, children: isConnected ? "\u63A5\u7D9A\u4E2D" : "\u63A5\u7D9A\u78BA\u8A8D\u4E2D" }),
-        /* @__PURE__ */ jsx("div", { className: `text-[10px] font-bold px-2 py-1 rounded-full backdrop-blur ${networkQualityClass}`, children: networkQualityLabel }),
-        /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold px-2 py-1 rounded-full backdrop-blur bg-indigo-500/80 text-white", children: qualityModeLabel }),
-        showClock && /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold px-2 py-1 rounded-full backdrop-blur bg-black/60 text-white", children: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })
-      ] }),
-      /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "absolute w-0 h-0 opacity-0 pointer-events-none" }),
-      /* @__PURE__ */ jsxs("div", { className: "w-full max-w-6xl h-full max-h-[760px] grid grid-cols-1 md:grid-cols-[260px_1fr] gap-3 md:gap-4", children: [
-        /* @__PURE__ */ jsxs("div", { className: "bg-zinc-900/90 text-white rounded-[28px] p-4 md:p-5 shadow-2xl backdrop-blur-sm border border-white/20", children: [
-          /* @__PURE__ */ jsxs("div", { className: "text-xs font-bold tracking-wide text-white/70 mb-3", children: [
-            "\u901A\u8A71\u30E1\u30F3\u30D0\u30FC (",
-            participantCount,
-            ")"
-          ] }),
-          /* @__PURE__ */ jsx("div", { className: "space-y-3", children: memberRows.map((member) => {
-            const MemberIcon = member.icon;
-            return /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2.5", children: [
-              /* @__PURE__ */ jsx("div", { className: "w-9 h-9 rounded-full bg-white/20 overflow-hidden flex items-center justify-center", children: /* @__PURE__ */ jsx(MemberIcon, { className: "w-4 h-4 text-white/80" }) }),
-              /* @__PURE__ */ jsxs("div", { className: "text-xs", children: [
-                /* @__PURE__ */ jsx("div", { className: "font-bold", children: member.label }),
-                /* @__PURE__ */ jsx("div", { className: "text-white/60", children: member.status })
-              ] })
-            ] }, member.key);
-          }) })
-        ] }),
-        /* @__PURE__ */ jsxs("div", { className: "bg-black/20 rounded-[28px] p-2.5 md:p-3 border border-white/30 shadow-2xl", children: [
-          /* @__PURE__ */ jsx("div", { className: "grid gap-2.5 md:gap-3 h-full", style: { gridTemplateColumns: `repeat(${tileColumns}, minmax(0, 1fr))` }, children: callTiles.map((tile) => {
-            if (tile.type === "remote") {
-              return /* @__PURE__ */ jsx("div", { className: `relative rounded-2xl overflow-hidden bg-black ${tileMinHeightClass}`, children: remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }) : /* @__PURE__ */ jsxs("div", { className: "w-full h-full text-white flex flex-col items-center justify-center gap-2", children: [
-                /* @__PURE__ */ jsx(User, { className: "w-8 h-8 opacity-80" }),
-                /* @__PURE__ */ jsx("p", { className: "text-xs font-bold", children: remoteStream ? isVideoEnabled ? "\u30D3\u30C7\u30AA\u53D7\u4FE1\u4E2D..." : "\u97F3\u58F0\u901A\u8A71\u4E2D..." : "\u63A5\u7D9A\u4E2D..." })
-              ] }) }, tile.key);
-            }
-            if (tile.type === "local") {
-              return /* @__PURE__ */ jsx("div", { className: `relative rounded-2xl overflow-hidden bg-black ${tileMinHeightClass}`, children: isVideoEnabled ? /* @__PURE__ */ jsx(
-                "video",
-                {
-                  ref: localVideoRef,
-                  autoPlay: true,
-                  playsInline: true,
-                  muted: true,
-                  className: "w-full h-full object-cover",
-                  style: { filter: localFilter, transform: localVideoTransform || "none" },
-                  onError: handleLocalVideoRenderIssue,
-                  onStalled: handleLocalVideoRenderIssue,
-                  onEmptied: handleLocalVideoRenderIssue,
-                  onAbort: handleLocalVideoRenderIssue
-                }
-              ) : /* @__PURE__ */ jsx("div", { className: "w-full h-full text-white flex items-center justify-center", children: /* @__PURE__ */ jsx(VideoOff, { className: "w-8 h-8 opacity-70" }) }) }, tile.key);
-            }
-            return /* @__PURE__ */ jsxs("div", { className: `rounded-2xl bg-white/20 border border-white/30 ${tileMinHeightClass} text-white flex flex-col items-center justify-center gap-2`, children: [
-              /* @__PURE__ */ jsx(Users, { className: "w-7 h-7 opacity-70" }),
-              /* @__PURE__ */ jsx("p", { className: "text-xs font-bold opacity-80", children: tile.label }),
-              /* @__PURE__ */ jsx("p", { className: "text-[10px] opacity-60", children: "\u53C2\u52A0\u5F85\u6A5F\u4E2D" })
-            ] }, tile.key);
-          }) }),
-          isEffectSuppressed && /* @__PURE__ */ jsx("div", { className: "mt-2 bg-yellow-500/85 text-black text-[10px] px-2 py-1 rounded font-bold text-center", children: "\u5B89\u5B9A\u512A\u5148\u30E2\u30FC\u30C9" })
-        ] })
+  return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black flex flex-col animate-in fade-in", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : "none", backgroundSize: "cover" }, children: [
+    /* @__PURE__ */ jsxs("div", { className: "relative flex-1 flex items-center justify-center backdrop-blur-md bg-black/30", children: [
+      /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "hidden" }),
+      remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover" }) : /* @__PURE__ */ jsxs("div", { className: "text-white flex flex-col items-center gap-4", children: [
+        /* @__PURE__ */ jsx("div", { className: "w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center animate-pulse", children: /* @__PURE__ */ jsx(User, { className: "w-10 h-10" }) }),
+        /* @__PURE__ */ jsx("p", { className: "font-bold text-lg drop-shadow-md", children: remoteStream ? isVideoEnabled ? "\u30D3\u30C7\u30AA\u3092\u53D7\u4FE1\u4E2D..." : "\u97F3\u58F0\u901A\u8A71\u4E2D..." : "\u63A5\u7D9A\u4E2D..." })
       ] }),
       needsRemotePlay && /* @__PURE__ */ jsxs("button", { onClick: resumeRemotePlayback, className: "absolute top-4 left-1/2 -translate-x-1/2 bg-white/90 text-gray-800 text-xs font-bold px-4 py-2 rounded-full shadow-lg", children: [
         /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
         "\u97F3\u58F0\u3092\u518D\u751F"
       ] }),
-      /* @__PURE__ */ jsxs("div", { className: "fixed right-4 bottom-4 md:right-6 md:bottom-6 z-[1015] flex items-center gap-2 md:gap-3", children: [
-        /* @__PURE__ */ jsxs("button", { onClick: openAdvancedSettingsPanel, className: "flex items-center gap-2 bg-black/75 hover:bg-black/85 text-white text-sm font-bold px-4 py-2.5 rounded-full shadow-2xl backdrop-blur", children: [
-          /* @__PURE__ */ jsx(Settings, { className: "w-4 h-4" }),
-          "\u8A2D\u5B9A"
-        ] }),
-        /* @__PURE__ */ jsxs("button", { onClick: handleEndCallRequest, className: "flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold px-5 py-2.5 rounded-full shadow-2xl", children: [
-          /* @__PURE__ */ jsx(PhoneOff, { className: "w-4 h-4" }),
-          "\u901A\u8A71\u7D42\u4E86"
-        ] })
+      isVideoEnabled && /* @__PURE__ */ jsxs("div", { className: "absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg transition-all", children: [
+        /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover transform scale-x-[-1]", style: { filter: getFilterStyle(activeEffect) } }),
+        activeEffect && activeEffect !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/50 text-white text-[8px] px-1 rounded", children: activeEffect })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: `relative z-[1003] bg-black/80 backdrop-blur-lg px-4 pb-6 pt-2 transition-all duration-200 ${controlsVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6 pointer-events-none"}`, children: [
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 mb-3", children: [
-        /* @__PURE__ */ jsx("button", { onClick: () => setIsRemoteMuted((v) => !v), className: `p-2 rounded-full transition-all ${isRemoteMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, title: "\u76F8\u624B\u97F3\u91CF\u30DF\u30E5\u30FC\u30C8", children: isRemoteMuted ? /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 opacity-40" }) : /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4" }) }),
-        /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 1, step: 0.05, value: isRemoteMuted ? 0 : remoteVolume, onChange: (e) => {
-          const v = Number(e.target.value);
-          setRemoteVolume(v);
-          if (v > 0 && isRemoteMuted) setIsRemoteMuted(false);
-        }, className: "w-40 md:w-64 lg:w-72 accent-green-500" }),
-        /* @__PURE__ */ jsx("button", { onClick: () => setShowAdvancedPanel((v) => !v), className: `p-2 rounded-full text-white ${showAdvancedPanel ? "bg-indigo-600 hover:bg-indigo-500" : "bg-gray-700 hover:bg-gray-600"}`, title: "\u8A73\u7D30\u8A2D\u5B9A", children: /* @__PURE__ */ jsx(Settings, { className: "w-4 h-4" }) })
+    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-8 pb-6 backdrop-blur-lg", children: [
+      /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `p-4 rounded-full transition-all ${isMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
+      /* @__PURE__ */ jsxs("button", { onClick: onEndCall, className: "p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
+        /* @__PURE__ */ jsx(PhoneOff, { className: "w-8 h-8" }),
+        /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u7D42\u4E86" })
       ] }),
-      showAdvancedPanel && /* @__PURE__ */ jsxs("div", { className: "mb-3 rounded-2xl border border-white/10 bg-black/40 p-3 text-white space-y-3", children: [
-        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 flex-wrap", children: [
-          /* @__PURE__ */ jsx("button", { onClick: retryRemotePlayback, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u518D\u751F" }),
-          /* @__PURE__ */ jsx("button", { onClick: captureCallSnapshot, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u30B9\u30AF\u30B7\u30E7" }),
-          /* @__PURE__ */ jsx("button", { onClick: toggleFullscreen, className: `p-2 rounded-full text-white ${isFullscreen ? "bg-green-600 hover:bg-green-500" : "bg-gray-700 hover:bg-gray-600"}`, title: isFullscreen ? "\u5168\u753B\u9762\u89E3\u9664" : "\u5168\u753B\u9762", children: /* @__PURE__ */ jsx(Maximize, { className: "w-4 h-4" }) }),
-          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: switchCameraFacing, disabled: isSwitchingCamera || isScreenSharing, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600 disabled:bg-gray-500", children: isSwitchingCamera ? "\u5207\u66FF\u4E2D..." : "\u30AB\u30E1\u30E9\u5207\u66FF" }),
-          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: () => setIsLocalMirror((v) => !v), className: `px-3 py-2 rounded-full text-xs font-bold ${isLocalMirror ? "bg-gray-700 text-white hover:bg-gray-600" : "bg-white text-black hover:bg-gray-200"}`, children: isLocalMirror ? "\u30DF\u30E9\u30FCON" : "\u30DF\u30E9\u30FCOFF" }),
-          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, className: `px-3 py-2 rounded-full text-xs font-bold ${isScreenSharing ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isScreenSharing ? "\u5171\u6709\u505C\u6B62" : "\u753B\u9762\u5171\u6709" }),
-          /* @__PURE__ */ jsx("button", { onClick: toggleCallRecording, className: `px-3 py-2 rounded-full text-xs font-bold ${isRecordingCall ? "bg-red-600 text-white hover:bg-red-500" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isRecordingCall ? "\u9332\u753B\u505C\u6B62" : "\u9332\u753B" }),
-          /* @__PURE__ */ jsx("button", { onClick: togglePictureInPicture, disabled: !hasRemoteVideo, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600 disabled:bg-gray-500", children: isRemotePip ? "PiP\u7D42\u4E86" : "PiP" }),
-          /* @__PURE__ */ jsx("button", { onClick: copyCallDebugInfo, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u60C5\u5831\u30B3\u30D4\u30FC" }),
-          /* @__PURE__ */ jsx("button", { onClick: toggleHold, className: `px-3 py-2 rounded-full text-xs font-bold ${isHold ? "bg-yellow-500 text-black hover:bg-yellow-400" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isHold ? "\u4FDD\u7559\u4E2D" : "\u4FDD\u7559" }),
-          /* @__PURE__ */ jsx("button", { onClick: addBookmark, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u3057\u304A\u308A" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setShowShortcutHelp((v) => !v), className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "?" }),
-          canSelectAudioOutput && audioOutputs.length > 0 && /* @__PURE__ */ jsx("select", { value: selectedAudioOutput, onChange: (e) => setSelectedAudioOutput(e.target.value), className: "bg-gray-700 text-white text-xs font-bold px-3 py-2 rounded-full outline-none max-w-[150px]", children: audioOutputs.map((d, i) => /* @__PURE__ */ jsx("option", { value: d.deviceId, children: d.label || `\u51FA\u529B${i + 1}` }, `${d.deviceId || "default"}-${i}`)) })
-        ] }),
-        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 flex-wrap", children: [
-          /* @__PURE__ */ jsx("label", { className: "text-[11px] font-bold opacity-80", children: "\u753B\u8CEA" }),
-          /* @__PURE__ */ jsx("select", { value: qualityMode, onChange: (e) => setQualityMode(e.target.value), className: "bg-gray-700 text-white text-xs font-bold px-2 py-1 rounded-lg outline-none", children: [
-            /* @__PURE__ */ jsx("option", { value: "auto", children: "\u81EA\u52D5" }),
-            /* @__PURE__ */ jsx("option", { value: "low", children: "\u4F4E" }),
-            /* @__PURE__ */ jsx("option", { value: "medium", children: "\u4E2D" }),
-            /* @__PURE__ */ jsx("option", { value: "high", children: "\u9AD8" })
-          ] }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setAutoHideControls((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${autoHideControls ? "bg-blue-600" : "bg-gray-700"}`, children: autoHideControls ? "\u64CD\u4F5C\u81EA\u52D5\u975E\u8868\u793AON" : "\u64CD\u4F5C\u81EA\u52D5\u975E\u8868\u793AOFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setKeepAwake((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${keepAwake ? "bg-blue-600" : "bg-gray-700"}`, children: keepAwake ? "\u30B9\u30EA\u30FC\u30D7\u6291\u5236ON" : "\u30B9\u30EA\u30FC\u30D7\u6291\u5236OFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setShowClock((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${showClock ? "bg-blue-600" : "bg-gray-700"}`, children: showClock ? "\u6642\u8A08ON" : "\u6642\u8A08OFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setConfirmBeforeHangup((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${confirmBeforeHangup ? "bg-blue-600" : "bg-gray-700"}`, children: confirmBeforeHangup ? "\u7D42\u4E86\u78BA\u8A8DON" : "\u7D42\u4E86\u78BA\u8A8DOFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setPlayConnectSound((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${playConnectSound ? "bg-blue-600" : "bg-gray-700"}`, children: playConnectSound ? "\u63A5\u7D9A\u97F3ON" : "\u63A5\u7D9A\u97F3OFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setVibrateOnConnect((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${vibrateOnConnect ? "bg-blue-600" : "bg-gray-700"}`, children: vibrateOnConnect ? "\u30D0\u30A4\u30D6ON" : "\u30D0\u30A4\u30D6OFF" })
-        ] }),
-        /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30CE\u30A4\u30BA\u6291\u5236 ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: noiseSuppressionEnabled, onChange: (e) => setNoiseSuppressionEnabled(e.target.checked), className: "ml-2" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30A8\u30B3\u30FC\u30AD\u30E3\u30F3\u30BB\u30EB ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: echoCancellationEnabled, onChange: (e) => setEchoCancellationEnabled(e.target.checked), className: "ml-2" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u81EA\u52D5\u30B2\u30A4\u30F3 ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: autoGainControlEnabled, onChange: (e) => setAutoGainControlEnabled(e.target.checked), className: "ml-2" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30EA\u30E2\u30FC\u30C8\u955C\u50CF ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: isRemoteMirror, onChange: (e) => setIsRemoteMirror(e.target.checked), className: "ml-2" })] })
-        ] }),
-        /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30DE\u30A4\u30AF\u611F\u5EA6 ", micGain.toFixed(1), /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 2, step: 0.1, value: micGain, onChange: (e) => setMicGain(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u97F3\u91CF\u30D6\u30FC\u30B9\u30C8 ", remoteBoost.toFixed(1), /* @__PURE__ */ jsx("input", { type: "range", min: 1, max: 2, step: 0.1, value: remoteBoost, onChange: (e) => setRemoteBoost(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u660E\u308B\u3055 ", remoteBrightness, "%", /* @__PURE__ */ jsx("input", { type: "range", min: 70, max: 150, step: 5, value: remoteBrightness, onChange: (e) => setRemoteBrightness(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30B3\u30F3\u30C8\u30E9\u30B9\u30C8 ", remoteContrast, "%", /* @__PURE__ */ jsx("input", { type: "range", min: 70, max: 170, step: 5, value: remoteContrast, onChange: (e) => setRemoteContrast(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u5F69\u5EA6 ", remoteSaturation, "%", /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 200, step: 5, value: remoteSaturation, onChange: (e) => setRemoteSaturation(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30ED\u30FC\u30AB\u30EB\u30BA\u30FC\u30E0 ", localZoom.toFixed(2), /* @__PURE__ */ jsx("input", { type: "range", min: 1, max: 1.6, step: 0.05, value: localZoom, onChange: (e) => setLocalZoom(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30EA\u30E2\u30FC\u30C8\u30BA\u30FC\u30E0 ", remoteZoom.toFixed(2), /* @__PURE__ */ jsx("input", { type: "range", min: 1, max: 1.6, step: 0.05, value: remoteZoom, onChange: (e) => setRemoteZoom(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30B9\u30AF\u30B7\u30E7\u30AB\u30A6\u30F3\u30C8 ", snapshotCountdownSec, "s", /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 10, step: 1, value: snapshotCountdownSec, onChange: (e) => setSnapshotCountdownSec(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u81EA\u52D5\u30B9\u30AF\u30B7\u30E7 ", autoSnapshotSec, "s", /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 60, step: 5, value: autoSnapshotSec, onChange: (e) => setAutoSnapshotSec(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30B9\u30AF\u30B7\u30E7\u6642\u523B ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: snapshotTimestampEnabled, onChange: (e) => setSnapshotTimestampEnabled(e.target.checked), className: "ml-2" })] })
-        ] }),
-        /* @__PURE__ */ jsx("textarea", { value: callNotes, onChange: (e) => setCallNotes(e.target.value), className: "w-full bg-black/50 border border-white/10 rounded-xl p-2 text-xs text-white outline-none", placeholder: "\u901A\u8A71\u30E1\u30E2..." }),
-        bookmarks.length > 0 && /* @__PURE__ */ jsx("div", { className: "flex flex-wrap gap-2", children: bookmarks.map((b) => /* @__PURE__ */ jsxs("button", { onClick: () => removeBookmark(b.id), className: "px-2 py-1 rounded-full bg-white/10 text-[10px] font-bold", children: [formatCallDuration(b.sec), " x"] }, b.id)) }),
-        /* @__PURE__ */ jsx("button", { onClick: resetAdvancedSettings, className: "w-full bg-red-600/80 hover:bg-red-500 text-white py-2 rounded-xl text-xs font-bold", children: "\u8A2D\u5B9A\u30EA\u30BB\u30C3\u30C8" })
-      ] }),
-      showShortcutHelp && /* @__PURE__ */ jsx("div", { className: "mb-3 rounded-2xl border border-white/10 bg-black/40 p-3 text-white text-xs font-bold", children: "Shortcut: M=Mic / V=Video / H=Hold / S=Snapshot / F=Fullscreen / P=PiP / ?=Help" }),
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-center gap-8", children: [
-        /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `p-4 rounded-full transition-all ${isMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
-        /* @__PURE__ */ jsxs("button", { onClick: handleEndCallRequest, className: "p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
-          /* @__PURE__ */ jsx(PhoneOff, { className: "w-8 h-8" }),
-          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u7D42\u4E86" })
-        ] }),
-        isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `p-4 rounded-full transition-all ${isVideoOff ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }) })
-      ] })
+      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `p-4 rounded-full transition-all ${isVideoOff ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }) })
     ] })
   ] });
 };
@@ -3122,39 +1545,62 @@ const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, m
     ) })
   ] }) });
 };
-const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appId2, chatId, addFriendById, onEdit, onDelete, onPreview, onReply, onReaction, usersByUid, usersByName, onStickerClick, onShowProfile, onJoinCall }) => {
+const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appId2, chatId, addFriendById, onEdit, onDelete, onPreview, onReply, onReaction, allUsers, onStickerClick, onShowProfile, onJoinCall }) => {
   const isMe = m.senderId === user.uid;
   const [mediaSrc, setMediaSrc] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
-  const [forceChunkLoad, setForceChunkLoad] = useState(false);
   const isInvalidBlob = !isMe && m.content?.startsWith("blob:");
-  const hasLocalBlobContent = isMe && m.content?.startsWith("blob:");
-  const shouldLoadFromChunks = m.hasChunks && (!hasLocalBlobContent || forceChunkLoad);
+  const setBlobSrcFromBase64 = (base64Data, mimeType) => {
+    try {
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mimeType });
+      setMediaSrc(URL.createObjectURL(blob));
+    } catch (e) {
+      console.error("Blob creation failed", e);
+    }
+  };
   useEffect(() => {
-    if (hasLocalBlobContent && !forceChunkLoad) {
+    if (isMe && m.content?.startsWith("blob:")) {
       setMediaSrc(m.content);
       return;
     }
     return () => {
-      if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe && !isCachedMessageMediaUrl(mediaSrc)) {
-        URL.revokeObjectURL(mediaSrc);
-      }
+      if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe) URL.revokeObjectURL(mediaSrc);
     };
-  }, [isMe, m.content, hasLocalBlobContent, forceChunkLoad, mediaSrc]);
+  }, [isMe, m.content]);
   useEffect(() => {
-    setForceChunkLoad(false);
-  }, [m.id, chatId]);
-  useEffect(() => {
-    if (shouldLoadFromChunks) {
+    if (isMe && m.content?.startsWith("blob:")) return;
+    if (m.hasChunks) {
       if (mediaSrc && !mediaSrc.startsWith("blob:") && mediaSrc !== m.preview) return;
       setLoading(true);
       (async () => {
         try {
-          const loadedUrl = await loadChunkedMessageMedia({ db: db2, appId: appId2, chatId, message: m });
-          if (loadedUrl) {
-            if (m.type !== "text" && m.type !== "contact") setMediaSrc(loadedUrl);
+          let base64Data = "";
+          if (m.chunkCount) {
+            const chunkPromises = [];
+            for (let i = 0; i < m.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks", `${i}`)));
+            const chunkDocs = await Promise.all(chunkPromises);
+            chunkDocs.forEach((d) => {
+              if (d.exists()) base64Data += d.data().data;
+            });
+          } else {
+            const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc")));
+            snap.forEach((d) => base64Data += d.data().data);
+          }
+          if (base64Data) {
+            let mimeType = m.mimeType;
+            if (!mimeType) {
+              if (m.type === "video") mimeType = "video/mp4";
+              else if (m.type === "image") mimeType = "image/jpeg";
+              else if (m.type === "audio") mimeType = "audio/webm";
+              else mimeType = "application/octet-stream";
+            }
+            if (m.type !== "text" && m.type !== "contact") setBlobSrcFromBase64(base64Data, mimeType);
           } else if (m.preview) {
             setMediaSrc(m.preview);
           }
@@ -3169,10 +1615,10 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
       if (isInvalidBlob) {
         setMediaSrc(m.preview);
       } else {
-        setMediaSrc(hasLocalBlobContent && forceChunkLoad ? m.preview : m.content || m.preview);
+        setMediaSrc(m.content || m.preview);
       }
     }
-  }, [m.id, chatId, m.content, m.hasChunks, isMe, isInvalidBlob, m.preview, m.type, m.mimeType, m.chunkCount, shouldLoadFromChunks, hasLocalBlobContent, forceChunkLoad, mediaSrc]);
+  }, [m.id, chatId, m.content, m.hasChunks, isMe, isInvalidBlob, m.preview, m.type, m.mimeType, m.chunkCount]);
   const handleDownload = async () => {
     if (m.content && m.content.startsWith("blob:")) {
       const a = document.createElement("a");
@@ -3185,7 +1631,26 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
     try {
       let dataUrl = mediaSrc;
       if (!dataUrl && m.hasChunks) {
-        dataUrl = await loadChunkedMessageMedia({ db: db2, appId: appId2, chatId, message: m });
+        let base64Data = "";
+        if (m.chunkCount) {
+          const chunkPromises = [];
+          for (let i = 0; i < m.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks", `${i}`)));
+          const chunkDocs = await Promise.all(chunkPromises);
+          chunkDocs.forEach((d) => {
+            if (d.exists()) base64Data += d.data().data;
+          });
+        } else {
+          const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc")));
+          snap.forEach((d) => base64Data += d.data().data);
+        }
+        if (base64Data) {
+          const mimeType = m.mimeType || "application/octet-stream";
+          const byteCharacters = atob(base64Data);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+          const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+          dataUrl = URL.createObjectURL(blob);
+        }
       } else if (!dataUrl) {
         dataUrl = m.content;
       }
@@ -3226,7 +1691,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
       if (part.match(/^https?:\/\//)) return /* @__PURE__ */ jsx("a", { href: part, target: "_blank", rel: "noopener noreferrer", className: "text-blue-600 underline break-all", onClick: (e) => e.stopPropagation(), children: part }, i);
       if (part.startsWith("@")) {
         const name = part.substring(1);
-        const mentionedUser = usersByName?.get(name);
+        const mentionedUser = allUsers.find((u) => u.name === name);
         if (mentionedUser) return /* @__PURE__ */ jsx("span", { className: "text-blue-500 font-bold cursor-pointer hover:underline bg-blue-50 px-1 rounded", onClick: (e) => {
           e.stopPropagation();
           onShowProfile && onShowProfile(mentionedUser);
@@ -3236,9 +1701,9 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
     });
   };
   const getUserNames = (uids) => {
-    if (!uids || !usersByUid) return "";
+    if (!uids || !allUsers) return "";
     return uids.map((uid) => {
-      const u = usersByUid.get(uid);
+      const u = allUsers.find((user2) => user2.uid === uid);
       return u ? u.name : "\u4E0D\u660E\u306A\u30E6\u30FC\u30B6\u30FC";
     }).join(", ");
   };
@@ -3273,7 +1738,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
           ] }),
           /* @__PURE__ */ jsx("button", { onClick: (e) => {
             e.stopPropagation();
-            onJoinCall(m.callType === "video", m.senderId, m.sessionId || "");
+            onJoinCall(m.callType === "video", m.senderId);
           }, className: "w-full bg-green-500 text-white font-bold py-2 rounded-xl shadow mt-2 hover:bg-green-600 transition-colors", children: "\u53C2\u52A0\u3059\u308B" })
         ] }),
         m.type === "sticker" && /* @__PURE__ */ jsxs("div", { className: "relative group/sticker", onClick: handleStickerClick, children: [
@@ -3285,11 +1750,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
             /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-8 h-8 text-green-500" }),
             /* @__PURE__ */ jsx("span", { className: "text-[10px] text-gray-500 font-bold", children: m.type === "video" ? "\u52D5\u753B\u3092\u53D7\u4FE1\u4E2D..." : "\u753B\u50CF\u3092\u53D7\u4FE1\u4E2D..." })
           ] }) : /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-            m.type === "video" ? /* @__PURE__ */ jsx("video", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md bg-black ${showMenu ? "brightness-50 transition-all" : ""}`, controls: true, playsInline: true, preload: "metadata", onError: () => {
-              if (hasLocalBlobContent && m.hasChunks) setForceChunkLoad(true);
-            } }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy", onError: () => {
-              if (hasLocalBlobContent && m.hasChunks) setForceChunkLoad(true);
-            } }),
+            m.type === "video" ? /* @__PURE__ */ jsx("video", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md bg-black ${showMenu ? "brightness-50 transition-all" : ""}`, controls: true, playsInline: true, preload: "metadata" }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy" }),
             m.type === "video" && !isShowingPreview && !finalSrc && /* @__PURE__ */ jsx("div", { className: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none", children: /* @__PURE__ */ jsx("div", { className: "bg-black/30 rounded-full p-2 backdrop-blur-sm", children: /* @__PURE__ */ jsx(Play, { className: "w-8 h-8 text-white fill-white opacity-90" }) }) }),
             isShowingPreview && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-2 right-2 bg-black/60 text-white text-[9px] px-2 py-0.5 rounded-full backdrop-blur-md flex items-center gap-1", children: [
               /* @__PURE__ */ jsx(Loader2, { className: "w-3 h-3 animate-spin" }),
@@ -4719,22 +3180,6 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   const [coinModalTarget, setCoinModalTarget] = useState(null);
   const [aiEffectModalOpen, setAiEffectModalOpen] = useState(false);
   const [headerAvatarError, setHeaderAvatarError] = useState(false);
-  const isMountedRef = useRef(true);
-  const readSyncedIdsRef = useRef(/* @__PURE__ */ new Set());
-  const usersByUid = useMemo(() => {
-    const map = /* @__PURE__ */ new Map();
-    (allUsers || []).forEach((u) => {
-      if (u?.uid) map.set(u.uid, u);
-    });
-    return map;
-  }, [allUsers]);
-  const usersByName = useMemo(() => {
-    const map = /* @__PURE__ */ new Map();
-    (allUsers || []).forEach((u) => {
-      if (u?.name) map.set(u.name, u);
-    });
-    return map;
-  }, [allUsers]);
   const chatData = chats.find((c) => c.id === activeChatId);
   const contactCandidates = useMemo(() => {
     const hiddenSet = new Set(profile?.hiddenFriends || []);
@@ -4750,14 +3195,12 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     return Array.from(new Map(merged.map((u) => [u.uid, u])).values());
   }, [allUsers, chats, profile?.friends, profile?.hiddenFriends, user.uid]);
   const isGroup = chatData?.isGroup || false;
-  const activeChatCallStatus = chatData?.callStatus || null;
-  const hasJoinableCall = !!activeChatCallStatus?.sessionId && (activeChatCallStatus.status === "ringing" || activeChatCallStatus.status === "accepted");
   let partnerId = null;
   let partnerData = null;
   if (chatData && !isGroup) {
     partnerId = chatData.participants.find((p) => p !== user.uid);
     if (!partnerId) partnerId = user.uid;
-    partnerData = usersByUid.get(partnerId);
+    partnerData = allUsers.find((u) => u.uid === partnerId);
   }
   const title = !isGroup && partnerData ? partnerData.name : chatData?.name || "";
   const icon = !isGroup && partnerData ? partnerData.avatar : chatData?.icon || "";
@@ -4785,23 +3228,9 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       showNotification("\u9001\u4FE1\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
     }
   };
-  const handleJoinCall = (isVideo, callerId, sessionId = "") => {
-    startVideoCall(activeChatId, isVideo, true, callerId, sessionId);
+  const handleJoinCall = (isVideo, callerId) => {
+    startVideoCall(activeChatId, isVideo, true, callerId);
   };
-  const joinCurrentCall = () => {
-    if (!activeChatCallStatus?.sessionId) {
-      showNotification("\u53C2\u52A0\u3067\u304D\u308B\u901A\u8A71\u304C\u3042\u308A\u307E\u305B\u3093");
-      return;
-    }
-    const isVideoCall = activeChatCallStatus.callType !== "audio";
-    startVideoCall(activeChatId, isVideoCall, true, activeChatCallStatus.callerId, activeChatCallStatus.sessionId);
-  };
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
   useEffect(() => {
     const q = query(collection(db2, "artifacts", appId2, "public", "data", "sticker_packs"), where("purchasedBy", "array-contains", user.uid));
     const unsub = onSnapshot(q, (snap) => {
@@ -4819,7 +3248,6 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   }, [user.uid]);
   useEffect(() => {
     isFirstLoad.current = true;
-    readSyncedIdsRef.current.clear();
   }, [activeChatId]);
   useEffect(() => {
     if (!activeChatId) return;
@@ -4831,37 +3259,26 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   }, [activeChatId, messageLimit]);
   useEffect(() => {
     if (!activeChatId) return;
-    (async () => {
+    const resetUnreadCount = async () => {
       try {
         await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), {
           [`unreadCounts.${user.uid}`]: 0,
+          // 縺ｾ縺溘√メ繝｣繝・ヨ荳隕ｧ縺ｮ譛蠕後・繝｡繝・そ繝ｼ繧ｸ繧よ里隱ｭ縺ｫ縺吶ｋ
           "lastMessage.readBy": arrayUnion(user.uid)
         });
       } catch (e) {
         console.error("Failed to reset unread count", e);
       }
-    })();
-  }, [activeChatId, user.uid, db2, appId2]);
-  useEffect(() => {
-    if (!activeChatId || messages.length === 0) return;
-    const targets = messages.filter((m) => m.senderId !== user.uid && !m.readBy?.includes(user.uid) && !readSyncedIdsRef.current.has(m.id));
-    if (targets.length === 0) return;
-    const toSync = targets.slice(0, 120);
-    toSync.forEach((m) => readSyncedIdsRef.current.add(m.id));
-    (async () => {
-      try {
-        const batch = writeBatch(db2);
-        toSync.forEach((m) => {
-          const msgRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", m.id);
-          batch.update(msgRef, { readBy: arrayUnion(user.uid) });
-        });
-        await batch.commit();
-      } catch (e) {
-        toSync.forEach((m) => readSyncedIdsRef.current.delete(m.id));
-        console.error("Failed to sync read flags", e);
-      }
-    })();
-  }, [messages, activeChatId, user.uid, db2, appId2]);
+    };
+    resetUnreadCount();
+    if (!messages.length) return;
+    const unreadMsgs = messages.filter((m) => m.senderId !== user.uid && !m.readBy?.includes(user.uid));
+    if (unreadMsgs.length > 0) {
+      unreadMsgs.forEach(async (m) => {
+        await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", m.id), { readBy: arrayUnion(user.uid) });
+      });
+    }
+  }, [messages, activeChatId, user.uid]);
   useEffect(() => {
     if (messages.length > 0) {
       const lastMsg = messages[messages.length - 1];
@@ -4947,14 +3364,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   const sendMessage = async (content, type = "text", additionalData = {}, file = null) => {
     if (profile?.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     if (!content && !file && type === "text" || isUploading) return;
-    const setUploadingSafe = (next) => {
-      if (isMountedRef.current) setIsUploading(next);
-    };
-    const setUploadProgressSafe = (next) => {
-      if (isMountedRef.current) setUploadProgress(next);
-    };
-    setUploadingSafe(true);
-    setUploadProgressSafe(0);
+    setIsUploading(true);
+    setUploadProgress(0);
     const currentReply = replyTo;
     setReplyTo(null);
     setStickerMenuOpen(false);
@@ -4964,7 +3375,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       let localBlobUrl = null;
       let storedContent = content;
       let previewData = null;
-      const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: usersByUid.get(currentReply.senderId)?.name || "Unknown", type: currentReply.type } } : {};
+      const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: allUsers.find((u) => u.uid === currentReply.senderId)?.name || "Unknown", type: currentReply.type } } : {};
       const fileData = file ? { fileName: file.name, fileSize: file.size, mimeType: file.type } : {};
       const currentChat = chats.find((c) => c.id === activeChatId);
       const updateData = {
@@ -4986,23 +3397,20 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         }
         await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, preview: previewData, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, isUploading: true, createdAt: serverTimestamp(), readBy: [user.uid] });
         await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
-        if (isMountedRef.current) {
-          setText("");
-          setPlusMenuOpen(false);
-          setContactModalOpen(false);
-          setTimeout(() => {
-            scrollRef.current?.scrollIntoView({ behavior: "auto" });
-          }, 100);
-        }
+        setText("");
+        setPlusMenuOpen(false);
+        setContactModalOpen(false);
+        setTimeout(() => {
+          scrollRef.current?.scrollIntoView({ behavior: "auto" });
+        }, 100);
       }
       let hasChunks = false, chunkCount = 0;
       if (file && file.size > CHUNK_SIZE) {
         hasChunks = true;
         chunkCount = Math.ceil(file.size / CHUNK_SIZE);
-        const CONCURRENCY = getUploadConcurrency();
+        const CONCURRENCY = 100;
         const executing = /* @__PURE__ */ new Set();
         let completed = 0;
-        let lastProgressAt = 0;
         for (let i = 0; i < chunkCount; i++) {
           const start = i * CHUNK_SIZE;
           const end = Math.min(start + CHUNK_SIZE, file.size);
@@ -5014,11 +3422,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
                 const base64Data = e.target.result.split(",")[1];
                 await setDoc(doc(msgCol, newMsgRef.id, "chunks", `${i}`), { data: base64Data, index: i });
                 completed++;
-                const now = Date.now();
-                if (completed === chunkCount || now - lastProgressAt >= 120) {
-                  lastProgressAt = now;
-                  setUploadProgressSafe(Math.round(completed / chunkCount * 100));
-                }
+                setUploadProgress(Math.round(completed / chunkCount * 100));
                 resolve(null);
               } catch (err) {
                 reject(err);
@@ -5027,20 +3431,14 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             reader.onerror = reject;
             reader.readAsDataURL(blobSlice);
           });
-          executing.add(p);
-          p.finally(() => executing.delete(p));
+          const pWrapper = p.then(() => executing.delete(pWrapper));
+          executing.add(pWrapper);
           if (executing.size >= CONCURRENCY) {
             await Promise.race(executing);
           }
         }
         await Promise.all(executing);
-        await updateDoc(newMsgRef, {
-          hasChunks: true,
-          chunkCount,
-          // blob URL is session-local. Keep message reloadable from chunk docs.
-          content: previewData || "",
-          isUploading: false
-        });
+        await updateDoc(newMsgRef, { hasChunks: true, chunkCount, isUploading: false });
       } else if (!hasChunks) {
         if (localBlobUrl && file) {
           const reader = new FileReader();
@@ -5060,22 +3458,20 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, ...additionalData, ...replyData, ...fileData, hasChunks, chunkCount, createdAt: serverTimestamp(), readBy: [user.uid] });
           }
           await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
-          if (isMountedRef.current) {
-            setText("");
-            setPlusMenuOpen(false);
-            setContactModalOpen(false);
-            setTimeout(() => {
-              scrollRef.current?.scrollIntoView({ behavior: "auto" });
-            }, 100);
-          }
+          setText("");
+          setPlusMenuOpen(false);
+          setContactModalOpen(false);
+          setTimeout(() => {
+            scrollRef.current?.scrollIntoView({ behavior: "auto" });
+          }, 100);
         }
       }
     } catch (e) {
       console.error(e);
       showNotification("\u9001\u4FE1\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
     } finally {
-      setUploadingSafe(false);
-      setUploadProgressSafe(0);
+      setIsUploading(false);
+      setUploadProgress(0);
     }
   };
   const handleDeleteMessage = useCallback(async (msgId) => {
@@ -5181,258 +3577,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       showNotification("\u30EA\u30BB\u30C3\u30C8\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
     }
   };
-  const runSlashCommand = async (rawInput) => {
-    const input = (rawInput || "").trim();
-    if (!input.startsWith("/")) return false;
-    const [commandRaw, ...rest] = input.slice(1).split(" ");
-    const cmd = (commandRaw || "").toLowerCase();
-    const args = rest.join(" ").trim();
-    if (!cmd) return false;
-    if (cmd === "help") {
-      await sendMessage(`\u4F7F\u3048\u308B\u30B3\u30DE\u30F3\u30C9\n${SLASH_COMMAND_HELP_LINES.join("\n")}`);
-      return true;
-    }
-    if (cmd === "time") {
-      await sendMessage(new Date().toLocaleTimeString());
-      return true;
-    }
-    if (cmd === "date") {
-      await sendMessage(new Date().toLocaleDateString());
-      return true;
-    }
-    if (cmd === "datetime") {
-      await sendMessage(new Date().toLocaleString());
-      return true;
-    }
-    if (cmd === "shrug") {
-      await sendMessage("\xAF\\_(\u30C4)_/\xAF");
-      return true;
-    }
-    if (cmd === "tableflip") {
-      await sendMessage("(\u256F\xB0\u25A1\xB0)\u256F\uFE35 \u253B\u2501\u253B");
-      return true;
-    }
-    if (cmd === "unflip") {
-      await sendMessage("\u252C\u2500\u252C \u30CE(\u309C-\u309C\u30CE)");
-      return true;
-    }
-    if (cmd === "lenny") {
-      await sendMessage("(\u0361\xB0 \u0361\u035C\u0296 \u0361\xB0)");
-      return true;
-    }
-    if (cmd === "me") {
-      await sendMessage(`*${profile?.name || "Me"} ${args || "..."}*`);
-      return true;
-    }
-    if (cmd === "echo") {
-      if (!args) {
-        showNotification("/echo \u306E\u5F8C\u306B\u6587\u5B57\u3092\u5165\u308C\u3066\u304F\u3060\u3055\u3044");
-        return true;
-      }
-      await sendMessage(args);
-      return true;
-    }
-    if (cmd === "upper") {
-      await sendMessage(args.toUpperCase());
-      return true;
-    }
-    if (cmd === "lower") {
-      await sendMessage(args.toLowerCase());
-      return true;
-    }
-    if (cmd === "title") {
-      await sendMessage(toTitleCase(args));
-      return true;
-    }
-    if (cmd === "reverse") {
-      await sendMessage(args.split("").reverse().join(""));
-      return true;
-    }
-    if (cmd === "shuffle") {
-      await sendMessage(shuffleText(args));
-      return true;
-    }
-    if (cmd === "repeat") {
-      const count = Math.max(1, Math.min(20, parseInt(rest[0] || "2", 10) || 2));
-      const body = rest.slice(1).join(" ").trim();
-      if (!body) {
-        showNotification("/repeat n text \u306E\u5F62\u3067\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
-        return true;
-      }
-      await sendMessage(Array.from({ length: count }, () => body).join(" "));
-      return true;
-    }
-    if (cmd === "len") {
-      const target = args || "";
-      showNotification(`\u6587\u5B57\u6570: ${target.length}`);
-      return true;
-    }
-    if (cmd === "trim") {
-      await sendMessage(args.trim());
-      return true;
-    }
-    if (cmd === "calc") {
-      const n = calcExpression(args);
-      if (n === null) {
-        showNotification("\u8A08\u7B97\u5F0F\u304C\u4E0D\u6B63\u3067\u3059");
-        return true;
-      }
-      await sendMessage(`= ${n}`);
-      return true;
-    }
-    if (cmd === "urlencode") {
-      await sendMessage(encodeURIComponent(args));
-      return true;
-    }
-    if (cmd === "urldecode") {
-      try {
-        await sendMessage(decodeURIComponent(args));
-      } catch {
-        showNotification("URL\u30C7\u30B3\u30FC\u30C9\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
-      }
-      return true;
-    }
-    if (cmd === "base64") {
-      const encoded = encodeBase64Utf8(args);
-      if (!encoded) {
-        showNotification("Base64\u5909\u63DB\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
-        return true;
-      }
-      await sendMessage(encoded);
-      return true;
-    }
-    if (cmd === "unbase64") {
-      const decoded = decodeBase64Utf8(args);
-      if (!decoded) {
-        showNotification("Base64\u5FA9\u5143\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
-        return true;
-      }
-      await sendMessage(decoded);
-      return true;
-    }
-    if (cmd === "binary") {
-      const bin = toBinaryText(args);
-      if (!bin) {
-        showNotification("2\u9032\u6570\u5909\u63DB\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
-        return true;
-      }
-      await sendMessage(bin);
-      return true;
-    }
-    if (cmd === "hex") {
-      const hex = toHexText(args);
-      if (!hex) {
-        showNotification("16\u9032\u6570\u5909\u63DB\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
-        return true;
-      }
-      await sendMessage(hex);
-      return true;
-    }
-    if (cmd === "rot13") {
-      await sendMessage(rot13(args));
-      return true;
-    }
-    if (cmd === "morse") {
-      await sendMessage(toMorse(args));
-      return true;
-    }
-    if (cmd === "unmorse") {
-      await sendMessage(fromMorse(args));
-      return true;
-    }
-    if (cmd === "rainbow") {
-      await sendMessage(rainbowText(args));
-      return true;
-    }
-    if (cmd === "random") {
-      const min = Number(rest[0]);
-      const max = Number(rest[1]);
-      let rangeMin = 0;
-      let rangeMax = 100;
-      if (Number.isFinite(min) && Number.isFinite(max)) {
-        rangeMin = Math.min(min, max);
-        rangeMax = Math.max(min, max);
-      } else if (Number.isFinite(min)) {
-        rangeMin = 1;
-        rangeMax = min;
-      }
-      const value = Math.floor(Math.random() * (rangeMax - rangeMin + 1)) + rangeMin;
-      await sendMessage(String(value));
-      return true;
-    }
-    if (cmd === "uuid") {
-      const id = crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      await sendMessage(id);
-      return true;
-    }
-    if (cmd === "copy") {
-      if (!args) {
-        showNotification("/copy \u306E\u5F8C\u306B\u30B3\u30D4\u30FC\u5BFE\u8C61\u3092\u5165\u308C\u3066\u304F\u3060\u3055\u3044");
-        return true;
-      }
-      try {
-        await navigator.clipboard.writeText(args);
-        showNotification("\u30AF\u30EA\u30C3\u30D7\u30DC\u30FC\u30C9\u306B\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F");
-      } catch {
-        showNotification("\u30B3\u30D4\u30FC\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
-      }
-      return true;
-    }
-    if (cmd === "plus") {
-      setPlusMenuOpen((prev) => !prev);
-      return true;
-    }
-    if (cmd === "stickers") {
-      setStickerMenuOpen((prev) => !prev);
-      return true;
-    }
-    if (cmd === "record") {
-      const mode = (rest[0] || "").toLowerCase();
-      if (mode === "start" || !mode) {
-        if (!isRecording) await startRecording();
-      } else if (mode === "stop") {
-        stopRecording();
-      } else if (mode === "cancel") {
-        cancelRecording();
-      } else {
-        showNotification("/record start|stop|cancel \u3092\u4F7F\u3063\u3066\u304F\u3060\u3055\u3044");
-      }
-      return true;
-    }
-    if (cmd === "bgreset") {
-      await resetBackground();
-      return true;
-    }
-    if (cmd === "joincall") {
-      joinCurrentCall();
-      return true;
-    }
-    if (cmd === "voice") {
-      handleVideoCallButton(false);
-      return true;
-    }
-    if (cmd === "video") {
-      handleVideoCallButton(true);
-      return true;
-    }
-    showNotification(`\u672A\u77E5\u306E\u30B3\u30DE\u30F3\u30C9: /${cmd}`);
-    return true;
-  };
-  const handleSubmitText = async () => {
-    const current = text.trim();
-    if (!current || isUploading) return;
-    const consumed = await runSlashCommand(current);
-    if (consumed) {
-      if (isMountedRef.current) setText("");
-      return;
-    }
-    await sendMessage(text);
-  };
   const handleVideoCallButton = (isVideo) => {
-    if (hasJoinableCall) {
-      joinCurrentCall();
-      return;
-    }
     startVideoCall(activeChatId, isVideo);
   };
   if (!chatData) return /* @__PURE__ */ jsx("div", { className: "h-full flex items-center justify-center bg-white", children: /* @__PURE__ */ jsx(Loader2, { className: "w-8 h-8 animate-spin text-gray-400" }) });
@@ -5468,7 +3613,6 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             children: /* @__PURE__ */ jsx(Settings, { className: "w-5 h-5 text-gray-600" })
           }
         ),
-        hasJoinableCall && /* @__PURE__ */ jsx("button", { onClick: joinCurrentCall, className: "px-2 py-1 rounded-full bg-green-500 text-white text-[10px] font-bold hover:bg-green-600 transition-colors", title: "\u901A\u8A71\u306B\u53C2\u52A0", children: "\u53C2\u52A0" }),
         /* @__PURE__ */ jsx("button", { onClick: () => handleVideoCallButton(false), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u97F3\u58F0\u901A\u8A71", children: /* @__PURE__ */ jsx(Phone, { className: "w-5 h-5 text-gray-500" }) }),
         /* @__PURE__ */ jsx("button", { onClick: () => handleVideoCallButton(true), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u30D3\u30C7\u30AA\u901A\u8A71", children: /* @__PURE__ */ jsx(Video, { className: "w-5 h-5 text-gray-500" }) }),
         /* @__PURE__ */ jsx("button", { onClick: () => setAiEffectModalOpen(true), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "AI\u30A8\u30D5\u30A7\u30AF\u30C8", children: /* @__PURE__ */ jsx(Sparkles, { className: "w-5 h-5 text-gray-500" }) }),
@@ -5541,7 +3685,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
                 /* @__PURE__ */ jsxs("div", { className: "mb-4", children: [
                   /* @__PURE__ */ jsx("div", { className: "text-xs font-bold text-gray-500 mb-2", children: "\u30E1\u30F3\u30D0\u30FC" }),
                   /* @__PURE__ */ jsx("div", { className: "space-y-2", children: chatData.participants.map((uid) => {
-                    const u = usersByUid.get(uid);
+                    const u = allUsers.find((x) => x.uid === uid);
                     if (!u) return null;
                     const me = uid === user.uid;
                     return /* @__PURE__ */ jsxs(
@@ -5591,7 +3735,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         }
       )
     ] }),
-    !isGroup && partnerId && isTodayBirthday(usersByUid.get(partnerId)?.birthday) && /* @__PURE__ */ jsxs("div", { className: "bg-pink-100 p-2 flex items-center justify-between px-4", children: [
+    !isGroup && partnerId && isTodayBirthday(allUsers.find((u) => u.uid === partnerId)?.birthday) && /* @__PURE__ */ jsxs("div", { className: "bg-pink-100 p-2 flex items-center justify-between px-4", children: [
       /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
         /* @__PURE__ */ jsx(Cake, { className: "w-5 h-5 text-pink-500 animate-bounce" }),
         /* @__PURE__ */ jsxs("span", { className: "text-xs font-bold text-pink-700", children: [
@@ -5608,8 +3752,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         " \u4EE5\u524D\u306E\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u8AAD\u307F\u8FBC\u3080"
       ] }) }),
       messages.map((m) => {
-        const sender = usersByUid.get(m.senderId);
-        return /* @__PURE__ */ jsx(MessageItem, { m, user, sender, isGroup, db: db2, appId: appId2, chatId: activeChatId, addFriendById, onEdit: handleEditMessage, onDelete: handleDeleteMessage, onPreview: handlePreviewMedia, onReply: setReplyTo, onReaction: handleReaction, usersByUid, usersByName, onStickerClick, onShowProfile: setViewProfile, onJoinCall: handleJoinCall }, m.id);
+        const sender = allUsers.find((u) => u.uid === m.senderId);
+        return /* @__PURE__ */ jsx(MessageItem, { m, user, sender, isGroup, db: db2, appId: appId2, chatId: activeChatId, addFriendById, onEdit: handleEditMessage, onDelete: handleDeleteMessage, onPreview: handlePreviewMedia, onReply: setReplyTo, onReaction: handleReaction, allUsers, onStickerClick, onShowProfile: setViewProfile, onJoinCall: handleJoinCall }, m.id);
       }),
       /* @__PURE__ */ jsx("div", { ref: scrollRef, className: "h-2 w-full" })
     ] }),
@@ -5682,7 +3826,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       replyTo && /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between bg-gray-100 p-2 rounded-xl text-xs mb-1 border-l-4 border-green-500", children: [
         /* @__PURE__ */ jsxs("div", { className: "flex flex-col max-w-[90%]", children: [
           /* @__PURE__ */ jsxs("span", { className: "font-bold text-green-600 mb-0.5", children: [
-            usersByUid.get(replyTo.senderId)?.name || "Unknown",
+            allUsers.find((u) => u.uid === replyTo.senderId)?.name || "Unknown",
             " \u3078\u306E\u8FD4\u4FE1"
           ] }),
           /* @__PURE__ */ jsxs("div", { className: "truncate text-gray-600 flex items-center gap-1", children: [
@@ -5695,12 +3839,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
         /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: "p-1", children: /* @__PURE__ */ jsx(Plus, { className: "w-6 h-6 text-gray-400" }) }),
-        !isRecording ? /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-4 py-2 text-sm leading-none focus:outline-none placeholder:text-[#9ca3af]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B (/help \u3067\u30B3\u30DE\u30F3\u30C9)", value: text, onChange: (e) => setText(e.target.value), onKeyDown: (e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            handleSubmitText();
-          }
-        } }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-full px-4 py-2 flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-[11px]", children: [
+        !isRecording ? /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-4 py-2 text-sm leading-none focus:outline-none placeholder:text-[#9ca3af]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-full px-4 py-2 flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-[11px]", children: [
           /* @__PURE__ */ jsx("div", { className: "w-2 h-2 rounded-full bg-red-500 animate-ping" }),
           "\u9332\u97F3\u4E2D... ",
           Math.floor(recordingTime / 60),
@@ -5712,7 +3851,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           /* @__PURE__ */ jsx("button", { onClick: cancelRecording, className: "p-2 rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300", title: "\u30AD\u30E3\u30F3\u30BB\u30EB", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) }),
           /* @__PURE__ */ jsx("button", { onClick: stopRecording, className: "p-2 rounded-full bg-red-500 text-white hover:bg-red-600 animate-bounce", title: "\u505C\u6B62\u3057\u3066\u9001\u4FE1", children: /* @__PURE__ */ jsx(StopCircle, { className: "w-4 h-4 fill-current" }) })
         ] }),
-        (text || isUploading) && /* @__PURE__ */ jsx("button", { onClick: handleSubmitText, disabled: !text && !isUploading, className: `p-2 rounded-full ${text ? "text-green-500" : "text-gray-300"}`, children: isUploading ? /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+        (text || isUploading) && /* @__PURE__ */ jsx("button", { onClick: () => sendMessage(text), disabled: !text && !isUploading, className: `p-2 rounded-full ${text ? "text-green-500" : "text-gray-300"}`, children: isUploading ? /* @__PURE__ */ jsxs("div", { className: "relative", children: [
           /* @__PURE__ */ jsx(Loader2, { className: "w-5 h-5 animate-spin text-green-500" }),
           uploadProgress > 0 && /* @__PURE__ */ jsxs("div", { className: "absolute top-full left-1/2 -translate-x-1/2 text-[8px] font-bold mt-1", children: [
             uploadProgress,
@@ -5731,71 +3870,56 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   ] });
 };
 const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, appId: appId2 }) => {
-  const [content, setContent] = useState(""), [media, setMedia] = useState(null), [mediaFile, setMediaFile] = useState(null), [mediaType, setMediaType] = useState("image"), [isUploading, setIsUploading] = useState(false);
-  useEffect(() => {
-    return () => {
-      if (media && media.startsWith("blob:")) {
-        URL.revokeObjectURL(media);
-      }
-    };
-  }, [media]);
+  const [content, setContent] = useState(""), [media, setMedia] = useState(null), [mediaType, setMediaType] = useState("image"), [isUploading, setIsUploading] = useState(false);
   const postMessage = async () => {
     if (profile?.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
-    if (!content && !mediaFile || isUploading) return;
+    if (!content && !media || isUploading) return;
     setIsUploading(true);
     try {
-      let hasChunks = false;
-      let chunkCount = 0;
-      let storedMedia = null;
-      let mimeType = null;
-      const newPostRef = doc(collection(db2, "artifacts", appId2, "public", "data", "posts"));
-      if (mediaFile) {
+      let hasChunks = false, chunkCount = 0, storedMedia = media;
+      if (media && media.length > CHUNK_SIZE) {
         hasChunks = true;
-        chunkCount = Math.ceil(mediaFile.size / CHUNK_SIZE);
-        mimeType = mediaFile.type || null;
-        const CONCURRENCY = getUploadConcurrency();
+        chunkCount = Math.ceil(media.length / CHUNK_SIZE);
+        storedMedia = null;
+      }
+      const newPostRef = doc(collection(db2, "artifacts", appId2, "public", "data", "posts"));
+      if (hasChunks && media) {
+        const CONCURRENCY = 100;
         const executing = /* @__PURE__ */ new Set();
         for (let i = 0; i < chunkCount; i++) {
           const start = i * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, mediaFile.size);
-          const blobSlice = mediaFile.slice(start, end);
-          const p = blobSlice.arrayBuffer().then(async (buf) => {
-            const base64Data = bytesToBase64(new Uint8Array(buf));
-            await setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: base64Data, index: i });
-          });
-          executing.add(p);
-          p.finally(() => executing.delete(p));
+          const end = Math.min(start + CHUNK_SIZE, media.length);
+          const chunkData = media.slice(start, end);
+          const p = setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: chunkData, index: i });
+          const pWrapper = p.then(() => executing.delete(pWrapper));
+          executing.add(pWrapper);
           if (executing.size >= CONCURRENCY) {
             await Promise.race(executing);
           }
         }
         await Promise.all(executing);
       }
+      let mimeType = null;
+      if (media && media.startsWith("data:")) {
+        mimeType = media.split(";")[0].split(":")[1];
+      }
       await setDoc(newPostRef, { userId: user.uid, content, media: storedMedia, mediaType, mimeType, hasChunks, chunkCount, likes: [], comments: [], createdAt: serverTimestamp() });
       setContent("");
-      if (media && media.startsWith("blob:")) {
-        URL.revokeObjectURL(media);
-      }
       setMedia(null);
-      setMediaFile(null);
       showNotification("\u6295\u7A3F\u3057\u307E\u3057\u305F");
     } finally {
       setIsUploading(false);
     }
   };
-  const handleVoomFileUpload = async (e) => {
-    const inputFile = e.target.files[0];
-    if (!inputFile) return;
-    e.target.value = "";
-    const processed = await processFileBeforeUpload(inputFile);
-    const file = processed instanceof File ? processed : new File([processed], inputFile.name, { type: processed?.type || inputFile.type || "application/octet-stream", lastModified: Date.now() });
-    if (media && media.startsWith("blob:")) {
-      URL.revokeObjectURL(media);
-    }
-    const objectUrl = URL.createObjectURL(file);
-    setMedia(objectUrl);
-    setMediaFile(file);
-    setMediaType(file.type.startsWith("video") ? "video" : "image");
+  const handleVoomFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setMedia(ev.target.result);
+      setMediaType(file.type.startsWith("video") ? "video" : "image");
+    };
+    reader.readAsDataURL(file);
   };
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-gray-50", children: [
     /* @__PURE__ */ jsx("div", { className: "bg-white p-4 border-b shrink-0", children: /* @__PURE__ */ jsx("h1", { className: "text-xl font-bold", children: "VOOM" }) }),
@@ -5804,49 +3928,28 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
         /* @__PURE__ */ jsx("textarea", { className: "w-full text-sm outline-none resize-none min-h-[60px]", placeholder: "\u4F55\u3092\u3057\u3066\u3044\u307E\u3059\u304B\uFF1F", value: content, onChange: (e) => setContent(e.target.value) }),
         media && /* @__PURE__ */ jsxs("div", { className: "relative mt-2", children: [
           mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: media, className: "w-full rounded-xl bg-black", controls: true }) : /* @__PURE__ */ jsx("img", { src: media, className: "max-h-60 rounded-xl" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => {
-            if (media && media.startsWith("blob:")) {
-              URL.revokeObjectURL(media);
-            }
-            setMedia(null);
-            setMediaFile(null);
-          }, className: "absolute top-1 right-1 bg-black/50 text-white rounded-full p-1", children: /* @__PURE__ */ jsx(X, { className: "w-3 h-3" }) })
+          /* @__PURE__ */ jsx("button", { onClick: () => setMedia(null), className: "absolute top-1 right-1 bg-black/50 text-white rounded-full p-1", children: /* @__PURE__ */ jsx(X, { className: "w-3 h-3" }) })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "flex justify-between items-center pt-2 border-t mt-2", children: [
           /* @__PURE__ */ jsxs("label", { className: "cursor-pointer p-2 flex items-center gap-2", children: [
             /* @__PURE__ */ jsx(ImageIcon, { className: "w-5 h-5 text-gray-400" }),
             /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*,video/*", onChange: handleVoomFileUpload })
           ] }),
-          /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || mediaFile ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: "\u6295\u7A3F" })
+          /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || media ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: "\u6295\u7A3F" })
         ] })
       ] }),
       posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id))
     ] })
   ] });
 };
-const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard, onLogout }) => {
+const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard }) => {
   const [edit, setEdit] = useState(profile || {});
   useEffect(() => {
     if (profile) setEdit((prev) => !prev || Object.keys(prev).length === 0 ? { ...profile } : { ...profile, name: prev.name, id: prev.id, status: prev.status, birthday: prev.birthday, avatar: prev.avatar, cover: prev.cover });
   }, [profile]);
-  const handleSave = async () => {
-    try {
-      await updateDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), edit);
-      showNotification("\u4FDD\u5B58\u3057\u307E\u3057\u305F \u2705");
-    } catch (e) {
-      console.error(e);
-      showNotification("\u4FDD\u5B58\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
-    }
-  };
-  const handleLogout = async () => {
-    try {
-      if (onLogout) {
-        await onLogout(edit);
-      }
-    } catch (e) {
-      console.error("Logout with save failed:", e);
-      showNotification("\u30ED\u30B0\u30A2\u30A6\u30C8\u4E2D\u306B\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
-    }
+  const handleSave = () => {
+    updateDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), edit);
+    showNotification("\u4FDD\u5B58\u3057\u307E\u3057\u305F \u2705");
   };
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-white", children: [
     /* @__PURE__ */ jsxs("div", { className: "p-4 border-b flex items-center gap-4 sticky top-0 bg-white shrink-0", children: [
@@ -5890,7 +3993,7 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
             /* @__PURE__ */ jsx("input", { className: "w-full border-b py-2 outline-none", value: edit.status || "", onChange: (e) => setEdit({ ...edit, status: e.target.value }) })
           ] }),
           /* @__PURE__ */ jsx("button", { onClick: handleSave, className: "w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg", children: "\u4FDD\u5B58" }),
-          /* @__PURE__ */ jsx("button", { onClick: handleLogout, className: "w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4", children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })
+          /* @__PURE__ */ jsx("button", { onClick: () => signOut(auth), className: "w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4", children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })
         ] })
       ] })
     ] })
@@ -6392,26 +4495,6 @@ function App() {
       return next;
     });
   };
-  const handleLogout = useCallback(async (nextProfile = null) => {
-    try {
-      const uid = user?.uid;
-      const profileToSave = nextProfile || profile;
-      if (uid && profileToSave) {
-        const persistFields = {
-          avatar: profileToSave.avatar || "",
-          cover: profileToSave.cover || "",
-          birthday: profileToSave.birthday || "",
-          status: profileToSave.status || ""
-        };
-        await setDoc(doc(db, "artifacts", appId, "public", "data", "users", uid), persistFields, { merge: true });
-        writeCachedProfile(uid, { ...profileToSave, ...persistFields });
-      }
-    } catch (e) {
-      console.warn("Profile save before logout failed:", e);
-    } finally {
-      await auth.signOut();
-    }
-  }, [user?.uid, profile]);
   useEffect(() => {
     const unlockAudio = () => {
       initAudioContext();
@@ -6420,50 +4503,41 @@ function App() {
     };
     window.addEventListener("click", unlockAudio);
     window.addEventListener("touchstart", unlockAudio);
-    setPersistence(auth, browserLocalPersistence).catch((e) => {
-      console.warn("Failed to set auth persistence:", e);
-    });
+    // Use public/manifest.json; do not inject data-URL manifests at runtime.
+    try {
+      document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]').forEach((el) => el.parentNode?.removeChild(el));
+      const iconLink = document.createElement("link");
+      iconLink.rel = "icon";
+      iconLink.href = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><text y="48" font-size="48">\u{1F4AC}</text></svg>';
+      document.head.appendChild(iconLink);
+    } catch {
+    }
+    setPersistence(auth, browserLocalPersistence);
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (u) {
-        const cachedProfile = readCachedProfile(u.uid);
-        const fallbackProfile = {
-          uid: u.uid,
-          name: u.displayName || `User_${u.uid.slice(0, 4)}`,
-          id: u.displayName ? u.displayName : `user_${u.uid.slice(0, 6)}`,
-          status: "\u3088\u308D\u3057\u304F\u304A\u9858\u3044\u3057\u307E\u3059\uFF01",
-          birthday: "",
-          avatar: u.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
-          cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
-          friends: [],
-          hiddenFriends: [],
-          hiddenChats: [],
-          wallet: 1e3,
-          isBanned: false
-        };
         setUser(u);
-        if (cachedProfile) {
-          setProfile({ ...fallbackProfile, ...cachedProfile });
+        const docSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid));
+        if (docSnap.exists()) {
+          setProfile(docSnap.data());
+        } else {
+          const initialProfile = {
+            uid: u.uid,
+            name: u.displayName || `User_${u.uid.slice(0, 4)}`,
+            id: `user_${u.uid.slice(0, 6)}`,
+            status: "\u3088\u308D\u3057\u304F\u304A\u9858\u3044\u3057\u307E\u3059\uFF01",
+            birthday: "",
+            avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
+            cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
+            friends: [],
+            hiddenFriends: [],
+            hiddenChats: [],
+            wallet: 1e3,
+            isBanned: false
+          };
+          await setDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid), initialProfile);
+          setProfile(initialProfile);
         }
-        // Keep user logged-in view even if Firestore profile fetch fails.
         setView("home");
-        try {
-          const userRef = doc(db, "artifacts", appId, "public", "data", "users", u.uid);
-          const docSnap = await getDoc(userRef);
-          if (docSnap.exists()) {
-            const merged = { ...fallbackProfile, ...docSnap.data() };
-            setProfile(merged);
-            writeCachedProfile(u.uid, merged);
-          } else {
-            const profileToCreate = cachedProfile ? { ...fallbackProfile, ...cachedProfile } : fallbackProfile;
-            await setDoc(userRef, profileToCreate, { merge: true });
-            setProfile(profileToCreate);
-            writeCachedProfile(u.uid, profileToCreate);
-          }
-        } catch (e) {
-          console.error("Profile bootstrap failed after login:", e);
-          const backup = cachedProfile ? { ...fallbackProfile, ...cachedProfile } : fallbackProfile;
-          setProfile(backup);
-        }
       } else {
         setUser(null);
         setProfile(null);
@@ -6487,11 +4561,7 @@ function App() {
   useEffect(() => {
     if (!user) return;
     const unsubProfile = onSnapshot(doc(db, "artifacts", appId, "public", "data", "users", user.uid), (doc2) => {
-      if (doc2.exists()) {
-        const next = doc2.data();
-        setProfile(next);
-        writeCachedProfile(user.uid, next);
-      }
+      if (doc2.exists()) setProfile(doc2.data());
     });
     const unsubUsers = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "users")), (snap) => {
       setAllUsers(snap.docs.map((d) => d.data()));
@@ -6642,45 +4712,18 @@ function App() {
       console.warn("cleanupCallSignaling failed (non-fatal):", e);
     }
   };
-  const startVideoCall = async (chatId, isVideo = true, isJoin = false, joinCallerId, joinSessionId = "") => {
-    initAudioContext();
+  const startVideoCall = async (chatId, isVideo = true, isJoin = false, joinCallerId) => {
     const chat = chats.find((c) => c.id === chatId);
     const isGroup = chat?.isGroup;
     if (isJoin) {
-      let latestCallStatus = chat?.callStatus || null;
-      try {
-        const latestChatSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId));
-        if (latestChatSnap.exists()) {
-          latestCallStatus = latestChatSnap.data()?.callStatus || latestCallStatus;
-        }
-      } catch (e) {
-        console.warn("Failed to load latest callStatus before join:", e);
-      }
-      const latestSessionId = latestCallStatus?.sessionId || "";
-      if (joinSessionId && latestSessionId && joinSessionId !== latestSessionId) {
-        showNotification("\u53E4\u3044\u901A\u8A71\u62DB\u5F85\u306E\u305F\u3081\u3001\u6700\u65B0\u306E\u901A\u8A71\u30BB\u30C3\u30B7\u30E7\u30F3\u306B\u53C2\u52A0\u3057\u307E\u3059");
-      }
-      let sessionId = latestSessionId || joinSessionId || "";
-      if (!sessionId) {
-        try {
-          const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
-          const signalingSnap = await getDoc(signalingRef);
-          sessionId = signalingSnap.data()?.sessionId || "";
-        } catch {
-        }
-      }
-      if (!sessionId) {
-        showNotification("\u53C2\u52A0\u3067\u304D\u308B\u901A\u8A71\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002\u901A\u8A71\u4E2D\u306B\u3082\u3046\u4E00\u5EA6\u53C2\u52A0\u3057\u3066\u304F\u3060\u3055\u3044");
-        return;
-      }
-      const callerId = latestCallStatus?.callerId || joinCallerId || "";
-      const callType = latestCallStatus?.callType || (isVideo ? "video" : "audio");
+      const callerId = joinCallerId || chat?.callStatus?.callerId || user.uid;
+      const sessionId = chat?.callStatus?.sessionId || `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       setActiveCall({
         chatId,
-        callData: { callerId, sessionId, callType, status: "accepted", isGroupCall: !!isGroup },
+        callData: { callerId, sessionId, callType: isVideo ? "video" : "audio", status: "accepted" },
         isVideo,
         isGroupCall: !!isGroup,
-        isCaller: !!callerId && callerId === user.uid,
+        isCaller: callerId === user.uid,
         phase: "inCall"
       });
       return;
@@ -6688,26 +4731,15 @@ function App() {
     if (isGroup) {
       await cleanupCallSignaling(chatId);
       try {
-        const sessionId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-        const groupCallData = {
-          status: "accepted",
-          callerId: user.uid,
-          callType: isVideo ? "video" : "audio",
-          sessionId,
-          timestamp: Date.now(),
-          isGroupCall: true
-        };
-        await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { callStatus: groupCallData });
         await addDoc(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "messages"), {
           senderId: user.uid,
           content: "\u901A\u8A71\u3092\u958B\u59CB\u3057\u307E\u3057\u305F",
           type: "call_invite",
           callType: isVideo ? "video" : "audio",
-          sessionId,
           createdAt: serverTimestamp(),
           readBy: [user.uid]
         });
-        setActiveCall({ chatId, callData: groupCallData, isVideo, isGroupCall: true, isCaller: true, phase: "inCall" });
+        setActiveCall({ chatId, callData: { callerId: user.uid }, isVideo, isGroupCall: true, isCaller: true, phase: "inCall" });
       } catch (e) {
         showNotification("\u958B\u59CB\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
       }
@@ -6738,14 +4770,12 @@ function App() {
       }
     }
   };
-  const endCall = async (chatId, callData, { clearStatus = true, cleanupSignaling = true } = {}) => {
+  const endCall = async (chatId, callData, { clearStatus = true } = {}) => {
     try {
       if (clearStatus) {
         await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { callStatus: deleteField() });
       }
-      if (cleanupSignaling) {
-        await cleanupCallSignaling(chatId, callData?.sessionId || null);
-      }
+      await cleanupCallSignaling(chatId, callData?.sessionId || null);
     } catch (e) {
       console.error("Failed to end call:", e);
     } finally {
@@ -6754,7 +4784,6 @@ function App() {
   };
   const acceptIncomingCall = async () => {
     if (!activeCall) return;
-    initAudioContext();
     try {
       const callData = activeCallChat?.callStatus || activeCall.callData || {};
       const nextCallData = {
@@ -6795,17 +4824,6 @@ function App() {
     }
     return activeCall.phase || null;
   }, [activeCall, syncedCallData, user?.uid]);
-  useEffect(() => {
-    if (!activeCall || effectiveCallPhase !== "dialing") return;
-    const timeout = setTimeout(() => {
-      const latestChat = chats.find((c) => c.id === activeCall.chatId);
-      const latestCall = latestChat?.callStatus || syncedCallData;
-      if (!latestCall || latestCall.status !== "ringing") return;
-      showNotification("\u5FDC\u7B54\u304C\u306A\u304B\u3063\u305F\u305F\u3081\u901A\u8A71\u3092\u7D42\u4E86\u3057\u307E\u3057\u305F");
-      endCall(activeCall.chatId, latestCall);
-    }, 45e3);
-    return () => clearTimeout(timeout);
-  }, [activeCall, effectiveCallPhase, chats, syncedCallData]);
   return /* @__PURE__ */ jsx("div", { className: "w-full h-[100dvh] bg-[#d7dbe1] flex justify-center overflow-hidden", children: /* @__PURE__ */ jsxs("div", { className: "w-[430px] max-w-full h-[100dvh] bg-[#f3f4f6] border-x border-gray-300 flex flex-col relative overflow-hidden", children: [
     notification && /* @__PURE__ */ jsx("div", { className: "fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce", children: notification }),
     !user ? /* @__PURE__ */ jsx(AuthView, { onLogin: setUser, showNotification }) : /* @__PURE__ */ jsxs(Fragment, { children: [
@@ -6836,14 +4854,7 @@ function App() {
             isVideoEnabled: activeCall.isVideo,
             activeEffect,
             backgroundUrl: currentChatBackground,
-            onEndCall: () => endCall(
-              activeCall.chatId,
-              syncedCallData || activeCall.callData,
-              {
-                clearStatus: !activeCall.isGroupCall || !!activeCall.isCaller,
-                cleanupSignaling: !activeCall.isGroupCall || !!activeCall.isCaller
-              }
-            )
+            onEndCall: () => endCall(activeCall.chatId, syncedCallData || activeCall.callData, { clearStatus: !activeCall.isGroupCall })
           }
         ),
         /* @__PURE__ */ jsxs("div", { className: "absolute top-4 left-0 right-0 px-4 flex gap-2 overflow-x-auto scrollbar-hide z-[1001]", children: [
@@ -6858,7 +4869,7 @@ function App() {
         view === "home" && /* @__PURE__ */ jsx(HomeView, { user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }),
         view === "voom" && /* @__PURE__ */ jsx(VoomView, { user, allUsers, profile, posts, showNotification, db, appId }),
         view === "chatroom" && /* @__PURE__ */ jsx(ChatRoomView, { user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }),
-        view === "profile" && /* @__PURE__ */ jsx(ProfileEditView, { user, profile, setView, showNotification, copyToClipboard, onLogout: handleLogout }),
+        view === "profile" && /* @__PURE__ */ jsx(ProfileEditView, { user, profile, setView, showNotification, copyToClipboard }),
         view === "qr" && /* @__PURE__ */ jsx(QRScannerView, { user, setView, addFriendById }),
         view === "group-create" && /* @__PURE__ */ jsx(GroupCreateView, { user, profile, allUsers, chats, setView, showNotification }),
         view === "birthday-cards" && /* @__PURE__ */ jsx(BirthdayCardBox, { user, setView }),
@@ -6891,8 +4902,3 @@ var App_13_default = App;
 export {
   App_13_default as default
 };
-
-
-
-
-
