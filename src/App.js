@@ -1627,17 +1627,16 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   try {
     const manual = qualityModeRef.current;
     
-    // 1. 手動設定（マニュアル）の場合
     if (manual !== "auto") {
       const manualLevel = manual === "low" ? "low" : manual === "medium" ? "medium" : "high";
       if (isMountedRef.current) {
         setNetworkQuality(manualLevel === "low" ? "poor" : manualLevel === "medium" ? "medium" : "good");
       }
       await applyAdaptiveProfile(getProfileByNetwork(manualLevel));
-      return; // ★ここで終了させることで、下の const report と衝突しない
+      return; // ★重要：ここで終了させることで下の report 宣言をスキップする
     }
 
-    // 2. 自動設定（オート）の場合のみここで宣言
+    // オートモードの時だけここが実行される
     const report = await pcRef.current.getStats();
     
     let outboundPacketsSent = 0;
