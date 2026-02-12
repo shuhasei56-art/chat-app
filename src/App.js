@@ -4160,7 +4160,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
     ] })
   ] });
 };
-const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard }) => {
+const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard , handleLogout }) => {
   const [edit, setEdit] = useState(profile || {});
   useEffect(() => {
     if (profile) setEdit((prev) => !prev || Object.keys(prev).length === 0 ? { ...profile } : { ...profile, name: prev.name, id: prev.id, status: prev.status, birthday: prev.birthday, avatar: prev.avatar, cover: prev.cover });
@@ -5153,7 +5153,7 @@ const handleLogout = async () => {
         view === "home" && /* @__PURE__ */ jsx(HomeView, { user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }),
         view === "voom" && /* @__PURE__ */ jsx(VoomView, { user, allUsers, profile, posts, showNotification, db, appId }),
         view === "chatroom" && /* @__PURE__ */ jsx(ChatRoomView, { user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }),
-        view === "profile" && /* @__PURE__ */ jsx(ProfileEditView, { user, profile, setView, showNotification, copyToClipboard }),
+        view === "profile" && /* @__PURE__ */ jsx(ProfileEditView, { user, profile, setView, showNotification, copyToClipboard, handleLogout }),
         view === "qr" && /* @__PURE__ */ jsx(QRScannerView, { user, setView, addFriendById }),
         view === "group-create" && /* @__PURE__ */ jsx(GroupCreateView, { user, profile, allUsers, chats, setView, showNotification }),
         view === "birthday-cards" && /* @__PURE__ */ jsx(BirthdayCardBox, { user, setView }),
