@@ -237,6 +237,13 @@ if (hasTurnConfig) {
     credential: turnCredential
   });
 }
+if (hasTurnConfig) {
+  iceServers.push({
+    urls: turnUrls,
+    username: turnUsername,
+    credential: turnCredential
+  });
+}
 const rtcConfig = {
   iceServers,
   iceCandidatePoolSize: 4,
@@ -5037,10 +5044,10 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     const currentReply = replyTo;
     setReplyTo(null);
     setStickerMenuOpen(false);
-    let localBlobUrl = null;
     try {
       const msgCol = collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages");
       const newMsgRef = doc(msgCol);
+      let localBlobUrl = null;
       let storedContent = content;
       let previewData = null;
       const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: usersByUid.get(currentReply.senderId)?.name || "Unknown", type: currentReply.type } } : {};
@@ -5153,9 +5160,6 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       console.error(e);
       showNotification("\u9001\u4FE1\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
     } finally {
-      if (localBlobUrl && typeof localBlobUrl === \"string\" && localBlobUrl.startsWith(\"blob:\")) {
-        URL.revokeObjectURL(localBlobUrl);
-      }
       setUploadingSafe(false);
       setUploadProgressSafe(0);
     }
