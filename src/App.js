@@ -4753,6 +4753,10 @@ function App() {
         if (docSnap.exists()) {
           setProfile(docSnap.data());
           try {
+            await idbProfileCache.set(`profile_cache_last_${appId}`, docSnap.data());
+          } catch {
+          }
+          try {
             localStorage.setItem(`profile_cache_${appId}_${u.uid}`, JSON.stringify(docSnap.data()));
           } catch {
           }
@@ -4793,7 +4797,33 @@ const initialProfile = lastCachedProfile ? {
             isBanned: false
           };
           await setDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid), initialProfile);
-          setProfile(initialProfile);
+
+setProfile(initialProfile);
+// Try restoring the full profile (including large avatar/cover) from IndexedDB.
+(async () => {
+  try {
+    const full = await idbProfileCache.get(`profile_cache_last_${appId}`);
+    if (full) {
+      const merged = {
+        ...initialProfile,
+        ...full,
+        uid: u.uid,
+        id: (full && full.id) ? full.id : initialProfile.id,
+        name: (full && full.name) ? full.name : initialProfile.name
+      };
+      setProfile(merged);
+      try {
+        await setDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid), merged, { merge: true });
+      } catch {
+      }
+      try {
+        localStorage.setItem(`profile_cache_${appId}_${u.uid}`, JSON.stringify(merged));
+      } catch {
+      }
+    }
+  } catch {
+  }
+})();
           try {
             localStorage.setItem(`profile_cache_${appId}_${u.uid}`, JSON.stringify(initialProfile));
           } catch {
@@ -4817,11 +4847,78 @@ const initialProfile = lastCachedProfile ? {
     setTimeout(() => setNotification(null), 3e3);
   };
 
+// ---------- Profile cache (IndexedDB) ----------
+// localStorage can easily exceed quota when avatar/cover are DataURL; keep a lightweight copy in localStorage
+// and the full profile in IndexedDB to survive logout / anonymous UID changes.
+const idbProfileCache = (() => {
+  const DB_NAME = "chatapp_profile_cache_v1";
+  const STORE = "profiles";
+  const open = () => new Promise((resolve, reject) => {
+    try {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db2 = req.result;
+        if (!db2.objectStoreNames.contains(STORE)) db2.createObjectStore(STORE);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    } catch (e) {
+      reject(e);
+    }
+  });
+  const get = async (key) => {
+    const db2 = await open();
+    return await new Promise((resolve, reject) => {
+      try {
+        const tx = db2.transaction(STORE, "readonly");
+        const st = tx.objectStore(STORE);
+        const r = st.get(key);
+        r.onsuccess = () => resolve(r.result || null);
+        r.onerror = () => reject(r.error);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  };
+  const set = async (key, value) => {
+    const db2 = await open();
+    return await new Promise((resolve, reject) => {
+      try {
+        const tx = db2.transaction(STORE, "readwrite");
+        const st = tx.objectStore(STORE);
+        const r = st.put(value, key);
+        r.onsuccess = () => resolve(true);
+        r.onerror = () => reject(r.error);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  };
+  return { get, set };
+})();
+
+const makeLightProfile = (p) => {
+  if (!p) return null;
+  const light = { ...p };
+  // Keep huge fields out of localStorage; full copy is in IndexedDB.
+  try {
+    if (typeof light.avatar === "string" && light.avatar.startsWith("data:") && light.avatar.length > 40000) light.avatar = null;
+    if (typeof light.cover === "string" && light.cover.startsWith("data:") && light.cover.length > 40000) light.cover = null;
+  } catch {
+  }
+  return light;
+};
+
+
+
 // Logout without losing locally saved profile details
 const handleLogout = async () => {
   try {
     if (profile) {
-      localStorage.setItem(`profile_cache_last_${appId}`, JSON.stringify(profile));
+      // Full cache (works even if avatar/cover are large)
+      await idbProfileCache.set(`profile_cache_last_${appId}`, profile);
+      // Lightweight fallback
+      localStorage.setItem(`profile_cache_last_${appId}`, JSON.stringify(makeLightProfile(profile)));
     }
   } catch {
   }
