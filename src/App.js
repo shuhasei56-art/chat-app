@@ -106,13 +106,13 @@ import {
   AlertCircle
 } from "lucide-react";
 const firebaseConfig = {
-  apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
-  authDomain: "chat-app-c17bf.firebaseapp.com",
-  databaseURL: "https://chat-app-c17bf-default-rtdb.firebaseio.com",
-  projectId: "chat-app-c17bf",
-  storageBucket: "chat-app-c17bf.firebasestorage.app",
-  messagingSenderId: "1063497801308",
-  appId: "1:1063497801308:web:8040959804832a690a1099"
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  databaseURL: process.env.REACT_APP_FIREBASE_DATABASE_URL,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID
 };
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -1623,9 +1623,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         }
         }
         statsTimerRef.current = setInterval(async () => {
-          if (!pcRef.current || pcRef.current.connectionState === "closed") return;
-          try {
-            const manual = qualityModeRef.current;
+  if (!pcRef.current || pcRef.current.connectionState === "closed") return;
+  try {
+    const report = await pcRef.current.getStats();
             if (manual !== "auto") {
               const manualLevel = manual === "low" ? "low" : manual === "medium" ? "medium" : "high";
               setNetworkQuality(manualLevel === "low" ? "poor" : manualLevel === "medium" ? "medium" : "good");
@@ -1656,12 +1656,15 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
             let level = "good";
             if (rtt > 0.8 || lossRate > 0.08) level = "poor";
             else if (rtt > 0.35 || lossRate > 0.03) level = "medium";
-            setNetworkQuality(level);
-            await applyAdaptiveProfile(getProfileByNetwork(level));
-          } catch (e) {
-            console.warn("Adaptive bitrate stats failed:", e);
-          }
-        }, 3e3);
+            // isMountedRef.current をチェックする
+    if (isMountedRef.current) {
+      setNetworkQuality(level);
+      await applyAdaptiveProfile(getProfileByNetwork(level));
+    }
+  } catch (e) {
+    console.warn("Adaptive bitrate stats failed:", e);
+  }
+}, 3000);
       };
       const attemptIceRecovery = async () => {
         if (!localIsCaller || !pcRef.current) return;
@@ -5171,24 +5174,19 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     setPreviewMedia({ src, type });
   }, []);
   // useCallbackで関数をメモ化
-const handleReaction = useCallback(async (messageId, emoji) => {
+// isAdding (追加か削除か) を引数で受け取ることで、messagesへの依存を排除
+const handleReaction = useCallback(async (messageId, emoji, isAdding) => {
   try {
     const msgRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", messageId);
-    // messages全体に依存すると更新頻度が高いため、最低限の依存にするか、
-    // ここではシンプルにmessagesが変わった時のみ関数を更新するようにします
-    const msg = messages.find((m) => m.id === messageId);
-    if (!msg) return; // 安全策
-
-    const currentReactions = msg.reactions?.[emoji] || [];
-    if (currentReactions.includes(user.uid)) {
-      await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayRemove(user.uid) });
-    } else {
+    if (isAdding) {
       await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayUnion(user.uid) });
+    } else {
+      await updateDoc(msgRef, { [`reactions.${emoji}`]: arrayRemove(user.uid) });
     }
   } catch (e) {
     console.error("Reaction error", e);
   }
-}, [db2, appId2, activeChatId, messages, user.uid]); // 依存配列を追加
+}, [db2, appId2, activeChatId, user.uid]); // messagesへの依存が消えた
   const submitEditMessage = async () => {
     if (!editingText.trim() || !editingMsgId) return;
     try {
@@ -6608,43 +6606,45 @@ function App() {
       });
       setChats(chatList);
      setActiveCall((prev) => {
-        const incoming = chatList.find((c) => c.callStatus?.status === "ringing" && c.callStatus.callerId !== user.uid);
-        
-        // 1. 新しい着信の処理
-        if (incoming) {
-          if (!prev || prev.callData?.sessionId !== incoming.callStatus?.sessionId) {
-             return {
-              chatId: incoming.id,
-              callData: incoming.callStatus,
-              isVideo: incoming.callStatus?.callType !== "audio",
-              isGroupCall: false,
-              isCaller: false,
-              phase: "incoming"
-            };
-          }
-        }
+  // 1. 新規着信の検知（自分が発信者でない、かつ ringing 状態）
+  const incoming = chatList.find((c) => 
+    c.callStatus?.status === "ringing" && 
+    c.callStatus.callerId !== user.uid
+  );
 
-        // 2. 通話中の状態維持ロジック（ここが重要）
-        if (prev) {
-          const currentChat = chatList.find((c) => c.id === prev.chatId);
-          const status = currentChat?.callStatus?.status;
-          
-          // 通話終了判定（データが消えた、またはnullになった場合）
-          if (!currentChat || !currentChat.callStatus) {
-             return null; 
-          }
+  // 通話中でない、かつ新規着信があればセット
+  if (!prev && incoming) {
+    return {
+      chatId: incoming.id,
+      callData: incoming.callStatus,
+      isVideo: incoming.callStatus?.callType !== "audio",
+      isGroupCall: !!incoming.isGroup,
+      isCaller: false,
+      phase: "incoming"
+    };
+  }
 
-          // 「接続中」へのステータス移行のみ更新し、それ以外はprev（既存オブジェクト）を返して再レンダリングを防ぐ
-          if (status === "accepted" && prev.phase !== "inCall") {
-            return { ...prev, phase: "inCall", callData: currentChat.callStatus };
-          }
-          
-          // 状態が変わっていない場合は、Reactに「変更なし」と伝えるために prev をそのまま返す
-          return prev;
-        }
-        
-        return null;
-      });
+  // 2. 既存通話の状態更新
+  if (prev) {
+    const currentChat = chatList.find((c) => c.id === prev.chatId);
+    const status = currentChat?.callStatus?.status;
+
+    // 通話データが消えた（終了した）場合
+    if (!currentChat?.callStatus) {
+      return null;
+    }
+
+    // ステータスが変化した場合のみ更新 (accepted になった等)
+    if (status === "accepted" && prev.phase !== "inCall") {
+      return { ...prev, phase: "inCall", callData: currentChat.callStatus };
+    }
+
+    // 変更がない場合は今のstateを維持
+    return prev;
+  }
+
+  return null;
+});
     });
     const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(50)), (snap) => {
       setPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
