@@ -1,4 +1,3 @@
-
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { initializeApp } from "firebase/app";
@@ -105,15 +104,16 @@ import {
   Eye,
   AlertCircle
 } from "lucide-react";
+
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
   authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  databaseURL: process.env.REACT_APP_FIREBASE_DATABASE_URL,
   projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
   storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.REACT_APP_FIREBASE_APP_ID
 };
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -1625,38 +1625,48 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         statsTimerRef.current = setInterval(async () => {
   if (!pcRef.current || pcRef.current.connectionState === "closed") return;
   try {
+    const manual = qualityModeRef.current;
+    
+    // 1. 手動設定（マニュアル）の場合
+    if (manual !== "auto") {
+      const manualLevel = manual === "low" ? "low" : manual === "medium" ? "medium" : "high";
+      if (isMountedRef.current) {
+        setNetworkQuality(manualLevel === "low" ? "poor" : manualLevel === "medium" ? "medium" : "good");
+      }
+      await applyAdaptiveProfile(getProfileByNetwork(manualLevel));
+      return; // ★ここで終了させることで、下の const report と衝突しない
+    }
+
+    // 2. 自動設定（オート）の場合のみここで宣言
     const report = await pcRef.current.getStats();
-            if (manual !== "auto") {
-              const manualLevel = manual === "low" ? "low" : manual === "medium" ? "medium" : "high";
-              setNetworkQuality(manualLevel === "low" ? "poor" : manualLevel === "medium" ? "medium" : "good");
-              await applyAdaptiveProfile(getProfileByNetwork(manualLevel));
-              return;
-            }
-            const report = await pcRef.current.getStats();
-            let outboundPacketsSent = 0;
-            let outboundPacketsLost = 0;
-            let rtt = 0;
-            report.forEach((stat) => {
-              if (stat.type === "outbound-rtp" && !stat.isRemote) {
-                outboundPacketsSent += stat.packetsSent || 0;
-              }
-              if (stat.type === "remote-inbound-rtp") {
-                outboundPacketsLost += stat.packetsLost || 0;
-                if (!rtt && stat.roundTripTime) rtt = stat.roundTripTime;
-              }
-              if (stat.type === "candidate-pair" && stat.state === "succeeded" && stat.currentRoundTripTime && !rtt) {
-                rtt = stat.currentRoundTripTime;
-              }
-            });
-            const prev = prevOutboundStatsRef.current;
-            const sentDelta = Math.max(0, outboundPacketsSent - prev.packetsSent);
-            const lostDelta = Math.max(0, outboundPacketsLost - prev.packetsLost);
-            const lossRate = sentDelta > 0 ? lostDelta / sentDelta : 0;
-            prevOutboundStatsRef.current = { packetsSent: outboundPacketsSent, packetsLost: outboundPacketsLost };
-            let level = "good";
-            if (rtt > 0.8 || lossRate > 0.08) level = "poor";
-            else if (rtt > 0.35 || lossRate > 0.03) level = "medium";
-            // isMountedRef.current をチェックする
+    
+    let outboundPacketsSent = 0;
+    let outboundPacketsLost = 0;
+    let rtt = 0;
+    
+    report.forEach((stat) => {
+      if (stat.type === "outbound-rtp" && !stat.isRemote) {
+        outboundPacketsSent += stat.packetsSent || 0;
+      }
+      if (stat.type === "remote-inbound-rtp") {
+        outboundPacketsLost += stat.packetsLost || 0;
+        if (!rtt && stat.roundTripTime) rtt = stat.roundTripTime;
+      }
+      if (stat.type === "candidate-pair" && stat.state === "succeeded" && stat.currentRoundTripTime && !rtt) {
+        rtt = stat.currentRoundTripTime;
+      }
+    });
+
+    const prev = prevOutboundStatsRef.current;
+    const sentDelta = Math.max(0, outboundPacketsSent - prev.packetsSent);
+    const lostDelta = Math.max(0, outboundPacketsLost - prev.packetsLost);
+    const lossRate = sentDelta > 0 ? lostDelta / sentDelta : 0;
+    prevOutboundStatsRef.current = { packetsSent: outboundPacketsSent, packetsLost: outboundPacketsLost };
+    
+    let level = "good";
+    if (rtt > 0.8 || lossRate > 0.08) level = "poor";
+    else if (rtt > 0.35 || lossRate > 0.03) level = "medium";
+    
     if (isMountedRef.current) {
       setNetworkQuality(level);
       await applyAdaptiveProfile(getProfileByNetwork(level));
