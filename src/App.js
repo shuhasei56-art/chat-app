@@ -121,7 +121,7 @@ const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F525}"];
 const rtcConfig = {
   iceServers: [
-    { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] }
+    { urls: ["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302","stun:stun2.l.google.com:19302","stun:stun3.l.google.com:19302","stun:stun4.l.google.com:19302"] }
   ],
   iceCandidatePoolSize: 10,
   bundlePolicy: "max-bundle"
@@ -547,6 +547,11 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
   const [callError, setCallError] = useState(null);
+
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const screenStreamRef = useRef(null);
+  const cameraDeviceIdsRef = useRef([]);
+  const cameraIndexRef = useRef(0);
   const [needsRemotePlay, setNeedsRemotePlay] = useState(false);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -753,6 +758,40 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           safeEndCall(1200);
         }
       };
+      pc.oniceconnectionstatechange = async () => {
+        try {
+          const iceState = pc.iceConnectionState;
+          if (iceState === "failed") {
+            // Try ICE restart (helps on NAT changes / Wi-Fi switch)
+            try {
+              pc.restartIce?.();
+            } catch {
+            }
+            if (isCaller) {
+              try {
+                const offer = await pc.createOffer({ iceRestart: true, offerToReceiveAudio: true, offerToReceiveVideo: !!isVideoEnabled });
+                await pc.setLocalDescription(offer);
+                await setDoc(
+                  signalingRef,
+                  {
+                    sessionId,
+                    callerId: callData?.callerId || user.uid,
+                    offerSdp: offer.sdp,
+                    offererId: user.uid,
+                    iceRestart: true,
+                    updatedAt: serverTimestamp()
+                  },
+                  { merge: true }
+                );
+              } catch (e) {
+                console.warn("ICE restart offer failed:", e);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("iceconnectionstatechange error:", e);
+        }
+      };
       pc.ontrack = async (event) => {
         const directStream = event.streams?.[0];
         const stream = directStream || remoteStreamRef.current;
@@ -824,6 +863,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           return;
         }
         localStreamRef.current = stream;
+        refreshCameraDevices();
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
           localVideoRef.current.muted = true;
@@ -958,6 +998,147 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     });
     setIsVideoOff(shouldDisableVideo);
   };
+
+  const refreshCameraDevices = useCallback(async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+      const videoInputs = devices.filter((d) => d.kind === "videoinput" && d.deviceId);
+      cameraDeviceIdsRef.current = videoInputs.map((d) => d.deviceId);
+      if (cameraIndexRef.current >= cameraDeviceIdsRef.current.length) cameraIndexRef.current = 0;
+    } catch {
+      cameraDeviceIdsRef.current = [];
+      cameraIndexRef.current = 0;
+    }
+  }, []);
+
+  const replaceOutgoingVideoTrack = useCallback(async (newVideoTrack) => {
+    const pc = pcRef.current;
+    if (!pc || !newVideoTrack) return;
+    const sender = pc.getSenders?.().find((s) => s.track && s.track.kind === "video");
+    try {
+      if (sender?.replaceTrack) await sender.replaceTrack(newVideoTrack);
+    } catch (e) {
+      console.warn("replaceTrack failed:", e);
+    }
+  }, []);
+
+  const switchToCamera = useCallback(async (deviceId) => {
+    const stream = localStreamRef.current;
+    const wantVideo = !!isVideoEnabled;
+    if (!wantVideo) return;
+    let newStream = null;
+    try {
+      newStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: deviceId ? { deviceId: { exact: deviceId }, width: { ideal: 640, max: 1280 }, height: { ideal: 360, max: 720 }, frameRate: { ideal: 24, max: 30 } } : { facingMode: "user" }
+      });
+    } catch (e) {
+      try {
+        newStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "user" } });
+      } catch (e2) {
+        console.warn("switch camera getUserMedia failed:", e2);
+        return;
+      }
+    }
+    const newTrack = newStream.getVideoTracks?.()[0];
+    if (!newTrack) return;
+    await replaceOutgoingVideoTrack(newTrack);
+
+    // Update local stream object (keep audio track)
+    const current = localStreamRef.current;
+    const audioTracks = current?.getAudioTracks?.() || [];
+    const oldVideoTracks = current?.getVideoTracks?.() || [];
+    oldVideoTracks.forEach((t) => {
+      try {
+        t.stop();
+      } catch {
+      }
+    });
+    const merged = new MediaStream([...audioTracks, newTrack]);
+    localStreamRef.current = merged;
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = merged;
+      localVideoRef.current.muted = true;
+      try {
+        await localVideoRef.current.play();
+      } catch {
+      }
+    }
+    setIsVideoOff(false);
+    try {
+      newStream.getTracks().forEach((t) => {
+        if (t.kind !== "video") t.stop();
+      });
+    } catch {
+    }
+  }, [isVideoEnabled, replaceOutgoingVideoTrack]);
+
+  const stopScreenShare = useCallback(async () => {
+    if (screenStreamRef.current) {
+      try {
+        screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      } catch {
+      }
+      screenStreamRef.current = null;
+    }
+    setIsScreenSharing(false);
+    await refreshCameraDevices();
+    const deviceIds = cameraDeviceIdsRef.current || [];
+    const deviceId = deviceIds[cameraIndexRef.current] || null;
+    await switchToCamera(deviceId);
+  }, [refreshCameraDevices, switchToCamera]);
+
+  const startScreenShare = useCallback(async () => {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setCallError("このブラウザは画面共有に対応していません。");
+      return;
+    }
+    if (!isVideoEnabled) return;
+    try {
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const track = displayStream.getVideoTracks?.()[0];
+      if (!track) return;
+      screenStreamRef.current = displayStream;
+      track.onended = () => {
+        stopScreenShare();
+      };
+      await replaceOutgoingVideoTrack(track);
+
+      // Update local preview (keep audio)
+      const current = localStreamRef.current;
+      const audioTracks = current?.getAudioTracks?.() || [];
+      const oldVideoTracks = current?.getVideoTracks?.() || [];
+      oldVideoTracks.forEach((t) => {
+        try {
+          t.stop();
+        } catch {
+        }
+      });
+      const merged = new MediaStream([...audioTracks, track]);
+      localStreamRef.current = merged;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = merged;
+        localVideoRef.current.muted = true;
+        try {
+          await localVideoRef.current.play();
+        } catch {
+        }
+      }
+      setIsScreenSharing(true);
+      setIsVideoOff(false);
+    } catch (e) {
+      console.warn("Screen share failed:", e);
+    }
+  }, [isVideoEnabled, replaceOutgoingVideoTrack, stopScreenShare]);
+
+  const switchCamera = useCallback(async () => {
+    if (!isVideoEnabled) return;
+    await refreshCameraDevices();
+    const list = cameraDeviceIdsRef.current || [];
+    if (list.length <= 1) return;
+    cameraIndexRef.current = (cameraIndexRef.current + 1) % list.length;
+    await switchToCamera(list[cameraIndexRef.current]);
+  }, [isVideoEnabled, refreshCameraDevices, switchToCamera]);
   if (callError) {
     return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center text-white flex-col gap-4", children: [
       /* @__PURE__ */ jsx(AlertCircle, { className: "w-16 h-16 text-red-500" }),
@@ -977,13 +1158,15 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         "\u97F3\u58F0\u3092\u518D\u751F"
       ] }),
       isVideoEnabled && /* @__PURE__ */ jsxs("div", { className: "absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg transition-all", children: [
-        /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover transform scale-x-[-1]", style: { filter: getFilterStyle(activeEffect) } }),
+        /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover transform scale-x-[-1]", style: { filter: getFilterStyle(activeEffect), willChange: "transform, filter" } }),
         activeEffect && activeEffect !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/50 text-white text-[8px] px-1 rounded", children: activeEffect })
       ] })
     ] }),
     /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-8 pb-6 backdrop-blur-lg", children: [
       /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `p-4 rounded-full transition-all ${isMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
-      /* @__PURE__ */ jsxs("button", { onClick: onEndCall, className: "p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
+      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: isScreenSharing ? stopScreenShare : startScreenShare, className: `p-4 rounded-full transition-all ${isScreenSharing ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isScreenSharing ? /* @__PURE__ */ jsx(StopCircle, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(ArrowUpCircle, { className: "w-6 h-6" }) }),
+            isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: switchCamera, className: "p-4 rounded-full bg-gray-700 text-white hover:bg-gray-600 transition-all", children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
+/* @__PURE__ */ jsxs("button", { onClick: onEndCall, className: "p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
         /* @__PURE__ */ jsx(PhoneOff, { className: "w-8 h-8" }),
         /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u7D42\u4E86" })
       ] }),
@@ -1600,7 +1783,17 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
               else if (m.type === "audio") mimeType = "audio/webm";
               else mimeType = "application/octet-stream";
             }
-            if (m.type !== "text" && m.type !== "contact") setBlobSrcFromBase64(base64Data, mimeType);
+            if (m.type !== "text" && m.type !== "contact") {
+              if (base64Data.startsWith("data:")) {
+                setMediaSrc(base64Data);
+              } else {
+                if (base64Data.startsWith("data:")) {
+              dataUrl = base64Data;
+            } else {
+              setBlobSrcFromBase64(base64Data, mimeType);
+            }
+              }
+            }
           } else if (m.preview) {
             setMediaSrc(m.preview);
           }
@@ -1893,6 +2086,24 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
     };
   }, [mediaSrc, isMe]);
   const toggleLike = async () => await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { likes: isLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
+
+  const deletePost = async () => {
+    if (!isMe) return;
+    const ok = window.confirm("この投稿を削除しますか？");
+    if (!ok) return;
+    try {
+      const postRef = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id);
+      const chunksSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"));
+      const commentsSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "comments"));
+      const batch = writeBatch(db2);
+      chunksSnap.forEach((d) => batch.delete(d.ref));
+      commentsSnap.forEach((d) => batch.delete(d.ref));
+      batch.delete(postRef);
+      await batch.commit();
+    } catch (e) {
+      console.error("Delete post failed:", e);
+    }
+  };
   const submitComment = async () => {
     if (!commentText.trim()) return;
     await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { comments: arrayUnion({ userId: user.uid, userName: profile.name, text: commentText, createdAt: (/* @__PURE__ */ new Date()).toISOString() }) });
@@ -1903,7 +2114,9 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
       /* @__PURE__ */ jsxs("div", { className: "relative", children: [
         /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
         isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
-      ] }),
+      ,
+        isMe && /* @__PURE__ */ jsx("button", { onClick: deletePost, className: "ml-auto p-2 rounded-full hover:bg-red-50 text-red-500", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) }),
+] }),
       /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
@@ -4512,13 +4725,32 @@ function App() {
       document.head.appendChild(iconLink);
     } catch {
     }
-    setPersistence(auth, browserLocalPersistence);
+    (async () => {
+      try {
+        await setPersistence(auth, browserLocalPersistence);
+      } catch (e) {
+        console.warn("Auth persistence set failed:", e);
+      }
+    })();
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (u) {
         setUser(u);
+        const cacheKey = `profile_cache_${appId}_${u.uid}`;
+        try {
+          const cached = localStorage.getItem(cacheKey);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && parsed.uid === u.uid) setProfile(parsed);
+          }
+        } catch {
+        }
         const docSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid));
         if (docSnap.exists()) {
           setProfile(docSnap.data());
+          try {
+            localStorage.setItem(`profile_cache_${appId}_${u.uid}`, JSON.stringify(docSnap.data()));
+          } catch {
+          }
         } else {
           const initialProfile = {
             uid: u.uid,
@@ -4536,6 +4768,10 @@ function App() {
           };
           await setDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid), initialProfile);
           setProfile(initialProfile);
+          try {
+            localStorage.setItem(`profile_cache_${appId}_${u.uid}`, JSON.stringify(initialProfile));
+          } catch {
+          }
         }
         setView("home");
       } else {
@@ -4561,7 +4797,14 @@ function App() {
   useEffect(() => {
     if (!user) return;
     const unsubProfile = onSnapshot(doc(db, "artifacts", appId, "public", "data", "users", user.uid), (doc2) => {
-      if (doc2.exists()) setProfile(doc2.data());
+      if (doc2.exists()) {
+        const data = doc2.data();
+        setProfile(data);
+        try {
+          localStorage.setItem(`profile_cache_${appId}_${user.uid}`, JSON.stringify(data));
+        } catch {
+        }
+      }
     });
     const unsubUsers = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "users")), (snap) => {
       setAllUsers(snap.docs.map((d) => d.data()));
