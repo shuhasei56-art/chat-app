@@ -1132,7 +1132,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     if (remoteAudioRef.current) remoteAudioRef.current.volume = effectiveVolume;
   }, [remoteVolume, remoteBoost, isRemoteMuted]);
   useEffect(() => {
-    if (!autoHideControls) {
+    if (!autoHideControls || showAdvancedPanel) {
       setControlsVisible(true);
       if (controlsTimerRef.current) {
         clearTimeout(controlsTimerRef.current);
@@ -1144,7 +1144,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       setControlsVisible(true);
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
       controlsTimerRef.current = setTimeout(() => {
-        if (isMountedRef.current) setControlsVisible(false);
+        if (isMountedRef.current && !showAdvancedPanel) setControlsVisible(false);
       }, 2800);
     };
     showTemporarily();
@@ -1160,7 +1160,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         controlsTimerRef.current = null;
       }
     };
-  }, [autoHideControls]);
+  }, [autoHideControls, showAdvancedPanel]);
   useEffect(() => {
     if (showAdvancedPanel) setControlsVisible(true);
   }, [showAdvancedPanel]);
@@ -2138,6 +2138,11 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     await tryPlayRemoteMedia();
   };
   const openAdvancedSettingsPanel = () => {
+    if (controlsTimerRef.current) {
+      clearTimeout(controlsTimerRef.current);
+      controlsTimerRef.current = null;
+    }
+    setAutoHideControls(false);
     setControlsVisible(true);
     setShowAdvancedPanel(true);
   };
@@ -2332,11 +2337,44 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       console.warn("PiP toggle failed:", e);
     }
   };
-  const rawParticipantCount = Array.isArray(callData?.participants) ? callData.participants.length : Number(callData?.participantCount) || (callData?.isGroupCall ? 4 : 2);
-  const participantCount = Math.max(2, Math.min(4, rawParticipantCount));
-  const tileCount = participantCount <= 2 ? 2 : 4;
-  const tileGridClass = tileCount === 2 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-2";
-  const tileMinHeightClass = tileCount === 2 ? "min-h-[200px] md:min-h-[420px]" : "min-h-[140px] md:min-h-[220px]";
+  const resolveCallParticipantCount = (data) => {
+    if (!data) return 2;
+    let inferred = 0;
+    const shapeCandidates = [
+      data.participants,
+      data.participantIds,
+      data.participantUids,
+      data.memberIds,
+      data.members,
+      data.attendees
+    ];
+    shapeCandidates.forEach((v) => {
+      if (Array.isArray(v)) {
+        inferred = Math.max(inferred, v.length);
+        return;
+      }
+      if (v && typeof v === "object") {
+        inferred = Math.max(inferred, Object.keys(v).length);
+      }
+    });
+    const numericCandidates = [
+      data.participantCount,
+      data.membersCount,
+      data.groupSize,
+      data.attendeeCount
+    ];
+    numericCandidates.forEach((v) => {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) inferred = Math.max(inferred, Math.floor(n));
+    });
+    if (inferred > 0) return inferred;
+    return data.isGroupCall ? 4 : 2;
+  };
+  const rawParticipantCount = resolveCallParticipantCount(callData);
+  const participantCount = Math.max(2, Math.min(12, rawParticipantCount));
+  const tileCount = participantCount;
+  const tileColumns = tileCount <= 2 ? 2 : tileCount <= 4 ? 2 : tileCount <= 9 ? 3 : 4;
+  const tileMinHeightClass = tileCount <= 2 ? "min-h-[200px] md:min-h-[420px]" : tileCount <= 4 ? "min-h-[140px] md:min-h-[220px]" : tileCount <= 6 ? "min-h-[120px] md:min-h-[180px]" : "min-h-[100px] md:min-h-[150px]";
   const memberRows = [
     {
       key: "self",
@@ -2407,7 +2445,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           }) })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "bg-black/20 rounded-[28px] p-2.5 md:p-3 border border-white/30 shadow-2xl", children: [
-          /* @__PURE__ */ jsx("div", { className: `grid ${tileGridClass} gap-2.5 md:gap-3 h-full`, children: callTiles.map((tile) => {
+          /* @__PURE__ */ jsx("div", { className: "grid gap-2.5 md:gap-3 h-full", style: { gridTemplateColumns: `repeat(${tileColumns}, minmax(0, 1fr))` }, children: callTiles.map((tile) => {
             if (tile.type === "remote") {
               return /* @__PURE__ */ jsx("div", { className: `relative rounded-2xl overflow-hidden bg-black ${tileMinHeightClass}`, children: remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }) : /* @__PURE__ */ jsxs("div", { className: "w-full h-full text-white flex flex-col items-center justify-center gap-2", children: [
                 /* @__PURE__ */ jsx(User, { className: "w-8 h-8 opacity-80" }),
@@ -2479,7 +2517,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           /* @__PURE__ */ jsx("button", { onClick: toggleHold, className: `px-3 py-2 rounded-full text-xs font-bold ${isHold ? "bg-yellow-500 text-black hover:bg-yellow-400" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isHold ? "\u4FDD\u7559\u4E2D" : "\u4FDD\u7559" }),
           /* @__PURE__ */ jsx("button", { onClick: addBookmark, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u3057\u304A\u308A" }),
           /* @__PURE__ */ jsx("button", { onClick: () => setShowShortcutHelp((v) => !v), className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "?" }),
-          canSelectAudioOutput && audioOutputs.length > 0 && /* @__PURE__ */ jsx("select", { value: selectedAudioOutput, onChange: (e) => setSelectedAudioOutput(e.target.value), className: "bg-gray-700 text-white text-xs font-bold px-3 py-2 rounded-full outline-none max-w-[150px]", children: audioOutputs.map((d, i) => /* @__PURE__ */ jsx("option", { value: d.deviceId, children: d.label || `\u51FA\u529B${i + 1}` }, d.deviceId || i)) })
+          canSelectAudioOutput && audioOutputs.length > 0 && /* @__PURE__ */ jsx("select", { value: selectedAudioOutput, onChange: (e) => setSelectedAudioOutput(e.target.value), className: "bg-gray-700 text-white text-xs font-bold px-3 py-2 rounded-full outline-none max-w-[150px]", children: audioOutputs.map((d, i) => /* @__PURE__ */ jsx("option", { value: d.deviceId, children: d.label || `\u51FA\u529B${i + 1}` }, `${d.deviceId || "default"}-${i}`)) })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 flex-wrap", children: [
           /* @__PURE__ */ jsx("label", { className: "text-[11px] font-bold opacity-80", children: "\u753B\u8CEA" }),
@@ -4989,8 +5027,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             reader.onerror = reject;
             reader.readAsDataURL(blobSlice);
           });
-          const pWrapper = p.then(() => executing.delete(pWrapper));
-          executing.add(pWrapper);
+          executing.add(p);
+          p.finally(() => executing.delete(p));
           if (executing.size >= CONCURRENCY) {
             await Promise.race(executing);
           }
@@ -5725,8 +5763,8 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
             const base64Data = bytesToBase64(new Uint8Array(buf));
             await setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: base64Data, index: i });
           });
-          const pWrapper = p.then(() => executing.delete(pWrapper));
-          executing.add(pWrapper);
+          executing.add(p);
+          p.finally(() => executing.delete(p));
           if (executing.size >= CONCURRENCY) {
             await Promise.race(executing);
           }
@@ -6853,6 +6891,8 @@ var App_13_default = App;
 export {
   App_13_default as default
 };
+
+
 
 
 
