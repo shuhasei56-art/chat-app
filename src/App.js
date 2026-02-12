@@ -1787,11 +1787,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
               if (base64Data.startsWith("data:")) {
                 setMediaSrc(base64Data);
               } else {
-                if (base64Data.startsWith("data:")) {
-              dataUrl = base64Data;
-            } else {
-              setBlobSrcFromBase64(base64Data, mimeType);
-            }
+                setBlobSrcFromBase64(base64Data, mimeType);
               }
             }
           } else if (m.preview) {
