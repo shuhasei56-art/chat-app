@@ -4231,6 +4231,24 @@ try {
   } catch {}
 }
       }
+
+} else {
+  // Text / sticker / etc.
+  if (typeof content === "object" && content !== null && type === "sticker") {
+    const stickerContent = content.image || content;
+    const stickerAudio = content.audio || null;
+    await setDoc(newMsgRef, { senderId: user.uid, content: stickerContent, audio: stickerAudio, type, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, isUploading: false, createdAt: serverTimestamp(), readBy: [user.uid] });
+  } else {
+    await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, isUploading: false, createdAt: serverTimestamp(), readBy: [user.uid] });
+  }
+  await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
+  setText("");
+  setPlusMenuOpen(false);
+  setContactModalOpen(false);
+  setTimeout(() => {
+    scrollRef.current?.scrollIntoView({ behavior: "auto" });
+  }, 100);
+}
     } catch (e) {
       console.error(e);
       showNotification("\u9001\u4FE1\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
