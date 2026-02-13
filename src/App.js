@@ -2592,14 +2592,21 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
           const chunksQ = query(
             collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"),
             orderBy("index", "asc")
-          );
-          // Prefer local cache first; fall back to server if needed (faster on repeat views)
-          let snap;
-          try {
-            snap = await getDocsFromCache(chunksQ);
-          } catch (e) {
-            snap = await getDocsFromServer(chunksQ);
-          }
+          );// Prefer local cache first; but for newest posts cache can be empty even though server has data.
+// So: cache -> if empty, server -> (if that fails, fallback to regular getDocs)
+let snap;
+try {
+  snap = await getDocsFromCache(chunksQ);
+  if (!snap || snap.empty) {
+    snap = await getDocsFromServer(chunksQ);
+  }
+} catch (e) {
+  try {
+    snap = await getDocsFromServer(chunksQ);
+  } catch (e2) {
+    snap = await getDocs(chunksQ);
+  }
+}
           const parts = [];
           snap.forEach((d) => {
             const v = d.data()?.data;
