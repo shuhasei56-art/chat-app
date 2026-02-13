@@ -2623,7 +2623,6 @@ if (parts.length) {
     console.error("Post media decode error", e);
   }
 }
-          }
         } catch (e) {
           console.error("Post media load error", e);
         } finally {
