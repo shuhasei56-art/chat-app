@@ -2255,11 +2255,6 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
   const isMe = m.senderId === user.uid;
   const [mediaSrc, setMediaSrc] = useState(null);
 
-useEffect(() => {
-  if (post && post.storageUrl) {
-    setMediaSrc(post.storageUrl);
-  }
-}, [post.storageUrl]);
   const [loading, setLoading] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
