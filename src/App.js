@@ -2630,7 +2630,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
           src: mediaSrc, 
           className: "w-full rounded-2xl max-h-96 bg-black cursor-pointer", 
           controls: true, 
-          playsInline: true,
+          playsInline: true, 
           preload: "metadata",
           onClick: () => setPostPreview({ src: mediaSrc, type: "video" }) 
         }) : /* @__PURE__ */ jsx("img", { 
