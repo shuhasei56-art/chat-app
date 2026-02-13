@@ -2506,7 +2506,6 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
 });
 const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => {
   const [commentText, setCommentText] = useState("");
-  // 初期状態ではメディアを読み込まない (nullにする)
   const [mediaSrc, setMediaSrc] = useState(post.hasChunks ? null : post.media);
   const [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [postPreview, setPostPreview] = useState(null);
@@ -2515,14 +2514,12 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
   const isLiked = post.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
 
-  // ★変更点1: ボタンを押した時だけ実行される読み込み関数
   const loadMedia = async () => {
     if (mediaSrc || isLoadingMedia) return;
     
     setIsLoadingMedia(true);
     try {
       const cacheKey = `post:${post.id}`;
-      // キャッシュがあればそれを使う
       const cachedUrl = __mediaUrlCache.get(cacheKey);
       if (cachedUrl) {
         setMediaSrc(cachedUrl);
@@ -2530,7 +2527,6 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
         return;
       }
 
-      // Firestoreからデータを取得
       const chunksQ = query(
         collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"),
         orderBy("index", "asc")
@@ -2553,13 +2549,11 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
       const mergedData = parts.join("");
       
       if (mergedData) {
-        // ★変更点2: fetchを使った高速変換 (ループ処理を排除)
         const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
         const res = await fetch(`data:${mimeType};base64,${mergedData}`);
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         
-        // キャッシュしてセット
         __cacheSet(__mediaUrlCache, cacheKey, url);
         setMediaSrc(url);
       }
@@ -2570,11 +2564,9 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
     }
   };
 
-  // クリーンアップ処理
   useEffect(() => {
     return () => {
-      // 必要に応じてURLをrevoke（キャッシュ管理との兼ね合いでコメントアウト推奨）
-      // if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe) URL.revokeObjectURL(mediaSrc);
+      // 必要に応じてURLをrevoke
     };
   }, [mediaSrc, isMe]);
 
@@ -2586,7 +2578,6 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
     if (!ok) return;
     try {
       const postRef = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id);
-      // 関連データの削除処理は省略
       await deleteDoc(postRef);
     } catch (e) {
       console.error("Delete post failed:", e);
@@ -2595,7 +2586,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
 
   const submitComment = async () => {
     if (!commentText.trim()) return;
-    await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { comments: arrayUnion({ userId: user.uid, userName: profile.name, text: commentText, createdAt: (/* @__PURE__ */ new Date()).toISOString() }) });
+    await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { comments: arrayUnion({ userId: user.uid, userName: profile.name, text: commentText, createdAt: (new Date()).toISOString() }) });
     setCommentText("");
   };
 
@@ -2604,17 +2595,16 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
     /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
       /* @__PURE__ */ jsxs("div", { className: "relative", children: [
         /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
-        isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" }),
+        isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
       ] }),
       /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name }),
-      /* 自分の投稿なら削除ボタンを表示 */
-      isMe && /* @__PURE__ */ jsx("button", { onClick: deletePost, className: "ml-auto p-2 rounded-full hover:bg-red-50 text-red-500", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) }),
+      isMe && /* @__PURE__ */ jsx("button", { onClick: deletePost, className: "ml-auto p-2 rounded-full hover:bg-red-50 text-red-500", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) })
     ] }),
     
     /* 投稿本文 */
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
     
-    /* ★変更点3: メディア表示エリア（読み込みボタンとコンテンツの切り替え） */
+    /* メディア表示エリア */
     (post.media || post.hasChunks) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[200px] relative overflow-hidden border border-gray-100", children: [
       
       // A. ロード中
@@ -2623,8 +2613,8 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
         /* @__PURE__ */ jsx("span", { className: "text-xs text-gray-400 font-bold", children: "読み込み中..." })
       ]}),
 
-      // B. 未ロード状態でチャンクがある場合 -> 「読み込むボタン」を表示
-      !mediaSrc && !isLoadingMedia && post.hasChunks && /* @__PURE__ */ jsxs("button", { 
+      // B. 未ロード状態でチャンクがある場合 -> 「読み込むボタン」
+      (!mediaSrc && !isLoadingMedia && post.hasChunks) && /* @__PURE__ */ jsxs("button", { 
         onClick: loadMedia,
         className: "flex flex-col items-center gap-2 p-4 hover:bg-gray-100 rounded-xl transition-colors",
         children: [
@@ -2635,7 +2625,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
       }),
 
       // C. ロード済みの場合 -> 画像/動画を表示
-      !isLoadingMedia && mediaSrc && (
+      (!isLoadingMedia && mediaSrc) && (
         post.mediaType === "video" ? /* @__PURE__ */ jsx("video", { 
           src: mediaSrc, 
           className: "w-full rounded-2xl max-h-96 bg-black cursor-pointer", 
@@ -2652,13 +2642,13 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
       ),
 
       // 拡大ボタン
-      !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: post.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
+      (!isLoadingMedia && mediaSrc) && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: post.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
         /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
         "\u62E1\u5927"
       ] })
     ] }),
 
-    /* 以下、変更なし（アクションボタンなど） */
+    /* アクションボタン */
     /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-6 py-2 border-y mb-3", children: [
       /* @__PURE__ */ jsxs("button", { onClick: toggleLike, className: "flex items-center gap-1.5", children: [
         /* @__PURE__ */ jsx(Heart, { className: `w-5 h-5 ${isLiked ? "fill-red-500 text-red-500" : "text-gray-400"}` }),
