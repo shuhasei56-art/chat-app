@@ -5285,6 +5285,7 @@ function App() {
   const [chats, setChats] = useState([]);
   const [posts, setPosts] = useState([]);
   const [postsLimit, setPostsLimit] = useState(5);
+  const [postsLimit, setPostsLimit] = useState(5);
   const [notification, setNotification] = useState(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -5605,7 +5606,7 @@ const handleLogout = async () => {
       unsubPosts();
       unsubEffects();
     };
-  }, [user]);
+  }, [user, postsLimit]);
   const addFriendById = async (targetId) => {
     if (!targetId) return;
     const targetUser = allUsers.find((u) => u.id === targetId || u.uid === targetId);
