@@ -4690,7 +4690,7 @@ const postMessage = async () => {
     let storagePath = null;
 
     if (media && typeof media !== "string") {
-      // File => upload to Firebase Storage (resumable). This avoids base64 and supports huge files.
+      // File => upload to Firebase Storage (resumable). Avoids base64 memory pressure.
       mimeType = media.type || null;
       const ext = media.name && media.name.includes(".") ? media.name.split(".").pop() : "";
       const safeExt = ext ? `.${ext}` : "";
@@ -4717,8 +4717,13 @@ const postMessage = async () => {
           }
         );
       });
+
+      // Storage path doesn't need chunks fields
+      hasChunks = false;
+      chunkCount = 0;
+      storedMedia = null;
     } else if (media && typeof media === "string") {
-      // Backward compatible: old dataURL path
+      // Backward compatible: existing dataURL string path
       storedMedia = media;
       if (media.length > CHUNK_SIZE) {
         hasChunks = true;
@@ -4748,9 +4753,7 @@ const postMessage = async () => {
             setUploadProgress(Math.min(100, Math.floor((done / chunkCount) * 100)));
           });
           executing.add(pWrapper);
-          if (executing.size >= CONCURRENCY) {
-            await Promise.race(executing);
-          }
+          if (executing.size >= CONCURRENCY) await Promise.race(executing);
         }
         await Promise.all(executing);
         setUploadProgress(100);
@@ -4784,4 +4787,1173 @@ const postMessage = async () => {
     setIsUploading(false);
     setUploadProgress(0);
   }
+};
+  
+const handleVoomFileUpload = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  setMedia(file);
+  setMediaType(file.type && file.type.startsWith("video") ? "video" : "image");
+  try {
+    if (mediaPreviewUrl && mediaPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(mediaPreviewUrl);
+  } catch {}
+  try {
+    const url = URL.createObjectURL(file);
+    setMediaPreviewUrl(url);
+  } catch {
+    setMediaPreviewUrl(null);
+  }
+};
+  return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-gray-50", children: [
+    /* @__PURE__ */ jsx("div", { className: "bg-white p-4 border-b shrink-0", children: /* @__PURE__ */ jsx("h1", { className: "text-xl font-bold", children: "VOOM" }) }),
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto scrollbar-hide pb-20", children: [
+      /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2", children: [
+        /* @__PURE__ */ jsx("textarea", { className: "w-full text-sm outline-none resize-none min-h-[60px]", placeholder: "\u4F55\u3092\u3057\u3066\u3044\u307E\u3059\u304B\uFF1F", value: content, onChange: (e) => setContent(e.target.value) }),
+        media && /* @__PURE__ */ jsxs("div", { className: "relative mt-2", children: [
+          mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaPreviewUrl || media, className: "w-full rounded-xl bg-black", controls: true }) : /* @__PURE__ */ jsx("img", { src: mediaPreviewUrl || media, className: "max-h-60 rounded-xl" }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setMedia(null), className: "absolute top-1 right-1 bg-black/50 text-white rounded-full p-1", children: /* @__PURE__ */ jsx(X, { className: "w-3 h-3" }) })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "flex justify-between items-center pt-2 border-t mt-2", children: [
+          /* @__PURE__ */ jsxs("label", { className: "cursor-pointer p-2 flex items-center gap-2", children: [
+            /* @__PURE__ */ jsx(ImageIcon, { className: "w-5 h-5 text-gray-400" }),
+            /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*,video/*", onChange: handleVoomFileUpload })
+          ] }),
+          /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || media ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: isUploading ? `投稿 ${uploadProgress}%` : "投稿" })
+        ] })
+      ] }),
+      posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id)),
+      /* @__PURE__ */ jsx("div", { ref: loadMoreRef, style: { height: 1 } })
+    ] })
+  ] });
+};
+const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard , handleLogout }) => {
+  const [edit, setEdit] = useState(profile || {});
+  useEffect(() => {
+    if (profile) setEdit((prev) => !prev || Object.keys(prev).length === 0 ? { ...profile } : { ...profile, name: prev.name, id: prev.id, status: prev.status, birthday: prev.birthday, avatar: prev.avatar, cover: prev.cover });
+  }, [profile]);
+  const handleSave = () => {
+    updateDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), edit);
+    showNotification("\u4FDD\u5B58\u3057\u307E\u3057\u305F \u2705");
+  };
+  return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-white", children: [
+    /* @__PURE__ */ jsxs("div", { className: "p-4 border-b flex items-center gap-4 sticky top-0 bg-white shrink-0", children: [
+      /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("home") }),
+      /* @__PURE__ */ jsx("span", { className: "font-bold", children: "\u8A2D\u5B9A" })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto pb-8", children: [
+      /* @__PURE__ */ jsxs("div", { className: "w-full h-48 relative bg-gray-200", children: [
+        /* @__PURE__ */ jsx("img", { src: edit.cover, className: "w-full h-full object-cover" }),
+        /* @__PURE__ */ jsxs("label", { className: "absolute inset-0 flex items-center justify-center bg-black/20 text-white font-bold cursor-pointer opacity-0 hover:opacity-100 transition-opacity", children: [
+          "\u80CC\u666F\u5909\u66F4",
+          /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*", onChange: (e) => handleCompressedUpload(e, (d) => setEdit({ ...edit, cover: d })) })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "px-8 -mt-12 flex flex-col items-center gap-6", children: [
+        /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+          /* @__PURE__ */ jsx("img", { src: edit.avatar, className: "w-24 h-24 rounded-3xl border-4 border-white object-cover" }),
+          /* @__PURE__ */ jsxs("label", { className: "absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer", children: [
+            /* @__PURE__ */ jsx(CameraIcon, { className: "w-4 h-4" }),
+            /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*", onChange: (e) => handleCompressedUpload(e, (d) => setEdit({ ...edit, avatar: d })) })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "w-full space-y-4", children: [
+          /* @__PURE__ */ jsxs("div", { children: [
+            /* @__PURE__ */ jsx("label", { className: "text-xs font-bold text-gray-400", children: "\u540D\u524D" }),
+            /* @__PURE__ */ jsx("input", { className: "w-full border-b py-2 outline-none", value: edit.name || "", onChange: (e) => setEdit({ ...edit, name: e.target.value }) })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { children: [
+            /* @__PURE__ */ jsx("label", { className: "text-xs font-bold text-gray-400", children: "ID" }),
+            /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 border-b py-2", children: [
+              /* @__PURE__ */ jsx("span", { className: "flex-1 font-mono text-gray-600", children: edit.id }),
+              /* @__PURE__ */ jsx("button", { onClick: () => copyToClipboard(edit.id), className: "p-1 hover:bg-gray-100 rounded-full", children: /* @__PURE__ */ jsx(Copy, { className: "w-4 h-4 text-gray-500" }) })
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { children: [
+            /* @__PURE__ */ jsx("label", { className: "text-xs font-bold text-gray-400", children: "\u8A95\u751F\u65E5" }),
+            /* @__PURE__ */ jsx("input", { type: "date", className: "w-full border-b py-2 outline-none bg-transparent", value: edit.birthday || "", onChange: (e) => setEdit({ ...edit, birthday: e.target.value }) })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { children: [
+            /* @__PURE__ */ jsx("label", { className: "text-xs font-bold text-gray-400", children: "\u3072\u3068\u3053\u3068" }),
+            /* @__PURE__ */ jsx("input", { className: "w-full border-b py-2 outline-none", value: edit.status || "", onChange: (e) => setEdit({ ...edit, status: e.target.value }) })
+          ] }),
+          /* @__PURE__ */ jsx("button", { onClick: handleSave, className: "w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg", children: "\u4FDD\u5B58" }),
+          /* @__PURE__ */ jsx("button", { onClick: () => handleLogout(), className: "w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4", children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })
+        ] })
+      ] })
+    ] })
+  ] });
+};
+const QRScannerView = ({ user, setView, addFriendById }) => {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [scanning, setScanning] = useState(false);
+  const startScanner = async () => {
+    setScanning(true);
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+        videoRef.current.setAttribute("playsinline", "true");
+        videoRef.current.play();
+        requestAnimationFrame(tick);
+      }
+    } catch (err) {
+      setScanning(false);
+    }
+  };
+  useEffect(() => {
+    return () => {
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject;
+        stream.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, []);
+  const tick = () => {
+    if (videoRef.current?.readyState === videoRef.current?.HAVE_ENOUGH_DATA) {
+      const c = canvasRef.current;
+      const ctx = c?.getContext("2d");
+      if (c && ctx) {
+        c.height = videoRef.current.videoHeight;
+        c.width = videoRef.current.videoWidth;
+        ctx.drawImage(videoRef.current, 0, 0, c.width, c.height);
+        const win = window;
+        const decoder = win.jsQR || jsQR;
+        if (decoder) {
+          const code = decoder(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
+          if (code) {
+            if (videoRef.current.srcObject) {
+              const stream = videoRef.current.srcObject;
+              stream.getTracks().forEach((t) => t.stop());
+            }
+            setScanning(false);
+            addFriendById(code.data);
+            return;
+          }
+        }
+      }
+    }
+    if (scanning) requestAnimationFrame(tick);
+  };
+  return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-white", children: [
+    /* @__PURE__ */ jsxs("div", { className: "p-4 border-b flex items-center gap-4", children: [
+      /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("home") }),
+      /* @__PURE__ */ jsx("span", { className: "font-bold", children: "QR" })
+    ] }),
+    /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-8", children: /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center justify-center gap-8 min-h-full", children: [
+      scanning ? /* @__PURE__ */ jsxs("div", { className: "relative w-64 h-64 border-4 border-green-500 rounded-3xl overflow-hidden", children: [
+        /* @__PURE__ */ jsx("video", { ref: videoRef, className: "w-full h-full object-cover" }),
+        /* @__PURE__ */ jsx("canvas", { ref: canvasRef, className: "hidden" })
+      ] }) : /* @__PURE__ */ jsx("div", { className: "bg-white p-6 rounded-[40px] shadow-xl border", children: /* @__PURE__ */ jsx("img", { src: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user?.uid}`, className: "w-48 h-48" }) }),
+      /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-4 w-full", children: [
+        /* @__PURE__ */ jsxs("button", { onClick: startScanner, className: "flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border", children: [
+          /* @__PURE__ */ jsx(Maximize, { className: "w-6 h-6 text-green-500" }),
+          /* @__PURE__ */ jsx("span", { children: "\u30B9\u30AD\u30E3\u30F3" })
+        ] }),
+        /* @__PURE__ */ jsxs("label", { className: "flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border cursor-pointer", children: [
+          /* @__PURE__ */ jsx(Upload, { className: "w-6 h-6 text-blue-500" }),
+          /* @__PURE__ */ jsx("span", { children: "\u8AAD\u8FBC" }),
+          /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*", onChange: (e) => {
+            const r = new FileReader();
+            r.onload = (ev) => {
+              const img = new Image();
+              img.onload = () => {
+                const c = document.createElement("canvas"), ctx = c.getContext("2d");
+                if (ctx) {
+                  c.width = img.width;
+                  c.height = img.height;
+                  ctx.drawImage(img, 0, 0);
+                  const win = window;
+                  const decoder = win.jsQR || jsQR;
+                  if (!decoder) return;
+                  const code = decoder(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
+                  if (code) addFriendById(code.data);
+                }
+              };
+              img.src = ev.target.result;
+            };
+            r.readAsDataURL(e.target.files[0]);
+          } })
+        ] })
+      ] })
+    ] }) })
+  ] });
+};
+const AvatarWithFallback = ({ src, name, className, fallbackClassName }) => {
+  const [hasError, setHasError] = useState(false);
+  const initial = (name || "h").trim().charAt(0).toLowerCase() || "h";
+  if (!src || hasError) {
+    return /* @__PURE__ */ jsx("div", { className: `${className} ${fallbackClassName} flex items-center justify-center text-white text-2xl font-medium`, children: initial });
+  }
+  return /* @__PURE__ */ jsx("img", { src, className, loading: "lazy", onError: () => setHasError(true), alt: name || "avatar" });
+};
+const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }) => {
+  const [tab, setTab] = useState("chats");
+  const [selectedFriend, setSelectedFriend] = useState(null);
+  const [coinModalTarget, setCoinModalTarget] = useState(null);
+  const [openChatMenuId, setOpenChatMenuId] = useState(null);
+  const [openFriendMenuId, setOpenFriendMenuId] = useState(null);
+  const hiddenFriendUids = useMemo(() => new Set(profile?.hiddenFriends || []), [profile?.hiddenFriends]);
+  const talkFriendUids = useMemo(() => {
+    const s = /* @__PURE__ */ new Set();
+    (chats || []).forEach((c) => {
+      if (!c || c.isGroup) return;
+      const parts = c.participants || [];
+      if (!parts.includes(user.uid)) return;
+      const other = parts.find((p) => p && p !== user.uid);
+      if (other) s.add(other);
+    });
+    return s;
+  }, [chats, user.uid]);
+  const directFriendUids = useMemo(() => {
+    const s = new Set(profile?.friends || []);
+    talkFriendUids.forEach((uid) => s.add(uid));
+    return s;
+  }, [profile?.friends, talkFriendUids]);
+  const talkFriendCount = talkFriendUids.size;
+  const groupChatCount = useMemo(() => (chats || []).filter((c) => c?.isGroup).length, [chats]);
+  const friendsListAll = useMemo(
+    () => allUsers.filter((u) => u?.uid && u.uid !== user.uid && directFriendUids.has(u.uid)),
+    [allUsers, directFriendUids, user.uid]
+  );
+  const directFriendsListAll = useMemo(
+    () => allUsers.filter((u) => directFriendUids.has(u.uid)),
+    [allUsers, directFriendUids]
+  );
+  const visibleFriendsList = useMemo(
+    () => friendsListAll.filter((u) => !hiddenFriendUids.has(u.uid)),
+    [friendsListAll, hiddenFriendUids]
+  );
+  const hiddenFriendsList = useMemo(
+    () => friendsListAll.filter((u) => hiddenFriendUids.has(u.uid)),
+    [friendsListAll, hiddenFriendUids]
+  );
+  const friendsOfFriendsCount = useMemo(() => {
+    const fof = /* @__PURE__ */ new Set();
+    directFriendsListAll.forEach((f) => {
+      const ff = f?.friends || [];
+      ff.forEach((uid) => {
+        if (!uid) return;
+        if (uid === user.uid) return;
+        if (directFriendUids.has(uid)) return;
+        fof.add(uid);
+      });
+    });
+    return fof.size;
+  }, [directFriendsListAll, user.uid, directFriendUids]);
+  const getMutualCount = useCallback((friend) => {
+    const ff = friend?.friends || [];
+    let n = 0;
+    for (const uid of ff) {
+      if (!uid || uid === user.uid) continue;
+      if (directFriendUids.has(uid)) n++;
+    }
+    return n;
+  }, [directFriendUids, user.uid]);
+  const getFofCandidateCount = useCallback((friend) => {
+    const ff = friend?.friends || [];
+    let n = 0;
+    for (const uid of ff) {
+      if (!uid || uid === user.uid) continue;
+      if (!directFriendUids.has(uid)) n++;
+    }
+    return n;
+  }, [directFriendUids, user.uid]);
+  const handleHideChat = async (e, chatId) => {
+    e.stopPropagation();
+    setOpenChatMenuId(null);
+    if (!window.confirm("\u3053\u306E\u30C8\u30FC\u30AF\u3092\u975E\u8868\u793A\u306B\u3057\u307E\u3059\u304B\uFF1F\n\uFF08\u30C8\u30FC\u30AF\u5C65\u6B74\u306F\u524A\u9664\u3055\u308C\u307E\u305B\u3093\uFF09")) return;
+    try {
+      const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+      const updatePayload = {
+        hiddenChats: arrayUnion(chatId)
+      };
+      const targetChat = (chats || []).find((c) => c?.id === chatId);
+      if (targetChat && !targetChat.isGroup) {
+        const partnerUid = (targetChat.participants || []).find((p) => p && p !== user.uid);
+        if (partnerUid) {
+          updatePayload.hiddenFriends = arrayUnion(partnerUid);
+        }
+      }
+      await updateDoc(userRef, updatePayload);
+      showNotification("\u975E\u8868\u793A\u306B\u3057\u307E\u3057\u305F");
+    } catch (e2) {
+      showNotification("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
+    }
+  };
+  const handleDeleteChat = async (e, chatId) => {
+    e.stopPropagation();
+    setOpenChatMenuId(null);
+    if (!window.confirm("\u3053\u306E\u30C8\u30FC\u30AF\u3092\u524A\u9664\uFF08\u9000\u51FA\uFF09\u3057\u307E\u3059\u304B\uFF1F\n\u76F8\u624B\u3068\u306E\u30C8\u30FC\u30AF\u30EA\u30B9\u30C8\u304B\u3089\u3082\u524A\u9664\u3055\u308C\u308B\u53EF\u80FD\u6027\u304C\u3042\u308A\u307E\u3059\u3002")) return;
+    try {
+      await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), {
+        participants: arrayRemove(user.uid)
+      });
+      showNotification("\u524A\u9664\u3057\u307E\u3057\u305F");
+    } catch (e2) {
+      showNotification("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
+    }
+  };
+  const handleHideFriend = async (e, friendUid) => {
+    e.stopPropagation();
+    setOpenFriendMenuId(null);
+    if (!window.confirm("\u3053\u306E\u53CB\u3060\u3061\u3092\u975E\u8868\u793A\u306B\u3057\u307E\u3059\u304B\uFF1F\n\uFF08\u53CB\u3060\u3061\u95A2\u4FC2\u306F\u89E3\u9664\u3055\u308C\u307E\u305B\u3093\uFF09")) return;
+    try {
+      await updateDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), {
+        hiddenFriends: arrayUnion(friendUid)
+      });
+      showNotification("\u975E\u8868\u793A\u306B\u3057\u307E\u3057\u305F");
+    } catch (e2) {
+      showNotification("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
+    }
+  };
+  const handleUnhideFriend = async (e, friendUid) => {
+    e.stopPropagation();
+    setOpenFriendMenuId(null);
+    try {
+      const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+      const relatedDirectChatIds = (chats || []).filter((c) => !c?.isGroup && (c.participants || []).includes(user.uid) && (c.participants || []).includes(friendUid)).map((c) => c.id);
+      const updatePayload = {
+        hiddenFriends: arrayRemove(friendUid)
+      };
+      if (relatedDirectChatIds.length > 0) {
+        updatePayload.hiddenChats = arrayRemove(...relatedDirectChatIds);
+      }
+      await updateDoc(userRef, updatePayload);
+      showNotification("\u975E\u8868\u793A\u3092\u89E3\u9664\u3057\u307E\u3057\u305F");
+    } catch (e2) {
+      showNotification("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
+    }
+  };
+  return /* @__PURE__ */ jsxs(
+    "div",
+    {
+      className: "flex flex-col h-full bg-white",
+      onClick: () => {
+        setOpenChatMenuId(null);
+        setOpenFriendMenuId(null);
+      },
+      children: [
+        /* @__PURE__ */ jsxs("div", { className: "p-4 border-b flex justify-between items-center bg-white shrink-0", children: [
+          /* @__PURE__ */ jsx("h1", { className: "text-xl font-bold", children: "\u30DB\u30FC\u30E0" }),
+          /* @__PURE__ */ jsxs("div", { className: "flex gap-4 items-center", children: [
+            /* @__PURE__ */ jsx(Store, { className: "w-6 h-6 cursor-pointer text-orange-500", onClick: () => setView("sticker-store") }),
+            /* @__PURE__ */ jsx(Gift, { className: "w-6 h-6 cursor-pointer text-pink-500", onClick: () => setView("birthday-cards") }),
+            /* @__PURE__ */ jsx(Users, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("group-create") }),
+            /* @__PURE__ */ jsx(Search, { className: "w-6 h-6 cursor-pointer", onClick: () => setSearchModalOpen(true) }),
+            /* @__PURE__ */ jsx(UserPlus, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("qr") }),
+            /* @__PURE__ */ jsx(Settings, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("profile") })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "flex border-b", children: [
+          /* @__PURE__ */ jsx(
+            "button",
+            {
+              className: `flex-1 py-3 text-sm font-bold ${tab === "friends" ? "border-b-2 border-black" : "text-gray-400"}`,
+              onClick: () => setTab("friends"),
+              children: "\u53CB\u3060\u3061"
+            }
+          ),
+          /* @__PURE__ */ jsx(
+            "button",
+            {
+              className: `flex-1 py-3 text-sm font-bold ${tab === "hidden" ? "border-b-2 border-black" : "text-gray-400"}`,
+              onClick: () => setTab("hidden"),
+              children: "\u975E\u8868\u793A"
+            }
+          ),
+          /* @__PURE__ */ jsx(
+            "button",
+            {
+              className: `flex-1 py-3 text-sm font-bold ${tab === "chats" ? "border-b-2 border-black" : "text-gray-400"}`,
+              onClick: () => setTab("chats"),
+              children: "\u30C8\u30FC\u30AF"
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto scrollbar-hide", children: [
+          /* @__PURE__ */ jsxs("div", { className: "p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer border-b", onClick: () => setView("profile"), children: [
+            /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+              /* @__PURE__ */ jsx("img", { src: profile?.avatar, className: "w-16 h-16 rounded-2xl object-cover border" }, profile?.avatar),
+              isTodayBirthday(profile?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-base", children: "\u{1F382}" })
+            ] }),
+            /* @__PURE__ */ jsxs("div", { className: "flex-1", children: [
+              /* @__PURE__ */ jsx("div", { className: "font-bold text-lg", children: profile?.name }),
+              /* @__PURE__ */ jsxs("div", { className: "text-xs text-gray-400 font-mono", children: [
+                "ID: ",
+                profile?.id
+              ] })
+            ] })
+          ] }),
+          (tab === "friends" || tab === "hidden") && /* @__PURE__ */ jsx("div", { className: "px-4 pt-4", children: /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 border rounded-3xl p-4 flex items-center justify-between", children: [
+            /* @__PURE__ */ jsxs("div", { children: [
+              /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-400 uppercase tracking-widest", children: "\u53CB\u3060\u3061\u306E\u53CB\u3060\u3061" }),
+              /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500 font-bold mt-1", children: "\u3042\u306A\u305F\u306E\u53CB\u3060\u3061\u7D4C\u7531\u3067\u3064\u306A\u304C\u308B\u4EBA\u6570\uFF08\u91CD\u8907\u306A\u3057\uFF09" })
+            ] }),
+            /* @__PURE__ */ jsx("div", { className: "text-2xl font-black text-gray-800", children: friendsOfFriendsCount })
+          ] }) }),
+          tab === "friends" && /* @__PURE__ */ jsx("div", { className: "pt-2", children: visibleFriendsList.length === 0 ? /* @__PURE__ */ jsx("div", { className: "text-center py-10 text-gray-400 text-sm", children: "\u53CB\u3060\u3061\u304C\u3044\u307E\u305B\u3093" }) : visibleFriendsList.map((friend) => /* @__PURE__ */ jsxs(
+            "div",
+            {
+              className: "p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer relative",
+              onClick: () => setSelectedFriend(friend),
+              children: [
+                /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+                  /* @__PURE__ */ jsx("img", { src: friend.avatar, className: "w-12 h-12 rounded-xl object-cover border" }, friend.avatar),
+                  isTodayBirthday(friend.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "flex-1 min-w-0", children: [
+                  /* @__PURE__ */ jsx("div", { className: "font-bold text-sm truncate", children: friend.name }),
+                  /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-400 truncate", children: friend.status }),
+                  /* @__PURE__ */ jsxs("div", { className: "text-[10px] text-gray-400 font-bold mt-0.5", children: [
+                    "\u5171\u901A ",
+                    getMutualCount(friend),
+                    " \u30FB \u53CB\u3060\u3061\u306E\u53CB\u3060\u3061 ",
+                    getFofCandidateCount(friend)
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "relative ml-2", onClick: (e) => e.stopPropagation(), children: [
+                  /* @__PURE__ */ jsx("button", { onClick: () => setOpenFriendMenuId(openFriendMenuId === friend.uid ? null : friend.uid), className: "p-2 hover:bg-gray-100 rounded-full text-gray-400", children: /* @__PURE__ */ jsx(MoreVertical, { className: "w-4 h-4" }) }),
+                  openFriendMenuId === friend.uid && /* @__PURE__ */ jsx("div", { className: "absolute right-0 top-8 bg-white shadow-xl border rounded-xl overflow-hidden z-20 min-w-[140px] animate-in fade-in zoom-in-95 duration-100", children: /* @__PURE__ */ jsxs("button", { onClick: (e) => handleHideFriend(e, friend.uid), className: "w-full text-left px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 flex items-center gap-2", children: [
+                    /* @__PURE__ */ jsx(EyeOff, { className: "w-3 h-3" }),
+                    " \u975E\u8868\u793A"
+                  ] }) })
+                ] })
+              ]
+            },
+            friend.uid
+          )) }),
+          tab === "hidden" && /* @__PURE__ */ jsx("div", { className: "pt-2", children: hiddenFriendsList.length === 0 ? /* @__PURE__ */ jsx("div", { className: "text-center py-10 text-gray-400 text-sm", children: "\u975E\u8868\u793A\u306E\u53CB\u3060\u3061\u306F\u3042\u308A\u307E\u305B\u3093" }) : hiddenFriendsList.map((friend) => /* @__PURE__ */ jsxs(
+            "div",
+            {
+              className: "p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer relative",
+              onClick: () => setSelectedFriend(friend),
+              children: [
+                /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+                  /* @__PURE__ */ jsx("img", { src: friend.avatar, className: "w-12 h-12 rounded-xl object-cover border" }, friend.avatar),
+                  isTodayBirthday(friend.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "flex-1 min-w-0", children: [
+                  /* @__PURE__ */ jsx("div", { className: "font-bold text-sm truncate", children: friend.name }),
+                  /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-400 truncate", children: friend.status })
+                ] }),
+                /* @__PURE__ */ jsxs(
+                  "button",
+                  {
+                    onClick: (e) => handleUnhideFriend(e, friend.uid),
+                    className: "px-3 py-2 bg-white border rounded-2xl text-xs font-bold text-gray-700 hover:bg-gray-50 flex items-center gap-2 shadow-sm",
+                    children: [
+                      /* @__PURE__ */ jsx(Eye, { className: "w-4 h-4" }),
+                      "\u8868\u793A"
+                    ]
+                  }
+                )
+              ]
+            },
+            friend.uid
+          )) }),
+          tab === "chats" && /* @__PURE__ */ jsxs(Fragment, { children: [
+            /* @__PURE__ */ jsx("div", { className: "px-4 pt-4", children: /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
+              /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 border rounded-3xl p-4 flex items-center justify-between", children: [
+                /* @__PURE__ */ jsxs("div", { children: [
+                  /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-400 uppercase tracking-widest", children: "\u30C8\u30FC\u30AF\u53CB\u3060\u3061" }),
+                  /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500 font-bold mt-1", children: "1\u5BFE1\u30C8\u30FC\u30AF\u306E\u4EBA\u6570" })
+                ] }),
+                /* @__PURE__ */ jsx("div", { className: "text-2xl font-black text-gray-800", children: talkFriendCount })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 border rounded-3xl p-4 flex items-center justify-between", children: [
+                /* @__PURE__ */ jsxs("div", { children: [
+                  /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-400 uppercase tracking-widest", children: "\u30B0\u30EB\u30FC\u30D7" }),
+                  /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500 font-bold mt-1", children: "\u53C2\u52A0\u4E2D\u306E\u6570" })
+                ] }),
+                /* @__PURE__ */ jsx("div", { className: "text-2xl font-black text-gray-800", children: groupChatCount })
+              ] })
+            ] }) }),
+            chats.filter((chat) => !profile?.hiddenChats?.includes(chat.id)).sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)).map((chat) => {
+              let name = chat.name, icon = chat.icon, partnerData = null;
+              if (!chat.isGroup) {
+                partnerData = allUsers.find((u) => u.uid === chat.participants.find((p) => p !== user.uid));
+                if (partnerData) {
+                  name = partnerData.name;
+                  icon = partnerData.avatar;
+                }
+              }
+              const unreadCount = chat.unreadCounts?.[user.uid] || 0;
+              return /* @__PURE__ */ jsxs(
+                "div",
+                {
+                  className: "p-4 flex items-center gap-4 hover:bg-gray-50 cursor-pointer relative group",
+                  onClick: () => {
+                    setActiveChatId(chat.id);
+                    setView("chatroom");
+                  },
+                  children: [
+                    /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+                      /* @__PURE__ */ jsx("img", { src: icon, className: "w-12 h-12 rounded-xl object-cover border" }, icon),
+                      !chat.isGroup && partnerData && isTodayBirthday(partnerData.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
+                    ] }),
+                    /* @__PURE__ */ jsxs("div", { className: "flex-1 min-w-0", children: [
+                      /* @__PURE__ */ jsxs("div", { className: "font-bold text-sm truncate", children: [
+                        name,
+                        " ",
+                        chat.isGroup ? `(${chat.participants.length})` : ""
+                      ] }),
+                      /* @__PURE__ */ jsx("div", { className: `text-xs truncate ${unreadCount > 0 ? "font-bold text-black" : "text-gray-400"}`, children: chat.lastMessage?.content })
+                    ] }),
+                    /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-end gap-1", children: [
+                      /* @__PURE__ */ jsx("div", { className: "text-[10px] text-gray-300", children: formatTime(chat.updatedAt) }),
+                      unreadCount > 0 && /* @__PURE__ */ jsx("div", { className: "bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center flex items-center justify-center h-5 border-2 border-white shadow-sm mb-1", children: unreadCount > 99 ? "99+" : unreadCount })
+                    ] }),
+                    /* @__PURE__ */ jsxs("div", { className: "relative ml-2", onClick: (e) => e.stopPropagation(), children: [
+                      /* @__PURE__ */ jsx("button", { onClick: () => setOpenChatMenuId(openChatMenuId === chat.id ? null : chat.id), className: "p-2 hover:bg-gray-100 rounded-full text-gray-400", children: /* @__PURE__ */ jsx(MoreVertical, { className: "w-4 h-4" }) }),
+                      openChatMenuId === chat.id && /* @__PURE__ */ jsxs("div", { className: "absolute right-0 top-8 bg-white shadow-xl border rounded-xl overflow-hidden z-20 min-w-[120px] animate-in fade-in zoom-in-95 duration-100", children: [
+                        /* @__PURE__ */ jsxs("button", { onClick: (e) => handleHideChat(e, chat.id), className: "w-full text-left px-4 py-3 text-xs font-bold text-gray-600 hover:bg-gray-50 flex items-center gap-2", children: [
+                          /* @__PURE__ */ jsx(EyeOff, { className: "w-3 h-3" }),
+                          " \u975E\u8868\u793A"
+                        ] }),
+                        /* @__PURE__ */ jsxs("button", { onClick: (e) => handleDeleteChat(e, chat.id), className: "w-full text-left px-4 py-3 text-xs font-bold text-red-500 hover:bg-red-50 border-t flex items-center gap-2", children: [
+                          /* @__PURE__ */ jsx(Trash2, { className: "w-3 h-3" }),
+                          " \u524A\u9664"
+                        ] })
+                      ] })
+                    ] })
+                  ]
+                },
+                chat.id
+              );
+            })
+          ] })
+        ] }),
+        selectedFriend && /* @__PURE__ */ jsx(
+          FriendProfileModal,
+          {
+            friend: selectedFriend,
+            onClose: () => setSelectedFriend(null),
+            onStartChat: startChatWithUser,
+            onTransfer: () => {
+              setCoinModalTarget(selectedFriend);
+              setSelectedFriend(null);
+            },
+            myUid: user.uid,
+            myProfile: profile,
+            allUsers,
+            showNotification
+          }
+        ),
+        coinModalTarget && /* @__PURE__ */ jsx(
+          CoinTransferModal,
+          {
+            onClose: () => setCoinModalTarget(null),
+            myWallet: profile.wallet,
+            myUid: user.uid,
+            targetUid: coinModalTarget.uid,
+            targetName: coinModalTarget.name,
+            showNotification
+          }
+        )
+      ]
+    }
+  );
+};
+function App() {
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [view, setView] = useState("auth");
+  const [activeChatId, setActiveChatId] = useState(null);
+  const [allUsers, setAllUsers] = useState([]);
+  const [chats, setChats] = useState([]);
+  const [posts, setPosts] = useState([]);
+  const [postsLimit, setPostsLimit] = useState(5);
+const loadMorePosts = useCallback(() => {
+  setPostsLimit((prev) => prev + 5);
+}, []);
+
+  const [notification, setNotification] = useState(null);
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [mutedChats, setMutedChats] = useState(() => {
+    const saved = localStorage.getItem("mutedChats");
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [activeCall, setActiveCall] = useState(null);
+  const [userEffects, setUserEffects] = useState([]);
+  const [activeEffect, setActiveEffect] = useState("Normal");
+  const [currentChatBackground, setCurrentChatBackground] = useState(null);
+  const processedMsgIds = useRef(/* @__PURE__ */ new Set());
+  const toggleMuteChat = (chatId) => {
+    setMutedChats((prev) => {
+      const next = prev.includes(chatId) ? prev.filter((id) => id !== chatId) : [...prev, chatId];
+      localStorage.setItem("mutedChats", JSON.stringify(next));
+      return next;
+    });
+  };
+  useEffect(() => {
+    const unlockAudio = () => {
+      initAudioContext();
+      window.removeEventListener("click", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+    };
+    window.addEventListener("click", unlockAudio);
+    window.addEventListener("touchstart", unlockAudio);
+    // Use public/manifest.json; do not inject data-URL manifests at runtime.
+    try {
+      document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]').forEach((el) => el.parentNode?.removeChild(el));
+      const iconLink = document.createElement("link");
+      iconLink.rel = "icon";
+      iconLink.href = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><text y="48" font-size="48">\u{1F4AC}</text></svg>';
+      document.head.appendChild(iconLink);
+    } catch {
+    }
+    (async () => {
+      try {
+        await setPersistence(auth, browserLocalPersistence);
+      } catch (e) {
+        console.warn("Auth persistence set failed:", e);
+      }
+    })();
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      if (u) {
+        setUser(u);
+        const cacheKey = `profile_cache_${appId}_${u.uid}`;
+        try {
+          const cached = localStorage.getItem(cacheKey);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && parsed.uid === u.uid) setProfile(parsed);
+          }
+        } catch {
+        }
+        const docSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid));
+        if (docSnap.exists()) {
+          setProfile(docSnap.data());
+          try {
+            await idbProfileCache.set(`profile_cache_last_${appId}`, docSnap.data());
+          } catch {
+          }
+          try {
+            localStorage.setItem(`profile_cache_${appId}_${u.uid}`, JSON.stringify(docSnap.data()));
+          } catch {
+          }
+        } else {
+let lastCachedProfile = null;
+try {
+  const last = localStorage.getItem(`profile_cache_last_${appId}`);
+  if (last) lastCachedProfile = JSON.parse(last);
+} catch {
+}
+const initialProfile = lastCachedProfile ? {
+  ...lastCachedProfile,
+  uid: u.uid,
+  // keep a stable public id if already set, otherwise derive from the new uid
+  id: lastCachedProfile.id || `user_${u.uid.slice(0, 6)}`,
+  name: lastCachedProfile.name || u.displayName || `User_${u.uid.slice(0, 4)}`,
+  status: lastCachedProfile.status || "よろしくお願いします！",
+  birthday: lastCachedProfile.birthday || "",
+  avatar: lastCachedProfile.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
+  cover: lastCachedProfile.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
+  friends: Array.isArray(lastCachedProfile.friends) ? lastCachedProfile.friends : [],
+  hiddenFriends: Array.isArray(lastCachedProfile.hiddenFriends) ? lastCachedProfile.hiddenFriends : [],
+  hiddenChats: Array.isArray(lastCachedProfile.hiddenChats) ? lastCachedProfile.hiddenChats : [],
+  wallet: typeof lastCachedProfile.wallet === "number" ? lastCachedProfile.wallet : 1000,
+  isBanned: false
+} : {
+  uid: u.uid,
+            name: u.displayName || `User_${u.uid.slice(0, 4)}`,
+            id: `user_${u.uid.slice(0, 6)}`,
+            status: "\u3088\u308D\u3057\u304F\u304A\u9858\u3044\u3057\u307E\u3059\uFF01",
+            birthday: "",
+            avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
+            cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
+            friends: [],
+            hiddenFriends: [],
+            hiddenChats: [],
+            wallet: 1e3,
+            isBanned: false
+          };
+          await setDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid), initialProfile);
+
+setProfile(initialProfile);
+// Try restoring the full profile (including large avatar/cover) from IndexedDB.
+(async () => {
+  try {
+    const full = await idbProfileCache.get(`profile_cache_last_${appId}`);
+    if (full) {
+      const merged = {
+        ...initialProfile,
+        ...full,
+        uid: u.uid,
+        id: (full && full.id) ? full.id : initialProfile.id,
+        name: (full && full.name) ? full.name : initialProfile.name
+      };
+      setProfile(merged);
+      try {
+        await setDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid), merged, { merge: true });
+      } catch {
+      }
+      try {
+        localStorage.setItem(`profile_cache_${appId}_${u.uid}`, JSON.stringify(merged));
+      } catch {
+      }
+    }
+  } catch {
+  }
+})();
+          try {
+            localStorage.setItem(`profile_cache_${appId}_${u.uid}`, JSON.stringify(initialProfile));
+          } catch {
+          }
+        }
+        setView("home");
+      } else {
+        setUser(null);
+        setProfile(null);
+        setView("auth");
+      }
+    });
+    return () => {
+      unsubscribe();
+      window.removeEventListener("click", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+    };
+  }, []);
+  const showNotification = (msg) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 3e3);
+  };
+
+// ---------- Profile cache (IndexedDB) ----------
+// localStorage can easily exceed quota when avatar/cover are DataURL; keep a lightweight copy in localStorage
+// and the full profile in IndexedDB to survive logout / anonymous UID changes.
+const idbProfileCache = (() => {
+  const DB_NAME = "chatapp_profile_cache_v1";
+  const STORE = "profiles";
+  const open = () => new Promise((resolve, reject) => {
+    try {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db2 = req.result;
+        if (!db2.objectStoreNames.contains(STORE)) db2.createObjectStore(STORE);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    } catch (e) {
+      reject(e);
+    }
+  });
+  const get = async (key) => {
+    const db2 = await open();
+    return await new Promise((resolve, reject) => {
+      try {
+        const tx = db2.transaction(STORE, "readonly");
+        const st = tx.objectStore(STORE);
+        const r = st.get(key);
+        r.onsuccess = () => resolve(r.result || null);
+        r.onerror = () => reject(r.error);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  };
+  const set = async (key, value) => {
+    const db2 = await open();
+    return await new Promise((resolve, reject) => {
+      try {
+        const tx = db2.transaction(STORE, "readwrite");
+        const st = tx.objectStore(STORE);
+        const r = st.put(value, key);
+        r.onsuccess = () => resolve(true);
+        r.onerror = () => reject(r.error);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  };
+  return { get, set };
+})();
+
+const makeLightProfile = (p) => {
+  if (!p) return null;
+  const light = { ...p };
+  // Keep huge fields out of localStorage; full copy is in IndexedDB.
+  try {
+    if (typeof light.avatar === "string" && light.avatar.startsWith("data:") && light.avatar.length > 40000) light.avatar = null;
+    if (typeof light.cover === "string" && light.cover.startsWith("data:") && light.cover.length > 40000) light.cover = null;
+  } catch {
+  }
+  return light;
+};
+
+
+
+// Logout without losing locally saved profile details
+const handleLogout = async () => {
+  try {
+    if (profile) {
+      // Full cache (works even if avatar/cover are large)
+      await idbProfileCache.set(`profile_cache_last_${appId}`, profile);
+      // Lightweight fallback
+      localStorage.setItem(`profile_cache_last_${appId}`, JSON.stringify(makeLightProfile(profile)));
+    }
+  } catch {
+  }
+  try {
+    await signOut(auth);
+  } catch {
+  }
+};
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    showNotification("ID\u3092\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F");
+  };
+  useEffect(() => {
+    if (!user) return;
+    const unsubProfile = onSnapshot(doc(db, "artifacts", appId, "public", "data", "users", user.uid), (doc2) => {
+      if (doc2.exists()) {
+        const data = doc2.data();
+        setProfile(data);
+        try {
+          localStorage.setItem(`profile_cache_${appId}_${user.uid}`, JSON.stringify(data));
+        } catch {
+        }
+      }
+    });
+    const unsubUsers = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "users")), (snap) => {
+      setAllUsers(snap.docs.map((d) => d.data()));
+    });
+    const unsubEffects = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "users", user.uid, "effects"), orderBy("createdAt", "desc")), (snap) => {
+      setUserEffects(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+    const unsubChats = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "chats"), where("participants", "array-contains", user.uid)), (snap) => {
+      const chatList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      snap.docChanges().forEach((change) => {
+        if (change.type === "added" || change.type === "modified") {
+          const data = change.doc.data();
+          const lastMsg = data.lastMessage;
+          if (lastMsg && lastMsg.senderId !== user.uid && lastMsg.createdAt) {
+            const now = Date.now();
+            let msgTime = 0;
+            if (lastMsg.createdAt?.seconds) {
+              msgTime = lastMsg.createdAt.seconds * 1e3;
+            } else if (lastMsg.createdAt?.toMillis) {
+              msgTime = lastMsg.createdAt.toMillis();
+            } else if (lastMsg.createdAt instanceof Date) {
+              msgTime = lastMsg.createdAt.getTime();
+            } else {
+              msgTime = now;
+            }
+            const msgUniqueKey = `${change.doc.id}_${msgTime}`;
+            if (now - msgTime < 1e4 && !processedMsgIds.current.has(msgUniqueKey)) {
+              playNotificationSound();
+              processedMsgIds.current.add(msgUniqueKey);
+            }
+          }
+        }
+      });
+      setChats(chatList);
+      setActiveCall((prev) => {
+        const incoming = chatList.find((c) => c.callStatus?.status === "ringing" && c.callStatus.callerId !== user.uid);
+        if (incoming && (!prev || prev.chatId !== incoming.id || prev?.callData?.sessionId !== incoming.callStatus?.sessionId)) {
+          return {
+            chatId: incoming.id,
+            callData: incoming.callStatus,
+            isVideo: incoming.callStatus?.callType !== "audio",
+            isGroupCall: false,
+            isCaller: false,
+            phase: "incoming"
+          };
+        }
+        if (!prev) return prev;
+        if (prev.isGroupCall) return prev;
+        const currentChat = chatList.find((c) => c.id === prev.chatId);
+        const status = currentChat?.callStatus?.status;
+        if (!currentChat || !currentChat.callStatus) return null;
+        if (status === "accepted") {
+          return { ...prev, phase: "inCall", callData: currentChat.callStatus, isVideo: currentChat.callStatus?.callType !== "audio", isCaller: currentChat.callStatus?.callerId === user.uid };
+        }
+        if (status === "ringing") {
+          const incomingCall = currentChat.callStatus?.callerId !== user.uid;
+          return { ...prev, phase: incomingCall ? "incoming" : "dialing", callData: currentChat.callStatus, isVideo: currentChat.callStatus?.callType !== "audio", isCaller: !incomingCall };
+        }
+        return null;
+      });
+    });
+    const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(postsLimit)), (snap) => {
+      setPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+    return () => {
+      unsubProfile();
+      unsubUsers();
+      unsubChats();
+      unsubPosts();
+      unsubEffects();
+    };
+  }, [user, postsLimit]);
+  const addFriendById = async (targetId) => {
+    if (!targetId) return;
+    const targetUser = allUsers.find((u) => u.id === targetId || u.uid === targetId);
+    if (targetUser && targetUser.uid !== user.uid) {
+      if ((profile.friends || []).includes(targetUser.uid)) {
+        showNotification("\u65E2\u306B\u53CB\u3060\u3061\u3067\u3059\u3002");
+        return;
+      }
+      await updateDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), { friends: arrayUnion(targetUser.uid) });
+      await updateDoc(doc(db, "artifacts", appId, "public", "data", "users", targetUser.uid), { friends: arrayUnion(user.uid) });
+      showNotification(`${targetUser.name}\u3092\u8FFD\u52A0\u3057\u307E\u3057\u305F`);
+      setSearchModalOpen(false);
+    } else {
+      showNotification("\u30E6\u30FC\u30B6\u30FC\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+    }
+  };
+  const startChatWithUser = async (targetUid) => {
+    const existingChat = chats.find(
+      (c) => !c.isGroup && c.participants.includes(targetUid) && c.participants.includes(user.uid)
+    );
+    if (existingChat) {
+      setActiveChatId(existingChat.id);
+      setView("chatroom");
+    } else {
+      const targetUser = allUsers.find((u) => u.uid === targetUid);
+      const newChat = {
+        name: targetUser ? targetUser.name : "Chat",
+        icon: targetUser ? targetUser.avatar : "",
+        participants: [user.uid, targetUid],
+        isGroup: false,
+        createdBy: user.uid,
+        updatedAt: serverTimestamp(),
+        lastMessage: { content: "\u30C1\u30E3\u30C3\u30C8\u3092\u958B\u59CB\u3057\u307E\u3057\u305F", senderId: user.uid, readBy: [user.uid] }
+      };
+      try {
+        const ref = await addDoc(collection(db, "artifacts", appId, "public", "data", "chats"), newChat);
+        setActiveChatId(ref.id);
+        setView("chatroom");
+      } catch (e) {
+        showNotification("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
+      }
+    }
+  };
+  const cleanupCallSignaling = async (chatId, targetSessionId = null) => {
+    try {
+      const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
+      const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
+      try {
+        if (!targetSessionId) {
+          await deleteDoc(signalingRef);
+        } else {
+          const signalingSnap = await getDoc(signalingRef).catch(() => null);
+          const signalingData = signalingSnap?.data?.();
+          if (signalingData?.sessionId === targetSessionId) {
+            await deleteDoc(signalingRef);
+          }
+        }
+      } catch {
+      }
+      const candidatesQuery = targetSessionId ? query(candidatesCol, where("sessionId", "==", targetSessionId)) : candidatesCol;
+      const snap = await getDocs(candidatesQuery).catch(() => null);
+      if (!snap) return;
+      const BATCH_LIMIT = 450;
+      let batch = writeBatch(db);
+      let i = 0;
+      for (const d of snap.docs) {
+        batch.delete(d.ref);
+        i++;
+        if (i % BATCH_LIMIT === 0) {
+          await batch.commit();
+          batch = writeBatch(db);
+        }
+      }
+      await batch.commit();
+    } catch (e) {
+      console.warn("cleanupCallSignaling failed (non-fatal):", e);
+    }
+  };
+  const startVideoCall = async (chatId, isVideo = true, isJoin = false, joinCallerId) => {
+    const chat = chats.find((c) => c.id === chatId);
+    const isGroup = !!(chat?.isGroup || (Array.isArray(chat?.members) && chat.members.length > 2) || (Array.isArray(chat?.participants) && chat.participants.length > 2) || (Array.isArray(chat?.memberIds) && chat.memberIds.length > 2) || (Array.isArray(chat?.userIds) && chat.userIds.length > 2));
+    if (isJoin) {
+      const callerId = joinCallerId || chat?.callStatus?.callerId || user.uid;
+      const sessionId = chat?.callStatus?.sessionId || `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      setActiveCall({
+        chatId,
+        callData: { callerId, sessionId, callType: isVideo ? "video" : "audio", status: "accepted" },
+        isVideo,
+        isGroupCall: !!isGroup,
+        isCaller: callerId === user.uid,
+        phase: "inCall"
+      });
+      return;
+    }
+    if (isGroup) {
+      await cleanupCallSignaling(chatId);
+      try {
+        await addDoc(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "messages"), {
+          senderId: user.uid,
+          content: "\u901A\u8A71\u3092\u958B\u59CB\u3057\u307E\u3057\u305F",
+          type: "call_invite",
+          callType: isVideo ? "video" : "audio",
+          createdAt: serverTimestamp(),
+          readBy: [user.uid]
+        });
+        setActiveCall({ chatId, callData: { callerId: user.uid }, isVideo, isGroupCall: true, isCaller: true, phase: "inCall" });
+      } catch (e) {
+        showNotification("\u958B\u59CB\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+      }
+    } else {
+      try {
+        const sessionId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        await cleanupCallSignaling(chatId);
+        await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), {
+          callStatus: {
+            status: "ringing",
+            callerId: user.uid,
+            callType: isVideo ? "video" : "audio",
+            sessionId,
+            timestamp: Date.now()
+          }
+        });
+        setActiveCall({
+          chatId,
+          callData: { status: "ringing", callerId: user.uid, callType: isVideo ? "video" : "audio", sessionId },
+          isVideo,
+          isGroupCall: false,
+          isCaller: true,
+          phase: "dialing"
+        });
+      } catch (e) {
+        console.error(e);
+        showNotification("\u767A\u4FE1\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+      }
+    }
+  };
+  const endCall = async (chatId, callData, { clearStatus = true } = {}) => {
+    try {
+      if (clearStatus) {
+        await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { callStatus: deleteField() });
+      }
+      await cleanupCallSignaling(chatId, callData?.sessionId || null);
+    } catch (e) {
+      console.error("Failed to end call:", e);
+    } finally {
+      setActiveCall(null);
+    }
+  };
+  const acceptIncomingCall = async () => {
+    if (!activeCall) return;
+    try {
+      const callData = activeCallChat?.callStatus || activeCall.callData || {};
+      const nextCallData = {
+        ...callData,
+        status: "accepted",
+        callerId: callData.callerId,
+        callType: callData.callType || (activeCall?.isVideo ? "video" : "audio"),
+        sessionId: callData.sessionId || `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        acceptedBy: user.uid,
+        acceptedAt: Date.now()
+      };
+      await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: nextCallData });
+      setActiveCall((prev) => prev ? { ...prev, phase: "inCall", callData: nextCallData, isCaller: false } : prev);
+    } catch (e) {
+      console.error(e);
+      showNotification("\u5FDC\u7B54\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+    }
+  };
+  useEffect(() => {
+    if (!activeCall || !chats.length) return;
+    const callChat = chats.find((c) => c.id === activeCall.chatId);
+    if (callChat && callChat.backgroundImage) {
+      setCurrentChatBackground(callChat.backgroundImage);
+    } else {
+      setCurrentChatBackground(null);
+    }
+  }, [activeCall, chats]);
+  const activeCallChat = activeCall ? chats.find((c) => c.id === activeCall.chatId) : null;
+  const syncedCallData = activeCallChat?.callStatus || activeCall?.callData || null;
+  const effectiveCallPhase = useMemo(() => {
+    if (!activeCall) return null;
+    if (activeCall.isGroupCall) return activeCall.phase;
+    const callStatus = syncedCallData?.status;
+    if (!callStatus) return activeCall.phase || null;
+    if (callStatus === "accepted") return "inCall";
+    if (callStatus === "ringing") {
+      return syncedCallData?.callerId === user.uid ? "dialing" : "incoming";
+    }
+    return activeCall.phase || null;
+  }, [activeCall, syncedCallData, user?.uid]);
+  return /* @__PURE__ */ jsx("div", { className: "w-full h-[100dvh] bg-[#d7dbe1] flex justify-center overflow-hidden", children: /* @__PURE__ */ jsxs("div", { className: "w-[430px] max-w-full h-[100dvh] bg-[#f3f4f6] border-x border-gray-300 flex flex-col relative overflow-hidden", children: [
+    notification && /* @__PURE__ */ jsx("div", { className: "fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce", children: notification }),
+    !user ? /* @__PURE__ */ jsx(AuthView, { onLogin: setUser, showNotification }) : /* @__PURE__ */ jsxs(Fragment, { children: [
+      activeCall ? effectiveCallPhase === "incoming" ? /* @__PURE__ */ jsx(
+        IncomingCallOverlay,
+        {
+          callData: syncedCallData || activeCall.callData,
+          allUsers,
+          onDecline: () => endCall(activeCall.chatId, syncedCallData || activeCall.callData),
+          onAccept: acceptIncomingCall
+        }
+      ) : effectiveCallPhase === "dialing" ? /* @__PURE__ */ jsx(
+        OutgoingCallOverlay,
+        {
+          callData: syncedCallData || activeCall.callData,
+          allUsers,
+          onCancel: () => endCall(activeCall.chatId, syncedCallData || activeCall.callData)
+        }
+      ) : /* @__PURE__ */ jsxs("div", { className: "relative w-full h-full", children: [
+        /* @__PURE__ */ jsx(
+          activeCall.isGroupCall ? GroupVideoCallView : VideoCallView,
+          {
+            user,
+            chatId: activeCall.chatId,
+            callData: syncedCallData || activeCall.callData,
+            isCaller: activeCall.isCaller,
+            effects: userEffects,
+            isVideoEnabled: activeCall.isVideo,
+            activeEffect,
+            backgroundUrl: currentChatBackground,
+            onEndCall: () => endCall(activeCall.chatId, syncedCallData || activeCall.callData, { clearStatus: !activeCall.isGroupCall })
+          }
+        ),
+        /* @__PURE__ */ jsxs("div", { className: "absolute top-4 left-0 right-0 px-4 flex gap-2 overflow-x-auto scrollbar-hide z-[1001]", children: [
+          /* @__PURE__ */ jsx("button", { onClick: () => setActiveEffect("Normal"), className: `p-2 rounded-xl text-xs font-bold whitespace-nowrap ${activeEffect === "Normal" ? "bg-white text-black" : "bg-black/50 text-white"}`, children: "Normal" }),
+          userEffects.map((ef) => /* @__PURE__ */ jsxs("button", { onClick: () => setActiveEffect(ef.name), className: `p-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-1 ${activeEffect === ef.name ? "bg-white text-black" : "bg-black/50 text-white"}`, children: [
+            /* @__PURE__ */ jsx(Sparkles, { className: "w-3 h-3" }),
+            " ",
+            ef.name
+          ] }, ef.id))
+        ] })
+      ] }) : /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden relative", children: [
+        view === "home" && /* @__PURE__ */ jsx(HomeView, { user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }),
+        view === "voom" && /* @__PURE__ */ jsx(VoomView, { user, allUsers, profile, posts, showNotification, db, appId, loadMorePosts, hasMorePosts: posts.length >= postsLimit }),
+        view === "chatroom" && /* @__PURE__ */ jsx(ChatRoomView, { user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }),
+        view === "profile" && /* @__PURE__ */ jsx(ProfileEditView, { user, profile, setView, showNotification, copyToClipboard, handleLogout }),
+        view === "qr" && /* @__PURE__ */ jsx(QRScannerView, { user, setView, addFriendById }),
+        view === "group-create" && /* @__PURE__ */ jsx(GroupCreateView, { user, profile, allUsers, chats, setView, showNotification }),
+        view === "birthday-cards" && /* @__PURE__ */ jsx(BirthdayCardBox, { user, setView }),
+        view === "sticker-create" && /* @__PURE__ */ jsx(StickerEditor, { user, profile, onClose: () => setView("sticker-store"), showNotification }),
+        view === "sticker-store" && /* @__PURE__ */ jsx(StickerStoreView, { user, setView, showNotification, profile, allUsers })
+      ] }),
+      searchModalOpen && /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/60", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-[32px] p-8", children: [
+        /* @__PURE__ */ jsx("h2", { className: "text-xl font-bold mb-6", children: "\u691C\u7D22" }),
+        /* @__PURE__ */ jsx("input", { className: "w-full bg-gray-50 rounded-2xl py-4 px-6 mb-6 outline-none", placeholder: "ID\u3092\u5165\u529B", value: searchQuery, onChange: (e) => setSearchQuery(e.target.value) }),
+        /* @__PURE__ */ jsxs("div", { className: "flex gap-4", children: [
+          /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 text-gray-600 font-bold", onClick: () => setSearchModalOpen(false), children: "\u9589\u3058\u308B" }),
+          /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
+        ] })
+      ] }) }),
+      user && !activeCall && ["home", "voom"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0", children: [
+        /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("home"), children: [
+          /* @__PURE__ */ jsx(Home, { className: "w-6 h-6" }),
+          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u30DB\u30FC\u30E0" })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "voom" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("voom"), children: [
+          /* @__PURE__ */ jsx(LayoutGrid, { className: "w-6 h-6" }),
+          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "VOOM" })
+        ] })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsx("style", { children: `.scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }` })
+  ] }) });
+}
+var App_13_default = App;
+export {
+  App_13_default as default
 };
