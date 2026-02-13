@@ -5900,16 +5900,27 @@ const handleLogout = async () => {
         view === "sticker-create" && /* @__PURE__ */ jsx(StickerEditor, { user, profile, onClose: () => setView("sticker-store"), showNotification }),
         view === "sticker-store" && /* @__PURE__ */ jsx(StickerStoreView, { user, setView, showNotification, profile, allUsers })
       ] }),
+      // 検索モーダル
       searchModalOpen && /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/60", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-[32px] p-8", children: [
         /* @__PURE__ */ jsx("h2", { className: "text-xl font-bold mb-6", children: "\u691C\u7D22" }),
         /* @__PURE__ */ jsx("input", { className: "w-full bg-gray-50 rounded-2xl py-4 px-6 mb-6 outline-none", placeholder: "ID\u3092\u5165\u529B", value: searchQuery, onChange: (e) => setSearchQuery(e.target.value) }),
         /* @__PURE__ */ jsxs("div", { className: "flex gap-4", children: [
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 text-gray-600 font-bold", onClick: () => setSearchModalOpen(false), children: "\u9589\u3058\u308B" }),
-          /* @__PURE__ */ jsxs("div", { className: "flex gap-4", children: [
-          /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 text-gray-600 font-bold", onClick: () => setSearchModalOpen(false), children: "\u9589\u3058\u308B" }),
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
-      ] }) }),
+      ] }) }), // ← ここにカンマが必要
+
+      // VOOM表示エリア (ここが消えていたので復元し、カンマを追加)
+      view === "voom" && /* @__PURE__ */ jsx(VoomView, { 
+        db, 
+        appId, 
+        user, 
+        allUsers, 
+        profile, 
+        onBack: () => setView("home") 
+      }), // ← ここにカンマが必要
+
+      // 下部ナビゲーション
       user && !activeCall && ["home", "voom"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0", children: [
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("home"), children: [
           /* @__PURE__ */ jsx(Home, { className: "w-6 h-6" }),
