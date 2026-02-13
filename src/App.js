@@ -197,15 +197,7 @@ if (parts.length) {
   } catch (e) {
     console.error("Post media decode error", e);
   }
-} else {
-                const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
-                const src = await __base64ToMediaSrc(mergedData, mimeType);
-                if (src) {
-                  if (src.startsWith("blob:")) __cacheSet(__mediaUrlCache, cacheKey, src);
-                  else __cacheSet(__mediaDataCache, cacheKey, src);
-                  setMediaSrc(src);
-                }
-              }
+}
             } catch (e) {
               console.error("Post media decode error", e);
             }
