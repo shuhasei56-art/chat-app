@@ -5285,7 +5285,7 @@ function App() {
   const [chats, setChats] = useState([]);
   const [posts, setPosts] = useState([]);
   const [postsLimit, setPostsLimit] = useState(5);
-  const [postsLimit, setPostsLimit] = useState(5);
+
   const [notification, setNotification] = useState(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
