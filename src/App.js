@@ -2255,6 +2255,14 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
   const isMe = m.senderId === user.uid;
   const [mediaSrc, setMediaSrc] = useState(null);
 
+useEffect(() => {
+  if (m && m.storageUrl) {
+    setMediaSrc(m.storageUrl);
+  }
+}, [m.storageUrl]);
+
+
+
   const [loading, setLoading] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
@@ -4171,7 +4179,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         if (["image", "video"].includes(type)) {
           previewData = await generateThumbnail(file);
         }
-        await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, preview: previewData, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, isUploading: true, createdAt: serverTimestamp(), readBy: [user.uid] });
+        await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, preview: previewData, ...additionalData, ...replyData, ...fileData, storageUrl: null, storagePath: null, hasChunks: false, chunkCount: 0, isUploading: true, createdAt: serverTimestamp(), readBy: [user.uid] });
         await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
         setText("");
         setPlusMenuOpen(false);
@@ -4180,59 +4188,59 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           scrollRef.current?.scrollIntoView({ behavior: "auto" });
         }, 100);
       }
-      let hasChunks = false, chunkCount = 0;
-      if (file && file.size > CHUNK_SIZE) {
-        hasChunks = true;
-        chunkCount = Math.ceil(file.size / CHUNK_SIZE);
-        const CONCURRENCY = 100;
-        const executing = /* @__PURE__ */ new Set();
-        let completed = 0;
-        for (let i = 0; i < chunkCount; i++) {
-          const start = i * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, file.size);
-          const blobSlice = file.slice(start, end);
-          const p = new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-              try {
-                const base64Data = e.target.result.split(",")[1];
-                await setDoc(doc(msgCol, newMsgRef.id, "chunks", `${i}`), { data: base64Data, index: i });
-                completed++;
-                setUploadProgress(Math.round(completed / chunkCount * 100));
-                resolve(null);
-              } catch (err) {
-                reject(err);
-              }
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blobSlice);
+
+// Upload media via Firebase Storage (same system as VOOM) to avoid base64/memory issues and stabilize playback.
+if (file && ["image", "video", "audio", "file"].includes(type)) {
+  const ext = file.name && file.name.includes(".") ? file.name.split(".").pop() : "";
+  const safeExt = ext ? `.${ext}` : "";
+  const storagePath = `artifacts/${appId2}/chats/${activeChatId}/${user.uid}/${Date.now()}_${Math.random().toString(16).slice(2)}${safeExt}`;
+  const sRef = storageRef(storage, storagePath);
+
+  await new Promise((resolve, reject) => {
+    const task = uploadBytesResumable(sRef, file, { contentType: file.type || undefined });
+    task.on(
+      "state_changed",
+      (snap) => {
+        const pct = snap.totalBytes ? Math.round((snap.bytesTransferred / snap.totalBytes) * 100) : 0;
+        setUploadProgress(pct);
+      },
+      (err) => reject(err),
+      async () => {
+        try {
+          const url = await getDownloadURL(task.snapshot.ref);
+          await updateDoc(newMsgRef, {
+            content: url,
+            storageUrl: url,
+            storagePath,
+            mimeType: file.type || null,
+            hasChunks: false,
+            chunkCount: 0,
+            isUploading: false
           });
-          const pWrapper = p.then(() => executing.delete(pWrapper));
-          executing.add(pWrapper);
-          if (executing.size >= CONCURRENCY) {
-            await Promise.race(executing);
-          }
+          resolve(null);
+        } catch (e) {
+          reject(e);
         }
-        await Promise.all(executing);
-        await updateDoc(newMsgRef, { hasChunks: true, chunkCount, isUploading: false });
-      } else if (!hasChunks) {
-        if (localBlobUrl && file) {
-          const reader = new FileReader();
-          reader.readAsDataURL(file);
-          await new Promise((resolve) => {
-            reader.onload = async (e) => {
-              await updateDoc(newMsgRef, { content: e.target.result, isUploading: false });
-              resolve(null);
-            };
-          });
-        } else {
-          if (typeof content === "object" && content !== null && type === "sticker") {
-            const stickerContent = content.image || content;
-            const stickerAudio = content.audio || null;
-            await setDoc(newMsgRef, { senderId: user.uid, content: stickerContent, audio: stickerAudio, type, ...additionalData, ...replyData, ...fileData, hasChunks, chunkCount, createdAt: serverTimestamp(), readBy: [user.uid] });
-          } else {
-            await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, ...additionalData, ...replyData, ...fileData, hasChunks, chunkCount, createdAt: serverTimestamp(), readBy: [user.uid] });
-          }
+      }
+    );
+  });
+} else {
+  // Non-file messages (text/sticker/etc.)
+  if (typeof content === "object" && content !== null && type === "sticker") {
+    const stickerContent = content.image || content;
+    const stickerAudio = content.audio || null;
+    await setDoc(newMsgRef, { senderId: user.uid, content: stickerContent, audio: stickerAudio, type, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, createdAt: serverTimestamp(), readBy: [user.uid] });
+  } else {
+    await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, createdAt: serverTimestamp(), readBy: [user.uid] });
+  }
+  await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
+  setText("");
+  setPlusMenuOpen(false);
+  setContactModalOpen(false);
+  setTimeout(() => {
+    scrollRef.current?.scrollIntoView({ behavior: "auto" });
+  }, 100);
+}
           await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
           setText("");
           setPlusMenuOpen(false);
@@ -4250,16 +4258,33 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       setUploadProgress(0);
     }
   };
-  const handleDeleteMessage = useCallback(async (msgId) => {
+  
+const handleDeleteMessage = useCallback(
+  async (msgId) => {
     try {
-      await deleteDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId));
+      const msgRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId);
+      try {
+        const snap = await getDoc(msgRef);
+        const data = snap.exists() ? snap.data() : null;
+        if (data?.storagePath) {
+          try {
+            await deleteObject(storageRef(storage, data.storagePath));
+          } catch (e) {
+          }
+        }
+      } catch (e) {
+      }
+
+      await deleteDoc(msgRef);
       const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId, "chunks"));
       for (const d of c.docs) await deleteDoc(d.ref);
-      showNotification("\u30E1\u30C3\u30BB\u30FC\u30B8\u306E\u9001\u4FE1\u3092\u53D6\u308A\u6D88\u3057\u307E\u3057\u305F");
+      showNotification("メッセージの送信を取り消しました");
     } catch (e) {
-      showNotification("\u9001\u4FE1\u53D6\u6D88\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+      showNotification("送信取消に失敗しました");
     }
-  }, [db2, appId2, activeChatId, showNotification]);
+  },
+  [db2, appId2, activeChatId, showNotification]
+);
   const handleEditMessage = useCallback((id, content) => {
     setEditingMsgId(id);
     setEditingText(content);
