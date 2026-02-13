@@ -4145,118 +4145,195 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       showNotification("\u9332\u97F3\u3092\u30AD\u30E3\u30F3\u30BB\u30EB\u3057\u307E\u3057\u305F");
     }
   };
-  const sendMessage = async (content, type = "text", additionalData = {}, file = null) => {
-    if (profile?.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
-    if (!content && !file && type === "text" || isUploading) return;
-    setIsUploading(true);
-    setUploadProgress(0);
-    const currentReply = replyTo;
-    setReplyTo(null);
-    setStickerMenuOpen(false);
-    try {
-      const msgCol = collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages");
-      const newMsgRef = doc(msgCol);
-      let localBlobUrl = null;
-      let storedContent = content;
-      let previewData = null;
-      const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: allUsers.find((u) => u.uid === currentReply.senderId)?.name || "Unknown", type: currentReply.type } } : {};
-      const fileData = file ? { fileName: file.name, fileSize: file.size, mimeType: file.type } : {};
-      const currentChat = chats.find((c) => c.id === activeChatId);
-      const updateData = {
-        lastMessage: { content: type === "text" ? content : `[${type}]`, senderId: user.uid, readBy: [user.uid] },
-        updatedAt: serverTimestamp()
-      };
-      if (currentChat) {
-        currentChat.participants.forEach((uid) => {
-          if (uid !== user.uid) {
-            updateData[`unreadCounts.${uid}`] = increment(1);
-          }
-        });
-      }
-      if (file && ["image", "video", "audio", "file"].includes(type)) {
-        localBlobUrl = URL.createObjectURL(file);
-        storedContent = localBlobUrl;
-        if (["image", "video"].includes(type)) {
-          previewData = await generateThumbnail(file);
-        }
-        await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, preview: previewData, ...additionalData, ...replyData, ...fileData, storageUrl: null, storagePath: null, hasChunks: false, chunkCount: 0, isUploading: true, createdAt: serverTimestamp(), readBy: [user.uid] });
-        await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
-        setText("");
-        setPlusMenuOpen(false);
-        setContactModalOpen(false);
-        setTimeout(() => {
-          scrollRef.current?.scrollIntoView({ behavior: "auto" });
-        }, 100);
+  
+const sendMessage = async (content, type = "text", additionalData = {}, file = null) => {
+  if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
+  if (((!content && !file) && type === "text") || isUploading) return;
 
+  setIsUploading(true);
+  setUploadProgress(0);
 
-// Upload the file via Firebase Storage (VOOM same system) and then update message content to the download URL.
-try {
-  const ext = file.name && file.name.includes(".") ? file.name.split(".").pop() : "";
-  const safeExt = ext ? `.${ext}` : "";
-  const storagePath = `artifacts/${appId2}/chats/${activeChatId}/${user.uid}/${Date.now()}_${Math.random().toString(16).slice(2)}${safeExt}`;
-  const sRef = storageRef(storage, storagePath);
+  const currentReply = replyTo;
+  setReplyTo(null);
+  setStickerMenuOpen(false);
 
-  await new Promise((resolve, reject) => {
-    const task = uploadBytesResumable(sRef, file, { contentType: file.type || undefined });
-    task.on(
-      "state_changed",
-      (snap) => {
-        const pct = snap.totalBytes ? Math.round((snap.bytesTransferred / snap.totalBytes) * 100) : 0;
-        setUploadProgress(pct);
-      },
-      (err) => reject(err),
-      async () => {
-        try {
-          const url = await getDownloadURL(task.snapshot.ref);
-          await updateDoc(newMsgRef, {
-            content: url,
-            storageUrl: url,
-            storagePath,
-            mimeType: file.type || null,
-            hasChunks: false,
-            chunkCount: 0,
-            isUploading: false
-          });
-          resolve(null);
-        } catch (e) {
-          reject(e);
-        }
-      }
-    );
-  });
-} catch (e) {
-  // If upload fails, keep local preview (blob URL) but mark as not uploading
   try {
-    await updateDoc(newMsgRef, { isUploading: false });
-  } catch {}
-}
+    const msgCol = collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages");
+    const newMsgRef = doc(msgCol);
+
+    let storedContent = content;
+    let localBlobUrl = null;
+    let previewData = null;
+
+    const replyData = currentReply
+      ? {
+          replyTo: {
+            id: currentReply.id,
+            content: currentReply.content,
+            senderName: allUsers.find((u) => u.uid === currentReply.senderId)?.name || "Unknown",
+            type: currentReply.type
+          }
+        }
+      : {};
+
+    const fileData = file ? { fileName: file.name, fileSize: file.size, mimeType: file.type } : {};
+
+    const currentChat = chats.find((c) => c.id === activeChatId);
+    const updateData = {
+      lastMessage: { content: type === "text" ? content : `[${type}]`, senderId: user.uid, readBy: [user.uid] },
+      updatedAt: serverTimestamp()
+    };
+    if (currentChat) {
+      currentChat.participants.forEach((uid) => {
+        if (uid !== user.uid) updateData[`unreadCounts.${uid}`] = increment(1);
+      });
+    }
+
+    // File-based messages: show local preview immediately, upload to Storage in background, then swap to URL.
+    if (file && ["image", "video", "audio", "file"].includes(type)) {
+      try {
+        localBlobUrl = URL.createObjectURL(file);
+      } catch (e) {
+        localBlobUrl = null;
+      }
+      storedContent = localBlobUrl || content;
+
+      if (["image", "video"].includes(type)) {
+        try {
+          previewData = await generateThumbnail(file);
+        } catch (e) {
+          previewData = null;
+        }
       }
 
-} else {
-  // Text / sticker / etc.
-  if (typeof content === "object" && content !== null && type === "sticker") {
-    const stickerContent = content.image || content;
-    const stickerAudio = content.audio || null;
-    await setDoc(newMsgRef, { senderId: user.uid, content: stickerContent, audio: stickerAudio, type, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, isUploading: false, createdAt: serverTimestamp(), readBy: [user.uid] });
-  } else {
-    await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, isUploading: false, createdAt: serverTimestamp(), readBy: [user.uid] });
-  }
-  await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
-  setText("");
-  setPlusMenuOpen(false);
-  setContactModalOpen(false);
-  setTimeout(() => {
-    scrollRef.current?.scrollIntoView({ behavior: "auto" });
-  }, 100);
-}
-    } catch (e) {
-      console.error(e);
-      showNotification("\u9001\u4FE1\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
-    } finally {
-      setIsUploading(false);
-      setUploadProgress(0);
+      await setDoc(newMsgRef, {
+        senderId: user.uid,
+        content: storedContent,
+        type,
+        preview: previewData,
+        ...additionalData,
+        ...replyData,
+        ...fileData,
+        storageUrl: null,
+        storagePath: null,
+        hasChunks: false,
+        chunkCount: 0,
+        isUploading: true,
+        createdAt: serverTimestamp(),
+        readBy: [user.uid]
+      });
+
+      await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
+
+      setText("");
+      setPlusMenuOpen(false);
+      setContactModalOpen(false);
+      setTimeout(() => {
+        scrollRef.current?.scrollIntoView({ behavior: "auto" });
+      }, 100);
+
+      // Upload to Firebase Storage (VOOM same system)
+      try {
+        const ext = file.name && file.name.includes(".") ? file.name.split(".").pop() : "";
+        const safeExt = ext ? `.${ext}` : "";
+        const storagePath = `artifacts/${appId2}/chats/${activeChatId}/${user.uid}/${Date.now()}_${Math.random()
+          .toString(16)
+          .slice(2)}${safeExt}`;
+        const sRef = storageRef(storage, storagePath);
+
+        await new Promise((resolve, reject) => {
+          const task = uploadBytesResumable(sRef, file, { contentType: file.type || undefined });
+          task.on(
+            "state_changed",
+            (snap) => {
+              const pct = snap.totalBytes ? Math.round((snap.bytesTransferred / snap.totalBytes) * 100) : 0;
+              setUploadProgress(pct);
+            },
+            (err) => reject(err),
+            async () => {
+              try {
+                const url = await getDownloadURL(task.snapshot.ref);
+                await updateDoc(newMsgRef, {
+                  content: url,
+                  storageUrl: url,
+                  storagePath,
+                  mimeType: file.type || null,
+                  hasChunks: false,
+                  chunkCount: 0,
+                  isUploading: false
+                });
+                resolve(null);
+              } catch (e) {
+                reject(e);
+              }
+            }
+          );
+        });
+      } catch (e) {
+        try {
+          await updateDoc(newMsgRef, { isUploading: false });
+        } catch {}
+      } finally {
+        try {
+          if (localBlobUrl && localBlobUrl.startsWith("blob:")) URL.revokeObjectURL(localBlobUrl);
+        } catch {}
+      }
+
+      return;
     }
-  };
+
+    // Non-file messages (text/contact/location/sticker/etc.)
+    if (typeof content === "object" && content !== null && type === "sticker") {
+      const stickerContent = content.image || content;
+      const stickerAudio = content.audio || null;
+      await setDoc(newMsgRef, {
+        senderId: user.uid,
+        content: stickerContent,
+        audio: stickerAudio,
+        type,
+        ...additionalData,
+        ...replyData,
+        ...fileData,
+        hasChunks: false,
+        chunkCount: 0,
+        isUploading: false,
+        createdAt: serverTimestamp(),
+        readBy: [user.uid]
+      });
+    } else {
+      await setDoc(newMsgRef, {
+        senderId: user.uid,
+        content: storedContent,
+        type,
+        ...additionalData,
+        ...replyData,
+        ...fileData,
+        hasChunks: false,
+        chunkCount: 0,
+        isUploading: false,
+        createdAt: serverTimestamp(),
+        readBy: [user.uid]
+      });
+    }
+
+    await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
+
+    setText("");
+    setPlusMenuOpen(false);
+    setContactModalOpen(false);
+    setTimeout(() => {
+      scrollRef.current?.scrollIntoView({ behavior: "auto" });
+    }, 100);
+  } catch (e) {
+    console.error(e);
+    showNotification("送信に失敗しました");
+  } finally {
+    setIsUploading(false);
+    setUploadProgress(0);
+  }
+};
+
+
   
 const handleDeleteMessage = useCallback(
   async (msgId) => {
