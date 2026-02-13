@@ -5505,7 +5505,7 @@ const handleLogout = async () => {
         return null;
       });
     });
-    const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(50)), (snap) => {
+    const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(20)), (snap) => {
       setPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
     return () => {
