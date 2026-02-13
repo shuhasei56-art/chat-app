@@ -107,6 +107,69 @@ import {
   Eye,
   AlertCircle
 } from "lucide-react";
+
+// Decode base64 chunks into a Blob URL without concatenating into one huge string.
+// Works even if chunks are not aligned to 4-char base64 blocks and even if the first chunk contains a data: header.
+const __chunksToObjectUrl = (chunkStrings, fallbackMimeType) => {
+  if (!chunkStrings || chunkStrings.length === 0) return null;
+
+  let mimeType = fallbackMimeType || "application/octet-stream";
+  let i = 0;
+  let carry = "";
+
+  const first = chunkStrings[0] || "";
+  if (first.startsWith("data:")) {
+    const commaIdx = first.indexOf(",");
+    if (commaIdx !== -1) {
+      const header = first.slice(0, commaIdx);
+      const mt = header.split(";")[0]?.split(":")[1];
+      if (mt) mimeType = mt;
+      carry = first.slice(commaIdx + 1);
+      i = 1;
+    }
+  }
+
+  const parts = [];
+  const pushDecoded = (b64) => {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+    parts.push(bytes);
+  };
+
+  for (; i < chunkStrings.length; i++) {
+    const s = chunkStrings[i];
+    if (!s) continue;
+    carry += s;
+
+    const fullLen = carry.length - (carry.length % 4);
+    if (fullLen <= 0) continue;
+
+    const toDecode = carry.slice(0, fullLen);
+    carry = carry.slice(fullLen);
+
+    const windowSize = 1024 * 1024; // 1MB base64 chars
+    for (let off = 0; off < toDecode.length; off += windowSize) {
+      const piece = toDecode.slice(off, off + windowSize);
+      if (piece) pushDecoded(piece);
+    }
+  }
+
+  if (carry) {
+    let tail = carry;
+    const mod = tail.length % 4;
+    if (mod !== 0) tail = tail + "=".repeat(4 - mod);
+    try {
+      pushDecoded(tail);
+    } catch (e) {
+      // ignore tail errors
+    }
+  }
+
+  const blob = new Blob(parts, { type: mimeType });
+  return URL.createObjectURL(blob);
+};
+
 const firebaseConfig = {
   apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
   authDomain: "chat-app-c17bf.firebaseapp.com",
@@ -132,81 +195,2441 @@ const __cacheSet = (map, key, val, max=60) => {
     map.delete(firstKey);
   }
 };
-
-// Robust + fast base64 -> Blob/ObjectURL (fallback if fetch(data:) fails)
-const __base64ToBlob = async (base64Data, mimeType) => {
-  // Try using fetch(data:) first (often fastest), but some browsers fail for large payloads.
-  try {
-    const res = await fetch(`data:${mimeType};base64,${base64Data}`);
-    return await res.blob();
-  } catch (e) {
-    // Fallback: manual decode in slices to avoid huge allocations
-    const sliceSize = 1024 * 1024; // 1MB
-    const byteChars = atob(base64Data);
-    const byteArrays = [];
-    for (let offset = 0; offset < byteChars.length; offset += sliceSize) {
-      const slice = byteChars.slice(offset, offset + sliceSize);
-      const byteNumbers = new Array(slice.length);
-      for (let i = 0; i < slice.length; i++) byteNumbers[i] = slice.charCodeAt(i);
-      byteArrays.push(new Uint8Array(byteNumbers));
-    }
-    return new Blob(byteArrays, { type: mimeType });
-  }
+const REACTION_EMOJIS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F525}"];
+const rtcConfig = {
+  iceServers: [
+    { urls: ["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302","stun:stun2.l.google.com:19302","stun:stun3.l.google.com:19302","stun:stun4.l.google.com:19302"] },
+    // TURN (NAT越え安定化). 公開リレーを使用（無料枠/制限がある場合あり）
+    { urls: ["turn:openrelay.metered.ca:80"], username: "openrelayproject", credential: "openrelayproject" },
+    { urls: ["turn:openrelay.metered.ca:443"], username: "openrelayproject", credential: "openrelayproject" },
+    { urls: ["turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" }
+  ],
+  iceCandidatePoolSize: 10,
+  bundlePolicy: "max-bundle"
 };
 
-// Stream-decode base64 chunks into a Blob without concatenating into one huge string.
-// Works even if chunk boundaries are not aligned to 4-char base64 blocks.
-const __chunksToObjectUrl = (chunkStrings, fallbackMimeType) => {
-  if (!chunkStrings || chunkStrings.length === 0) return null;
-
-  // Detect/strip optional data: header that may be split across chunks.
-  let mimeType = fallbackMimeType || "application/octet-stream";
-  let i = 0;
-  let carry = "";
-
-  // If first chunk contains a full data URL header up to comma, extract it.
-  const first = chunkStrings[0] || "";
-  if (first.startsWith("data:")) {
-    const commaIdx = first.indexOf(",");
-    if (commaIdx !== -1) {
-      const header = first.slice(0, commaIdx); // data:<mime>;base64
-      const mt = header.split(";")[0]?.split(":")[1];
-      if (mt) mimeType = mt;
-      carry = first.slice(commaIdx + 1);
-      i = 1;
-    }
+// Optional custom TURN (より安定させたい場合): .env に以下を設定すると優先利用します。
+// REACT_APP_TURN_URLS=turn:your.turn.server:3478,turns:your.turn.server:5349?transport=tcp
+// REACT_APP_TURN_USERNAME=xxx
+// REACT_APP_TURN_CREDENTIAL=yyy
+try {
+  const _turnUrls = (process.env.REACT_APP_TURN_URLS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (_turnUrls.length) {
+    const _turn = {
+      urls: _turnUrls,
+      username: process.env.REACT_APP_TURN_USERNAME || undefined,
+      credential: process.env.REACT_APP_TURN_CREDENTIAL || undefined
+    };
+    rtcConfig.iceServers = [_turn, ...(rtcConfig.iceServers || [])];
   }
+} catch {}
 
-  
-const parts = [];
-snap.forEach((d) => {
-  const v = d.data()?.data;
-  if (v) parts.push(v);
+
+const formatTime = (timestamp) => {
+  if (!timestamp) return "";
+  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+};
+const formatDate = (timestamp) => {
+  if (!timestamp) return "";
+  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  return date.toLocaleDateString();
+};
+const formatDateTime = (timestamp) => {
+  if (!timestamp) return "";
+  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}/${mm}/${dd} ${hh}:${min}`;
+};
+const getEffectOwnerUidFromRefPath = (refPath) => {
+  if (!refPath || typeof refPath !== "string") return "";
+  const parts = refPath.split("/");
+  const usersIndex = parts.indexOf("users");
+  if (usersIndex < 0) return "";
+  return parts[usersIndex + 1] || "";
+};
+const isTodayBirthday = (birthdayString) => {
+  if (!birthdayString) return false;
+  const today = /* @__PURE__ */ new Date();
+  const [y, m, d] = birthdayString.split("-").map(Number);
+  return today.getMonth() + 1 === m && today.getDate() === d;
+};
+let audioCtx = null;
+const initAudioContext = () => {
+  if (!audioCtx) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) audioCtx = new AudioContextClass();
+  }
+  if (audioCtx && audioCtx.state === "suspended") {
+    audioCtx.resume().catch((e) => console.error("Audio resume failed:", e));
+  }
+};
+const playNotificationSound = () => {
+  try {
+    initAudioContext();
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(1e-5, audioCtx.currentTime + 0.5);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.5);
+  } catch (e) {
+    console.error("Audio play failed", e);
+  }
+};
+const processFileBeforeUpload = (file) => {
+  return new Promise((resolve) => {
+    if (!file || !file.type.startsWith("image") || file.type === "image/gif") {
+      resolve(file);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX_WIDTH = 1600;
+        const MAX_HEIGHT = 1600;
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob((blob) => {
+            if (blob) {
+              resolve(blob.size > file.size ? file : new File([blob], file.name, { type: "image/jpeg", lastModified: Date.now() }));
+            } else {
+              resolve(file);
+            }
+          }, "image/jpeg", 0.8);
+        } else {
+          resolve(file);
+        }
+      };
+      img.onerror = () => resolve(file);
+      img.src = event.target.result;
+    };
+    reader.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+};
+const handleFileUpload = async (e, callback) => {
+  const files = e.target.files;
+  if (!files || files.length === 0) return;
+  const originalFile = files[0];
+  e.target.value = "";
+  let file = originalFile;
+  if (originalFile.type.startsWith("image") && originalFile.type !== "image/gif") {
+    file = await processFileBeforeUpload(originalFile);
+  }
+  let type = "file";
+  if (file.type.startsWith("image")) type = "image";
+  else if (file.type.startsWith("video")) type = "video";
+  else if (file.type.startsWith("audio")) type = "audio";
+  if (file.size > 1024 * 1024 || type === "video" || type === "file") {
+    const objectUrl = URL.createObjectURL(file);
+    callback(objectUrl, type, file);
+  } else {
+    const reader = new FileReader();
+    reader.onload = (event) => callback(event.target.result, type, file);
+    reader.readAsDataURL(file);
+  }
+};
+const handleCompressedUpload = (e, callback) => {
+  const files = e.target.files;
+  if (!files || files.length === 0) return;
+  const file = files[0];
+  if (!file.type.startsWith("image")) return;
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const MAX_WIDTH = 800;
+      const MAX_HEIGHT = 800;
+      let width = img.width;
+      let height = img.height;
+      if (width > height) {
+        if (width > MAX_WIDTH) {
+          height *= MAX_WIDTH / width;
+          width = MAX_WIDTH;
+        }
+      } else {
+        if (height > MAX_HEIGHT) {
+          width *= MAX_HEIGHT / height;
+          height = MAX_HEIGHT;
+        }
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, width, height);
+        callback(canvas.toDataURL("image/jpeg", 0.7));
+      }
+    };
+    img.src = event.target.result;
+  };
+  reader.readAsDataURL(file);
+};
+const generateThumbnail = (file) => {
+  return new Promise((resolve) => {
+    if (!file) {
+      resolve(null);
+      return;
+    }
+    const MAX_SIZE = 320;
+    if (file.type.startsWith("image")) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          let width = img.width;
+          let height = img.height;
+          if (width > height) {
+            if (width > MAX_SIZE) {
+              height *= MAX_SIZE / width;
+              width = MAX_SIZE;
+            }
+          } else {
+            if (height > MAX_SIZE) {
+              width *= MAX_SIZE / height;
+              height = MAX_SIZE;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL("image/jpeg", 0.5));
+          } else resolve(null);
+        };
+        img.onerror = () => resolve(null);
+        img.src = e.target.result;
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    } else if (file.type.startsWith("video")) {
+      const video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      video.crossOrigin = "anonymous";
+      video.preload = "metadata";
+      const capture = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          let width = video.videoWidth;
+          let height = video.videoHeight;
+          if (!width || !height) {
+            resolve(null);
+            return;
+          }
+          if (width > height) {
+            if (width > MAX_SIZE) {
+              height *= MAX_SIZE / width;
+              width = MAX_SIZE;
+            }
+          } else {
+            if (height > MAX_SIZE) {
+              width *= MAX_SIZE / height;
+              height = MAX_SIZE;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, width, height);
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.5);
+            video.src = "";
+            video.load();
+            resolve(dataUrl);
+          } else resolve(null);
+        } catch (e) {
+          resolve(null);
+        }
+      };
+      video.onloadeddata = () => {
+        video.currentTime = 0.5;
+      };
+      video.onseeked = () => {
+        capture();
+      };
+      video.onerror = () => resolve(null);
+      setTimeout(() => resolve(null), 2e3);
+      try {
+        video.src = URL.createObjectURL(file);
+      } catch (e) {
+        resolve(null);
+      }
+    } else {
+      resolve(null);
+    }
+  });
+};
+const AuthView = ({ onLogin, showNotification }) => {
+  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [userId, setUserId] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const getGoogleLoginErrorMessage = (error) => {
+    const code = error?.code || "";
+    if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
+      return "ポップアップがブロックされたため、リダイレクトでログインします。";
+    }
+    if (code === "auth/popup-closed-by-user") {
+      return "Googleログインがキャンセルされました。";
+    }
+    if (code === "auth/unauthorized-domain") {
+      return "このドメインはFirebase Authenticationで許可されていません。Firebaseコンソールで承認済みドメインを追加してください。";
+    }
+    if (code === "auth/operation-not-allowed") {
+      return "FirebaseでGoogleログインが有効化されていません。Authentication > Sign-in method で有効にしてください。";
+    }
+    return `Googleログインに失敗しました: ${error?.message || "不明なエラー"}`;
+  };
+  const handleGoogleLogin = async () => {
+    try {
+      const googleProvider = new GoogleAuthProvider();
+      googleProvider.setCustomParameters({ prompt: "select_account" });
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      // Do not overwrite an existing profile on every login
+      const existing = await getDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid));
+      if (!existing.exists()) {
+        await setDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), {
+          uid: user.uid,
+          name: user.displayName || "No Name",
+          avatar: user.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + user.uid,
+          id: user.uid,
+          friends: [],
+          hiddenFriends: [],
+          hiddenChats: [],
+          wallet: 1e3,
+          isBanned: false,
+          status: "よろしくお願いします！",
+          cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80"
+        }, { merge: true });
+      }
+
+    } catch (error) {
+      console.error("Login Error:", error);
+      const code = error?.code || "";
+      if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
+        try {
+          const googleProvider = new GoogleAuthProvider();
+          googleProvider.setCustomParameters({ prompt: "select_account" });
+          showNotification("ポップアップが使えないため、リダイレクトでログインします。");
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        } catch (redirectError) {
+          console.error("Redirect Login Error:", redirectError);
+          showNotification(getGoogleLoginErrorMessage(redirectError));
+          return;
+        }
+      }
+      showNotification(getGoogleLoginErrorMessage(error));
+    }
+  };
+  const handleGuestLogin = async () => {
+    setLoading(true);
+    try {
+      await signInAnonymously(auth);
+      showNotification("\u30B2\u30B9\u30C8\u30ED\u30B0\u30A4\u30F3\u3057\u307E\u3057\u305F");
+    } catch (e) {
+      showNotification("\u30B2\u30B9\u30C8\u30ED\u30B0\u30A4\u30F3\u5931\u6557");
+    } finally {
+      setLoading(false);
+    }
+  };
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!userId || !password) return showNotification("ID\u3068\u30D1\u30B9\u30EF\u30FC\u30C9\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+    const email = `${userId}@voom-persistent.app`;
+    setLoading(true);
+    try {
+      if (isLoginMode) {
+        await signInWithEmailAndPassword(auth, email, password);
+        showNotification("\u30ED\u30B0\u30A4\u30F3\u3057\u307E\u3057\u305F");
+      } else {
+        if (!displayName) {
+          showNotification("\u30CB\u30C3\u30AF\u30CD\u30FC\u30E0\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+          setLoading(false);
+          return;
+        }
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        await setDoc(doc(db, "artifacts", appId, "public", "data", "users", cred.user.uid), {
+          uid: cred.user.uid,
+          name: displayName || userId,
+          id: userId,
+          status: "\u3088\u308D\u3057\u304F\u304A\u9858\u3044\u3057\u307E\u3059\uFF01",
+          birthday: "",
+          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cred.user.uid}`,
+          cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
+          friends: [],
+          hiddenFriends: [],
+          hiddenChats: [],
+          wallet: 1e3,
+          isBanned: false
+        });
+        showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u4F5C\u6210\u5B8C\u4E86");
+      }
+    } catch (e2) {
+      showNotification("\u30A8\u30E9\u30FC: " + e2.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  return /* @__PURE__ */ jsx("div", { className: "flex flex-col items-center justify-center h-full w-full bg-gradient-to-br from-indigo-50 to-purple-50 p-4 overflow-y-auto", children: /* @__PURE__ */ jsx("div", { className: "min-h-full flex flex-col items-center justify-center w-full", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-[40px] shadow-2xl p-8 border border-white/50 backdrop-blur-sm my-auto", children: [
+    /* @__PURE__ */ jsxs("div", { className: "text-center mb-8", children: [
+      /* @__PURE__ */ jsx("div", { className: "w-20 h-20 bg-indigo-500 rounded-3xl mx-auto flex items-center justify-center mb-4 shadow-lg", children: /* @__PURE__ */ jsx(MessageCircle, { className: "w-10 h-10 text-white" }) }),
+      /* @__PURE__ */ jsx("h1", { className: "text-2xl font-black text-gray-800", children: "\u30C1\u30E3\u30C3\u30C8\u30A2\u30D7\u30EA" }),
+      /* @__PURE__ */ jsx("p", { className: "text-sm text-gray-500 mt-2", children: isLoginMode ? "\u30ED\u30B0\u30A4\u30F3\u3057\u3066\u59CB\u3081\u307E\u3057\u3087\u3046" : "\u30A2\u30AB\u30A6\u30F3\u30C8\u3092\u4F5C\u6210\u3057\u3066\u30C7\u30FC\u30BF\u3092\u4FDD\u5B58" })
+    ] }),
+    /* @__PURE__ */ jsxs("form", { onSubmit: handleSubmit, className: "space-y-4", children: [
+      !isLoginMode && /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
+        /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-gray-400 ml-2", children: "\u8868\u793A\u540D" }),
+        /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border", children: [
+          /* @__PURE__ */ jsx(User, { className: "w-4 h-4 text-gray-400" }),
+          /* @__PURE__ */ jsx("input", { className: "bg-transparent w-full outline-none text-sm font-bold", placeholder: "\u5C71\u7530 \u592A\u90CE", value: displayName, onChange: (e) => setDisplayName(e.target.value) })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
+        /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-gray-400 ml-2", children: "\u30E6\u30FC\u30B6\u30FCID" }),
+        /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border", children: [
+          /* @__PURE__ */ jsx(AtSign, { className: "w-4 h-4 text-gray-400" }),
+          /* @__PURE__ */ jsx("input", { className: "bg-transparent w-full outline-none text-sm font-bold", placeholder: "user_id", value: userId, onChange: (e) => setUserId(e.target.value) })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
+        /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-gray-400 ml-2", children: "\u30D1\u30B9\u30EF\u30FC\u30C9" }),
+        /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border", children: [
+          /* @__PURE__ */ jsx(KeyRound, { className: "w-4 h-4 text-gray-400" }),
+          /* @__PURE__ */ jsx("input", { className: "bg-transparent w-full outline-none text-sm font-bold", type: "password", placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022", value: password, onChange: (e) => setPassword(e.target.value) })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsx("button", { type: "submit", disabled: loading, className: "w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl flex items-center justify-center", children: loading ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin" }) : isLoginMode ? "\u30ED\u30B0\u30A4\u30F3" : "\u767B\u9332" })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "mt-6 flex flex-col gap-3", children: [
+      /* @__PURE__ */ jsxs("button", { onClick: handleGoogleLogin, className: "w-full bg-white border text-gray-700 font-bold py-3 rounded-2xl shadow-sm flex items-center justify-center gap-2", children: [
+        /* @__PURE__ */ jsx("img", { src: "https://www.gstatic.com/firebasejs/ui/2.0.0/images/action/google.svg", className: "w-4 h-4" }),
+        "Google\u3067\u30ED\u30B0\u30A4\u30F3"
+      ] }),
+      /* @__PURE__ */ jsx("button", { onClick: () => setIsLoginMode(!isLoginMode), className: "text-xs font-bold text-gray-400 hover:text-indigo-500", children: isLoginMode ? "\u30A2\u30AB\u30A6\u30F3\u30C8\u3092\u304A\u6301\u3061\u3067\u306A\u3044\u65B9\u306F\u3053\u3061\u3089" : "\u3059\u3067\u306B\u30A2\u30AB\u30A6\u30F3\u30C8\u3092\u304A\u6301\u3061\u306E\u65B9\u306F\u3053\u3061\u3089" }),
+      /* @__PURE__ */ jsx("button", { onClick: handleGuestLogin, className: "text-xs font-bold text-gray-400 underline hover:text-gray-600", children: "\u304A\u8A66\u3057\u30B2\u30B9\u30C8\u30ED\u30B0\u30A4\u30F3" })
+    ] })
+  ] }) }) });
+};
+const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerProp, isVideoEnabled = true, activeEffect, backgroundUrl, effects = [] }) => {
+  const [remoteStream, setRemoteStream] = useState(null);
+  const [hasRemoteVideoTrack, setHasRemoteVideoTrack] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
+  const [callError, setCallError] = useState(null);
+
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const screenStreamRef = useRef(null);
+  const cameraDeviceIdsRef = useRef([]);
+  const cameraIndexRef = useRef(0);
+  const [needsRemotePlay, setNeedsRemotePlay] = useState(false);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
+  const pcRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(new MediaStream());
+  const unsubscribersRef = useRef([]);
+  const pendingCandidatesRef = useRef([]);
+  const disconnectTimerRef = useRef(null);
+  const isMountedRef = useRef(true);
+  const startedRef = useRef(false);
+  const hasRemoteVideoTrackRef = useRef(false);
+  const sessionId = callData?.sessionId || "";
+  const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData?.callerId === user.uid;
+  const getFilterStyle = (effectName) => {
+    if (!effectName || effectName === "Normal") return "none";
+    const sanitizeFilter = (filterValue) => {
+      if (typeof filterValue !== "string") return "none";
+      const v = filterValue.trim();
+      // Avoid expensive/unsupported filters that can freeze video rendering on some devices.
+      if (!v || v.length > 120 || /blur\s*\(|drop-shadow\s*\(|url\s*\(/i.test(v)) return "none";
+      return v;
+    };
+    const match = (effects || []).find(
+      (e) => e?.name === effectName && typeof e?.filter === "string" && e.filter.trim() !== ""
+    );
+    if (match?.filter) return sanitizeFilter(match.filter);
+    switch (effectName) {
+      case "Sepia":
+        return "sepia(100%)";
+      case "Grayscale":
+        return "grayscale(100%)";
+      case "Invert":
+        return "invert(100%)";
+      case "Hue":
+        return "hue-rotate(90deg)";
+      case "Contrast":
+        return "contrast(200%)";
+      case "Blur":
+        return "none";
+      case "Bright":
+        return "brightness(150%)";
+      case "Fire":
+        return "sepia(100%) hue-rotate(-35deg) saturate(180%)";
+      case "Ice":
+        return "sepia(40%) hue-rotate(170deg) saturate(160%)";
+      case "Rainbow":
+        return "hue-rotate(80deg) saturate(150%)";
+      default:
+        return "none";
+    }
+  };
+  const safeEndCall = useCallback(
+    (delay = 0) => {
+      if (delay <= 0) {
+        onEndCall?.();
+        return;
+      }
+      setTimeout(() => {
+        if (isMountedRef.current) onEndCall?.();
+      }, delay);
+    },
+    [onEndCall]
+  );
+  const cleanup = useCallback(() => {
+    unsubscribersRef.current.forEach((u) => {
+      try {
+        u();
+      } catch {
+      }
+    });
+    unsubscribersRef.current = [];
+    try {
+      if (pcRef.current) {
+        pcRef.current.onicecandidate = null;
+        pcRef.current.ontrack = null;
+        pcRef.current.onconnectionstatechange = null;
+        pcRef.current.close();
+      }
+    } catch {
+    }
+    pcRef.current = null;
+    if (disconnectTimerRef.current) {
+      clearTimeout(disconnectTimerRef.current);
+      disconnectTimerRef.current = null;
+    }
+    try {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    } catch {
+    }
+    localStreamRef.current = null;
+    try {
+      if (remoteStreamRef.current) {
+        remoteStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    } catch {
+    }
+    remoteStreamRef.current = new MediaStream();
+    setRemoteStream(null);
+    hasRemoteVideoTrackRef.current = false;
+    setHasRemoteVideoTrack(false);
+    setNeedsRemotePlay(false);
+    pendingCandidatesRef.current = [];
+  }, []);
+  const getMediaErrorMessage = (err) => {
+    const name = err?.name || "";
+    if (name === "NotAllowedError" || name === "SecurityError") return "\u30AB\u30E1\u30E9/\u30DE\u30A4\u30AF\u306E\u5229\u7528\u304C\u8A31\u53EF\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002\u30D6\u30E9\u30A6\u30B6\u8A2D\u5B9A\u3067\u8A31\u53EF\u3057\u3066\u304F\u3060\u3055\u3044\u3002";
+    if (name === "NotFoundError") return "\u30AB\u30E1\u30E9\u307E\u305F\u306F\u30DE\u30A4\u30AF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002";
+    if (name === "NotReadableError") return "\u30AB\u30E1\u30E9/\u30DE\u30A4\u30AF\u3092\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002\u4ED6\u306E\u30A2\u30D7\u30EA\u304C\u4F7F\u7528\u4E2D\u306E\u53EF\u80FD\u6027\u304C\u3042\u308A\u307E\u3059\u3002";
+    return "\u30AB\u30E1\u30E9/\u30DE\u30A4\u30AF\u306E\u53D6\u5F97\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002";
+  };
+  const flushPendingCandidates = async (pc) => {
+    const list = pendingCandidatesRef.current;
+    pendingCandidatesRef.current = [];
+    for (const candidate of list) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.warn("Failed to add queued candidate:", e);
+      }
+    }
+  };
+  const tryPlayRemoteMedia = useCallback(async () => {
+    let audioFailed = false;
+    let videoFailed = false;
+    const audioEl = remoteAudioRef.current;
+    const videoEl = remoteVideoRef.current;
+    const hasVideoTrack = hasRemoteVideoTrackRef.current || !!videoEl?.srcObject?.getVideoTracks?.().some((track) => track.readyState === "live");
+    if (audioEl) {
+      audioEl.muted = false;
+      audioEl.volume = 1;
+      if (hasVideoTrack) {
+        audioEl.pause();
+      } else {
+        try {
+          await audioEl.play();
+        } catch {
+          audioFailed = true;
+        }
+      }
+    }
+    if (videoEl) {
+      videoEl.muted = false;
+      videoEl.volume = 1;
+      try {
+        await videoEl.play();
+      } catch {
+        videoFailed = true;
+      }
+    }
+    setNeedsRemotePlay(audioFailed || videoFailed);
+    return !(audioFailed || videoFailed);
+  }, []);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!chatId || !user?.uid) return;
+      if (startedRef.current) return;
+      startedRef.current = true;
+      if (!sessionId) {
+        setCallError("\u901A\u8A71\u30BB\u30C3\u30B7\u30E7\u30F3\u304C\u7121\u52B9\u3067\u3059\u3002");
+        safeEndCall(1500);
+        return;
+      }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCallError("\u3053\u306E\u30D6\u30E9\u30A6\u30B6\u306F\u901A\u8A71\u306B\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u305B\u3093\u3002");
+        safeEndCall(1500);
+        return;
+      }
+      const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
+      const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
+      const pc = new RTCPeerConnection(rtcConfig);
+      pcRef.current = pc;
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState;
+        if (state === "connected") {
+          if (disconnectTimerRef.current) {
+            clearTimeout(disconnectTimerRef.current);
+            disconnectTimerRef.current = null;
+          }
+          return;
+        }
+        if (state === "disconnected") {
+          if (disconnectTimerRef.current) return;
+          disconnectTimerRef.current = setTimeout(() => {
+            disconnectTimerRef.current = null;
+            if (!pcRef.current || pcRef.current.connectionState === "connected") return;
+            setCallError("\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
+            safeEndCall(1200);
+          }, 5e3);
+          return;
+        }
+        if (state === "failed" || state === "closed") {
+          setCallError("\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
+          safeEndCall(1200);
+        }
+      };
+      pc.oniceconnectionstatechange = async () => {
+        try {
+          const iceState = pc.iceConnectionState;
+          if (iceState === "failed") {
+            // Try ICE restart (helps on NAT changes / Wi-Fi switch)
+            try {
+              pc.restartIce?.();
+            } catch {
+            }
+            if (isCaller) {
+              try {
+                const offer = await pc.createOffer({ iceRestart: true, offerToReceiveAudio: true, offerToReceiveVideo: !!isVideoEnabled });
+                await pc.setLocalDescription(offer);
+                await setDoc(
+                  signalingRef,
+                  {
+                    sessionId,
+                    callerId: callData?.callerId || user.uid,
+                    offerSdp: offer.sdp,
+                    offererId: user.uid,
+                    iceRestart: true,
+                    updatedAt: serverTimestamp()
+                  },
+                  { merge: true }
+                );
+              } catch (e) {
+                console.warn("ICE restart offer failed:", e);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("iceconnectionstatechange error:", e);
+        }
+      };
+      pc.ontrack = async (event) => {
+        const directStream = event.streams?.[0];
+        const stream = directStream || remoteStreamRef.current;
+        if (!directStream && event.track) {
+          const exists = stream.getTracks().some((track) => track.id === event.track.id);
+          if (!exists) stream.addTrack(event.track);
+        }
+        const hasLiveVideo = stream.getVideoTracks().some((track) => track.readyState === "live");
+        hasRemoteVideoTrackRef.current = hasLiveVideo;
+        setHasRemoteVideoTrack(hasLiveVideo);
+        setRemoteStream(stream);
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = stream;
+        }
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = stream;
+        }
+        await tryPlayRemoteMedia();
+      };
+      pc.onicecandidate = async (event) => {
+        if (!event.candidate) return;
+        try {
+          await addDoc(candidatesCol, {
+            sessionId,
+            senderId: user.uid,
+            candidate: event.candidate.toJSON(),
+            createdAt: serverTimestamp()
+          });
+        } catch (e) {
+          console.warn("Failed to publish ICE candidate:", e);
+        }
+      };
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+        const hasVideoInput = devices.some((d) => d.kind === "videoinput");
+        const wantVideo = !!isVideoEnabled && hasVideoInput;
+        let stream = null;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+            video: wantVideo ? {
+              facingMode: "user",
+              width: { ideal: 640, max: 1280 },
+              height: { ideal: 360, max: 720 },
+              frameRate: { ideal: 24, max: 30 }
+            } : false
+          });
+        } catch (err) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: wantVideo ? { facingMode: "user" } : false
+            });
+            if (wantVideo && stream.getVideoTracks().length === 0) {
+              setIsVideoOff(true);
+            }
+          } catch (fallbackErr) {
+            if (wantVideo) {
+              stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+              setIsVideoOff(true);
+            } else {
+              throw fallbackErr;
+            }
+          }
+        }
+        if (!stream) throw new Error("No local stream");
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        localStreamRef.current = stream;
+        refreshCameraDevices();
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+          localVideoRef.current.muted = true;
+          try {
+            await localVideoRef.current.play();
+          } catch {
+          }
+        }
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      } catch (err) {
+        console.error("Failed to start local media:", err);
+        setCallError(getMediaErrorMessage(err));
+        safeEndCall(2500);
+        return;
+      }
+      const unsubSignal = onSnapshot(signalingRef, async (snap) => {
+        if (!pcRef.current) return;
+        const data = snap.data();
+        if (!data || data.sessionId !== sessionId) return;
+        try {
+          if (isCaller) {
+            if (!pc.currentRemoteDescription && data.answerSdp) {
+              await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: data.answerSdp }));
+              await flushPendingCandidates(pc);
+            }
+          } else {
+            if (!pc.currentRemoteDescription && data.offerSdp) {
+              await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: data.offerSdp }));
+              await flushPendingCandidates(pc);
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              await setDoc(
+                signalingRef,
+                {
+                  sessionId,
+                  answerSdp: answer.sdp,
+                  answererId: user.uid,
+                  updatedAt: serverTimestamp()
+                },
+                { merge: true }
+              );
+            }
+          }
+        } catch (e) {
+          console.warn("Signaling sync failed:", e);
+        }
+      });
+      unsubscribersRef.current.push(unsubSignal);
+      const candidateQuery = query(candidatesCol, where("sessionId", "==", sessionId));
+      const unsubCandidates = onSnapshot(candidateQuery, (snapshot) => {
+        snapshot.docChanges().forEach(async (change) => {
+          if (change.type !== "added") return;
+          const data = change.doc.data();
+          if (!data || data.senderId === user.uid || !data.candidate) return;
+          try {
+            if (pc.remoteDescription) {
+              await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            } else {
+              pendingCandidatesRef.current.push(data.candidate);
+            }
+          } catch (e) {
+            console.warn("Failed to add ICE candidate:", e);
+          }
+        });
+      });
+      unsubscribersRef.current.push(unsubCandidates);
+      if (isCaller) {
+        try {
+          const offer = await pc.createOffer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: !!isVideoEnabled
+          });
+          await pc.setLocalDescription(offer);
+          await setDoc(
+            signalingRef,
+            {
+              sessionId,
+              callerId: callData?.callerId || user.uid,
+              offerSdp: offer.sdp,
+              offererId: user.uid,
+              updatedAt: serverTimestamp()
+            },
+            { merge: true }
+          );
+        } catch (e) {
+          console.error("Failed to create offer:", e);
+          setCallError("\u901A\u8A71\u306E\u958B\u59CB\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002");
+          safeEndCall(1500);
+        }
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+      cleanup();
+      startedRef.current = false;
+    };
+  }, [chatId, user?.uid, isCaller, callData?.callerId, isVideoEnabled, sessionId, cleanup, safeEndCall, tryPlayRemoteMedia]);
+  useEffect(() => {
+    if (remoteStream && remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = remoteStream;
+    }
+    if (remoteStream && remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+    const hasLiveVideo = remoteStream?.getVideoTracks?.().some((track) => track.readyState === "live") || false;
+    hasRemoteVideoTrackRef.current = hasLiveVideo;
+    setHasRemoteVideoTrack(hasLiveVideo);
+    if (remoteStream) {
+      tryPlayRemoteMedia();
+    }
+  }, [remoteStream, tryPlayRemoteMedia]);
+  const hasRemoteVideo = hasRemoteVideoTrack || remoteStream?.getVideoTracks?.().some((track) => track.readyState === "live");
+  const resumeRemotePlayback = async () => {
+    await tryPlayRemoteMedia();
+  };
+  const toggleMute = () => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    const shouldMute = !isMuted;
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = !shouldMute;
+    });
+    setIsMuted(shouldMute);
+  };
+  const toggleVideo = () => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    const shouldDisableVideo = !isVideoOff;
+    stream.getVideoTracks().forEach((track) => {
+      track.enabled = !shouldDisableVideo;
+    });
+    setIsVideoOff(shouldDisableVideo);
+  };
+
+  const refreshCameraDevices = useCallback(async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+      const videoInputs = devices.filter((d) => d.kind === "videoinput" && d.deviceId);
+      cameraDeviceIdsRef.current = videoInputs.map((d) => d.deviceId);
+      if (cameraIndexRef.current >= cameraDeviceIdsRef.current.length) cameraIndexRef.current = 0;
+    } catch {
+      cameraDeviceIdsRef.current = [];
+      cameraIndexRef.current = 0;
+    }
+  }, []);
+
+  const replaceOutgoingVideoTrack = useCallback(async (newVideoTrack) => {
+    const pc = pcRef.current;
+    if (!pc || !newVideoTrack) return;
+
+    // trackが一時的にnullになっても「ビデオの送信者」を見失わないようにする
+    let sender = pc.getSenders?.().find((s) => s?.track?.kind === "video");
+    if (!sender && pc.getTransceivers) {
+      const t = pc.getTransceivers().find((tr) => tr?.sender && (tr.sender?.track?.kind === "video" || tr?.receiver?.track?.kind === "video"));
+      sender = t?.sender || null;
+    }
+    if (!sender) return;
+
+    try {
+      if (sender?.replaceTrack) await sender.replaceTrack(newVideoTrack);
+    } catch (e) {
+      console.warn("replaceTrack failed:", e);
+    }
+  }, []);
+
+  const switchToCamera = useCallback(async (deviceId) => {
+    const stream = localStreamRef.current;
+    const wantVideo = !!isVideoEnabled;
+    if (!wantVideo) return;
+    let newStream = null;
+    try {
+      newStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: deviceId ? { deviceId: { exact: deviceId }, width: { ideal: 640, max: 1280 }, height: { ideal: 360, max: 720 }, frameRate: { ideal: 24, max: 30 } } : { facingMode: "user" }
+      });
+    } catch (e) {
+      try {
+        newStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "user" } });
+      } catch (e2) {
+        console.warn("switch camera getUserMedia failed:", e2);
+        return;
+      }
+    }
+    const newTrack = newStream.getVideoTracks?.()[0];
+    if (!newTrack) return;
+    await replaceOutgoingVideoTrack(newTrack);
+
+    // Update local stream object (keep audio track)
+    const current = localStreamRef.current;
+    const audioTracks = current?.getAudioTracks?.() || [];
+    const oldVideoTracks = current?.getVideoTracks?.() || [];
+    oldVideoTracks.forEach((t) => {
+      try {
+        t.stop();
+      } catch {
+      }
+    });
+    const merged = new MediaStream([...audioTracks, newTrack]);
+    localStreamRef.current = merged;
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = merged;
+      localVideoRef.current.muted = true;
+      try {
+        await localVideoRef.current.play();
+      } catch {
+      }
+    }
+    setIsVideoOff(false);
+    try {
+      newStream.getTracks().forEach((t) => {
+        if (t.kind !== "video") t.stop();
+      });
+    } catch {
+    }
+  }, [isVideoEnabled, replaceOutgoingVideoTrack]);
+
+  const stopScreenShare = useCallback(async () => {
+    if (screenStreamRef.current) {
+      try {
+        screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      } catch {
+      }
+      screenStreamRef.current = null;
+    }
+    setIsScreenSharing(false);
+    await refreshCameraDevices();
+    const deviceIds = cameraDeviceIdsRef.current || [];
+    const deviceId = deviceIds[cameraIndexRef.current] || null;
+    await switchToCamera(deviceId);
+  }, [refreshCameraDevices, switchToCamera]);
+
+  const startScreenShare = useCallback(async () => {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setCallError("このブラウザは画面共有に対応していません。");
+      return;
+    }
+    if (!isVideoEnabled) return;
+    try {
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const track = displayStream.getVideoTracks?.()[0];
+      if (!track) return;
+      screenStreamRef.current = displayStream;
+      track.onended = () => {
+        stopScreenShare();
+      };
+      await replaceOutgoingVideoTrack(track);
+
+      // Update local preview (keep audio)
+      const current = localStreamRef.current;
+      const audioTracks = current?.getAudioTracks?.() || [];
+      const oldVideoTracks = current?.getVideoTracks?.() || [];
+      oldVideoTracks.forEach((t) => {
+        try {
+          t.stop();
+        } catch {
+        }
+      });
+      const merged = new MediaStream([...audioTracks, track]);
+      localStreamRef.current = merged;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = merged;
+        localVideoRef.current.muted = true;
+        try {
+          await localVideoRef.current.play();
+        } catch {
+        }
+      }
+      setIsScreenSharing(true);
+      setIsVideoOff(false);
+    } catch (e) {
+      console.warn("Screen share failed:", e);
+    }
+  }, [isVideoEnabled, replaceOutgoingVideoTrack, stopScreenShare]);
+
+  const switchCamera = useCallback(async () => {
+    if (!isVideoEnabled) return;
+    await refreshCameraDevices();
+    const list = cameraDeviceIdsRef.current || [];
+    if (list.length <= 1) return;
+    cameraIndexRef.current = (cameraIndexRef.current + 1) % list.length;
+    await switchToCamera(list[cameraIndexRef.current]);
+  }, [isVideoEnabled, refreshCameraDevices, switchToCamera]);
+  if (callError) {
+    return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center text-white flex-col gap-4", children: [
+      /* @__PURE__ */ jsx(AlertCircle, { className: "w-16 h-16 text-red-500" }),
+      /* @__PURE__ */ jsx("p", { className: "font-bold text-lg text-center px-8", children: callError }),
+      /* @__PURE__ */ jsx("p", { className: "text-sm text-gray-400", children: "\u901A\u8A71\u3092\u7D42\u4E86\u3057\u307E\u3059..." })
+    ] });
+  }
+  return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black flex flex-col animate-in fade-in", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : "none", backgroundSize: "cover" }, children: [
+    /* @__PURE__ */ jsxs("div", { className: "relative flex-1 flex items-center justify-center backdrop-blur-md bg-black/30", children: [
+      /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "hidden" }),
+      remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover" }) : /* @__PURE__ */ jsxs("div", { className: "text-white flex flex-col items-center gap-4", children: [
+        /* @__PURE__ */ jsx("div", { className: "w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center animate-pulse", children: /* @__PURE__ */ jsx(User, { className: "w-10 h-10" }) }),
+        /* @__PURE__ */ jsx("p", { className: "font-bold text-lg drop-shadow-md", children: remoteStream ? isVideoEnabled ? "\u30D3\u30C7\u30AA\u3092\u53D7\u4FE1\u4E2D..." : "\u97F3\u58F0\u901A\u8A71\u4E2D..." : "\u63A5\u7D9A\u4E2D..." })
+      ] }),
+      needsRemotePlay && /* @__PURE__ */ jsxs("button", { onClick: resumeRemotePlayback, className: "absolute top-4 left-1/2 -translate-x-1/2 bg-white/90 text-gray-800 text-xs font-bold px-4 py-2 rounded-full shadow-lg", children: [
+        /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
+        "\u97F3\u58F0\u3092\u518D\u751F"
+      ] }),
+      isVideoEnabled && /* @__PURE__ */ jsxs("div", { className: "absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg transition-all", children: [
+        /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover transform scale-x-[-1]", style: { filter: getFilterStyle(activeEffect), willChange: "transform, filter" } }),
+        activeEffect && activeEffect !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/50 text-white text-[8px] px-1 rounded", children: activeEffect })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "fixed bottom-0 left-0 right-0 z-[2000] h-24 bg-black/80 flex items-center justify-center gap-8 pb-6 backdrop-blur-lg", children: [
+      /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `p-4 rounded-full transition-all ${isMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
+      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: isScreenSharing ? stopScreenShare : startScreenShare, className: `p-4 rounded-full transition-all ${isScreenSharing ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isScreenSharing ? /* @__PURE__ */ jsx(StopCircle, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(ArrowUpCircle, { className: "w-6 h-6" }) }),
+            isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: switchCamera, className: "p-4 rounded-full bg-gray-700 text-white hover:bg-gray-600 transition-all", children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
+/* @__PURE__ */ jsxs("button", { onClick: onEndCall, className: "p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
+        /* @__PURE__ */ jsx(PhoneOff, { className: "w-8 h-8" }),
+        /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u7D42\u4E86" })
+      ] }),
+      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `p-4 rounded-full transition-all ${isVideoOff ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }) })
+    ] })
+  ] });
+};
+const AIEffectGenerator = ({ user, onClose, showNotification, onSelectEffect }) => {
+  const [sourceImage, setSourceImage] = useState(null);
+  const [generatedEffects, setGeneratedEffects] = useState([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const canvasRef = useRef(null);
+  const handleImageUpload = (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setSourceImage(event.target.result);
+      generateEffects(event.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+  const generateEffects = async (imgSrc) => {
+    setIsProcessing(true);
+    setGeneratedEffects([]);
+    await new Promise((r) => setTimeout(r, 1500));
+    const img = new Image();
+    img.onload = () => {
+      const effects = [
+        { name: "Normal", filter: "none" },
+        { name: "Sepia", filter: "sepia(100%)" },
+        { name: "Grayscale", filter: "grayscale(100%)" },
+        { name: "Invert", filter: "invert(100%)" },
+        { name: "Hue", filter: "hue-rotate(90deg)" },
+        { name: "Contrast", filter: "contrast(200%)" },
+        { name: "Blur", filter: "blur(4px)" },
+        { name: "Bright", filter: "brightness(150%)" }
+      ];
+      const results = [];
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const MAX_SIZE = 200;
+      let w = img.width;
+      let h = img.height;
+      if (w > h) {
+        if (w > MAX_SIZE) {
+          h *= MAX_SIZE / w;
+          w = MAX_SIZE;
+        }
+      } else {
+        if (h > MAX_SIZE) {
+          w *= MAX_SIZE / h;
+          h = MAX_SIZE;
+        }
+      }
+      canvas.width = w;
+      canvas.height = h;
+      effects.forEach((effect) => {
+        ctx.filter = effect.filter;
+        ctx.drawImage(img, 0, 0, w, h);
+        results.push({ name: effect.name, filter: effect.filter, image: canvas.toDataURL("image/jpeg", 0.8) });
+      });
+      setGeneratedEffects(results);
+      setIsProcessing(false);
+      showNotification("AI\u304C8\u30D1\u30BF\u30FC\u30F3\u306E\u30A8\u30D5\u30A7\u30AF\u30C8\u3092\u751F\u6210\u3057\u307E\u3057\u305F\uFF01\u2728");
+    };
+    img.src = imgSrc;
+  };
+  const saveEffect = async (effect) => {
+    try {
+      await addDoc(collection(db, "artifacts", appId, "public", "data", "users", user.uid, "effects"), {
+        name: effect.name,
+        image: effect.image,
+        filter: effect.filter || null,
+        type: "created",
+        ownerId: user.uid,
+        creatorId: user.uid,
+        forSale: false,
+        price: 0,
+        soldCount: 0,
+        createdAt: serverTimestamp()
+      });
+      showNotification(`${effect.name} \u30A8\u30D5\u30A7\u30AF\u30C8\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F`);
+      if (onSelectEffect) onSelectEffect(effect.name);
+      onClose();
+    } catch (e) {
+      console.error(e);
+      showNotification("\u4FDD\u5B58\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+    }
+  };
+  return /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[2000] bg-black/90 flex flex-col items-center justify-center p-6 backdrop-blur-md animate-in fade-in", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]", children: [
+    /* @__PURE__ */ jsx("button", { onClick: onClose, className: "absolute top-4 right-4 bg-gray-100 p-2 rounded-full hover:bg-gray-200 z-10", children: /* @__PURE__ */ jsx(X, { className: "w-5 h-5" }) }),
+    /* @__PURE__ */ jsxs("h2", { className: "text-xl font-bold mb-4 flex items-center gap-2 flex-shrink-0", children: [
+      /* @__PURE__ */ jsx(Sparkles, { className: "w-6 h-6 text-purple-500" }),
+      " AI\u30A8\u30D5\u30A7\u30AF\u30C8\u751F\u6210"
+    ] }),
+    !sourceImage ? /* @__PURE__ */ jsx("div", { className: "flex flex-col items-center justify-center flex-1 border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50 hover:bg-gray-100 transition-colors", children: /* @__PURE__ */ jsxs("label", { className: "cursor-pointer flex flex-col items-center p-10 w-full h-full justify-center", children: [
+      /* @__PURE__ */ jsx(Upload, { className: "w-12 h-12 text-gray-400 mb-2" }),
+      /* @__PURE__ */ jsx("span", { className: "text-sm font-bold text-gray-500", children: "\u753B\u50CF\u3092\u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u3057\u3066\u751F\u6210" }),
+      /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*", onChange: handleImageUpload })
+    ] }) }) : /* @__PURE__ */ jsxs("div", { className: "flex flex-col flex-1 overflow-hidden", children: [
+      /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-2", children: isProcessing ? /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center justify-center h-64", children: [
+        /* @__PURE__ */ jsx(Loader2, { className: "w-12 h-12 animate-spin text-purple-500 mb-4" }),
+        /* @__PURE__ */ jsx("p", { className: "text-sm font-bold text-gray-500 animate-pulse", children: "AI\u304C\u601D\u8003\u4E2D..." })
+      ] }) : /* @__PURE__ */ jsx("div", { className: "grid grid-cols-2 gap-4", children: generatedEffects.map((ef, i) => /* @__PURE__ */ jsxs("div", { onClick: () => saveEffect(ef), className: "bg-white p-2 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center cursor-pointer hover:ring-2 ring-purple-500 transition-all group", children: [
+        /* @__PURE__ */ jsx("div", { className: "w-full aspect-square bg-gray-100 rounded-lg overflow-hidden mb-2 relative", children: /* @__PURE__ */ jsx("img", { src: ef.image, className: "w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" }) }),
+        /* @__PURE__ */ jsx("span", { className: "text-xs font-bold text-gray-700", children: ef.name })
+      ] }, i)) }) }),
+      /* @__PURE__ */ jsx("button", { onClick: () => {
+        setSourceImage(null);
+        setGeneratedEffects([]);
+      }, className: "mt-4 w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl flex-shrink-0", children: "\u3084\u308A\u76F4\u3059" })
+    ] }),
+    /* @__PURE__ */ jsx("canvas", { ref: canvasRef, className: "hidden" })
+  ] }) });
+};
+const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, showNotification }) => {
+  const [amount, setAmount] = useState("");
+  const [sending, setSending] = useState(false);
+  const handleSend = async () => {
+    const val = parseInt(amount, 10);
+    if (isNaN(val) || val <= 0) return showNotification("\u6B63\u306E\u6574\u6570\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+    if (val > myWallet) return showNotification("\u6B8B\u9AD8\u304C\u8DB3\u308A\u307E\u305B\u3093");
+    setSending(true);
+    try {
+      await runTransaction(db, async (t) => {
+        const senderRef = doc(db, "artifacts", appId, "public", "data", "users", myUid);
+        const receiverRef = doc(db, "artifacts", appId, "public", "data", "users", targetUid);
+        const senderDoc = await t.get(senderRef);
+        if (!senderDoc.exists() || senderDoc.data().wallet < val) throw "\u6B8B\u9AD8\u4E0D\u8DB3\u307E\u305F\u306F\u30A8\u30E9\u30FC";
+        t.update(senderRef, { wallet: increment(-val) });
+        t.update(receiverRef, { wallet: increment(val) });
+      });
+      showNotification(`${targetName}\u3055\u3093\u306B ${val}\u30B3\u30A4\u30F3\u9001\u308A\u307E\u3057\u305F`);
+      onClose();
+    } catch (e) {
+      showNotification("\u9001\u91D1\u30A8\u30E9\u30FC: " + e);
+    } finally {
+      setSending(false);
+    }
+  };
+  return /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[600] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-[32px] p-6 text-center shadow-2xl", children: [
+    /* @__PURE__ */ jsx("h3", { className: "font-bold text-lg mb-4 text-gray-800", children: "\u30B3\u30A4\u30F3\u3092\u9001\u308B" }),
+    /* @__PURE__ */ jsxs("div", { className: "bg-yellow-50 p-4 rounded-2xl mb-4 border border-yellow-100", children: [
+      /* @__PURE__ */ jsx("div", { className: "text-xs text-yellow-700 font-bold uppercase tracking-widest", children: "\u3042\u306A\u305F\u306E\u6B8B\u9AD8" }),
+      /* @__PURE__ */ jsx("div", { className: "text-3xl font-black text-yellow-500 mt-1", children: myWallet?.toLocaleString() })
+    ] }),
+    /* @__PURE__ */ jsxs("p", { className: "text-sm font-bold text-gray-500 mb-2", children: [
+      "To: ",
+      targetName
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "relative mb-6", children: [
+      /* @__PURE__ */ jsx("input", { type: "number", className: "w-full bg-gray-100 rounded-2xl p-4 text-center font-bold text-xl outline-none focus:ring-2 focus:ring-yellow-400", placeholder: "0", value: amount, onChange: (e) => setAmount(e.target.value) }),
+      /* @__PURE__ */ jsx("span", { className: "absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-xs", children: "COIN" })
+    ] }),
+    /* @__PURE__ */ jsx("button", { onClick: handleSend, disabled: sending, className: "w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-4 rounded-2xl shadow-lg transition-transform active:scale-95 mb-3", children: sending ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin mx-auto" }) : "\u9001\u91D1\u3059\u308B" }),
+    /* @__PURE__ */ jsx("button", { onClick: onClose, className: "text-gray-400 text-xs font-bold hover:text-gray-600", children: "\u30AD\u30E3\u30F3\u30BB\u30EB" })
+  ] }) });
+};
+const ContactSelectModal = ({ onClose, onSend, friends }) => /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl flex flex-col max-h-[70vh]", children: [
+  /* @__PURE__ */ jsxs("div", { className: "flex justify-between items-center mb-4", children: [
+    /* @__PURE__ */ jsx("h3", { className: "font-bold text-lg", children: "\u9023\u7D61\u5148\u3092\u9078\u629E" }),
+    /* @__PURE__ */ jsx("button", { onClick: onClose, children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) })
+  ] }),
+  /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto space-y-2 pr-2", children: friends.length === 0 ? /* @__PURE__ */ jsx("div", { className: "text-center py-10 text-gray-400 text-sm", children: "\u53CB\u3060\u3061\u304C\u3044\u307E\u305B\u3093" }) : friends.map((f) => /* @__PURE__ */ jsxs("div", { onClick: () => onSend(f), className: "flex items-center gap-3 p-3 hover:bg-gray-50 rounded-2xl cursor-pointer border border-transparent hover:border-gray-100 transition-all", children: [
+    /* @__PURE__ */ jsx("img", { src: f.avatar, className: "w-10 h-10 rounded-xl object-cover border" }),
+    /* @__PURE__ */ jsx("span", { className: "font-bold text-sm flex-1", children: f.name }),
+    /* @__PURE__ */ jsx(Plus, { className: "w-4 h-4 text-green-500" })
+  ] }, f.uid)) })
+] }) });
+const BirthdayCardModal = ({ onClose, onSend, toName }) => {
+  const [color, setColor] = useState("pink"), [message, setMessage] = useState("");
+  const colors = [{ id: "pink", class: "bg-pink-100 border-pink-300" }, { id: "blue", class: "bg-blue-100 border-blue-300" }, { id: "yellow", class: "bg-yellow-100 border-yellow-300" }, { id: "green", class: "bg-green-100 border-green-300" }];
+  return /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl", children: [
+    /* @__PURE__ */ jsxs("div", { className: "flex justify-between items-center mb-4", children: [
+      /* @__PURE__ */ jsx("h3", { className: "font-bold text-lg", children: "\u30AB\u30FC\u30C9\u3092\u9001\u308B" }),
+      /* @__PURE__ */ jsx("button", { onClick: onClose, children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) })
+    ] }),
+    /* @__PURE__ */ jsx("div", { className: "mb-4 flex gap-3", children: colors.map((c) => /* @__PURE__ */ jsx("button", { onClick: () => setColor(c.id), className: `w-10 h-10 rounded-full border-2 ${c.class} ${color === c.id ? "scale-125 ring-2 ring-gray-300" : ""}` }, c.id)) }),
+    /* @__PURE__ */ jsxs("div", { className: `p-4 rounded-2xl border-2 mb-4 ${colors.find((c) => c.id === color)?.class}`, children: [
+      /* @__PURE__ */ jsxs("div", { className: "font-bold text-gray-700 mb-2", children: [
+        "To: ",
+        toName
+      ] }),
+      /* @__PURE__ */ jsx("textarea", { className: "w-full bg-white/50 rounded-xl p-3 text-sm focus:outline-none min-h-[100px]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8...", value: message, onChange: (e) => setMessage(e.target.value) })
+    ] }),
+    /* @__PURE__ */ jsx("button", { onClick: () => onSend({ color, message }), disabled: !message.trim(), className: "w-full bg-pink-500 text-white font-bold py-3 rounded-2xl shadow-lg", children: "\u9001\u4FE1\u3059\u308B" })
+  ] }) });
+};
+const StickerBuyModal = ({ onClose, onGoToStore, packId }) => {
+  return /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[400] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center", children: [
+    /* @__PURE__ */ jsx("div", { className: "w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4", children: /* @__PURE__ */ jsx(ShoppingCart, { className: "w-8 h-8 text-blue-600" }) }),
+    /* @__PURE__ */ jsx("h3", { className: "font-bold text-lg mb-2", children: "\u3053\u306E\u30B9\u30BF\u30F3\u30D7\u3092\u8CFC\u5165\u3057\u307E\u3059\u304B\uFF1F" }),
+    /* @__PURE__ */ jsx("p", { className: "text-gray-500 text-sm mb-6", children: "\u30B7\u30E7\u30C3\u30D7\u3067\u8A73\u7D30\u3092\u78BA\u8A8D\u3067\u304D\u307E\u3059\u3002" }),
+    /* @__PURE__ */ jsxs("div", { className: "flex gap-3", children: [
+      /* @__PURE__ */ jsx("button", { onClick: onClose, className: "flex-1 py-3 bg-gray-100 hover:bg-gray-200 font-bold rounded-2xl text-gray-600 transition-colors", children: "\u30AD\u30E3\u30F3\u30BB\u30EB" }),
+      /* @__PURE__ */ jsx("button", { onClick: () => {
+        onGoToStore(packId);
+        onClose();
+      }, className: "flex-1 py-3 bg-blue-500 hover:bg-blue-600 font-bold rounded-2xl text-white transition-colors shadow-lg shadow-blue-200", children: "\u30B7\u30E7\u30C3\u30D7\u3078" })
+    ] })
+  ] }) });
+};
+const GroupAddMemberModal = ({ onClose, currentMembers, chatId, allUsers, profile, user, chats, showNotification }) => {
+  const [selected, setSelected] = useState([]);
+  const inviteableFriends = useMemo(() => {
+    const candidateUids = new Set(profile?.friends || []);
+    (chats || []).forEach((chat) => {
+      if (chat?.isGroup || !Array.isArray(chat?.participants) || !chat.participants.includes(user.uid)) return;
+      const otherUid = chat.participants.find((p) => p && p !== user.uid);
+      if (otherUid) candidateUids.add(otherUid);
+    });
+    return allUsers.filter((u) => u?.uid && candidateUids.has(u.uid) && !currentMembers.includes(u.uid));
+  }, [allUsers, chats, currentMembers, profile?.friends, user.uid]);
+  const toggle = (uid) => setSelected((prev) => prev.includes(uid) ? prev.filter((i) => i !== uid) : [...prev, uid]);
+  const handleInvite = async () => {
+    if (selected.length === 0) return;
+    try {
+      const addedNames = [];
+      await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { participants: arrayUnion(...selected) });
+      selected.forEach((uid) => {
+        const u = allUsers.find((user2) => user2.uid === uid);
+        if (u) addedNames.push(u.name);
+      });
+      await addDoc(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "messages"), {
+        senderId: user.uid,
+        content: `${profile.name}\u304C${addedNames.join("\u3001")}\u3092\u62DB\u5F85\u3057\u307E\u3057\u305F\u3002`,
+        type: "text",
+        createdAt: serverTimestamp(),
+        readBy: [user.uid]
+      });
+      showNotification("\u30E1\u30F3\u30D0\u30FC\u3092\u8FFD\u52A0\u3057\u307E\u3057\u305F");
+      onClose();
+    } catch (e) {
+      showNotification("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
+    }
+  };
+  return /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-3xl flex flex-col max-h-[70vh]", children: [
+    /* @__PURE__ */ jsxs("div", { className: "flex justify-between items-center p-4 border-b", children: [
+      /* @__PURE__ */ jsx("h3", { className: "font-bold text-lg", children: "\u30E1\u30F3\u30D0\u30FC\u3092\u8FFD\u52A0" }),
+      /* @__PURE__ */ jsx("button", { onClick: onClose, children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) })
+    ] }),
+    /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-4 space-y-2", children: inviteableFriends.length === 0 ? /* @__PURE__ */ jsx("div", { className: "text-center py-10 text-gray-400 text-sm", children: "\u62DB\u5F85\u3067\u304D\u308B\u53CB\u3060\u3061\u304C\u3044\u307E\u305B\u3093" }) : inviteableFriends.map((f) => /* @__PURE__ */ jsxs("div", { onClick: () => toggle(f.uid), className: "flex items-center gap-3 p-3 hover:bg-gray-50 rounded-2xl cursor-pointer border border-transparent transition-all", children: [
+      /* @__PURE__ */ jsx("img", { src: f.avatar, className: "w-10 h-10 rounded-xl object-cover border" }),
+      /* @__PURE__ */ jsx("span", { className: "font-bold text-sm flex-1", children: f.name }),
+      /* @__PURE__ */ jsx("div", { className: `w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${selected.includes(f.uid) ? "bg-green-500 border-green-500" : "border-gray-200"}`, children: selected.includes(f.uid) && /* @__PURE__ */ jsx(Check, { className: "w-4 h-4 text-white" }) })
+    ] }, f.uid)) }),
+    /* @__PURE__ */ jsx("div", { className: "p-4 border-t", children: /* @__PURE__ */ jsxs("button", { onClick: handleInvite, disabled: selected.length === 0, className: `w-full py-3 rounded-2xl font-bold shadow-lg text-white transition-all ${selected.length > 0 ? "bg-green-500" : "bg-gray-300"}`, children: [
+      "\u62DB\u5F85\u3059\u308B (",
+      selected.length,
+      ")"
+    ] }) })
+  ] }) });
+};
+const GroupEditModal = ({ onClose, chatId, currentName, currentIcon, currentMembers, allUsers, showNotification, user, profile }) => {
+  const [name, setName] = useState(currentName);
+  const [icon, setIcon] = useState(currentIcon);
+  const [kickTarget, setKickTarget] = useState(null);
+  const handleUpdate = async () => {
+    if (!name.trim()) return showNotification("\u30B0\u30EB\u30FC\u30D7\u540D\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044");
+    try {
+      await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { name, icon, updatedAt: serverTimestamp() });
+      if (name !== currentName || icon !== currentIcon) {
+        await addDoc(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "messages"), {
+          senderId: user.uid,
+          content: `${profile.name}\u304C\u30B0\u30EB\u30FC\u30D7\u60C5\u5831\u3092\u5909\u66F4\u3057\u307E\u3057\u305F\u3002`,
+          type: "text",
+          createdAt: serverTimestamp(),
+          readBy: [user.uid]
+        });
+      }
+      showNotification("\u30B0\u30EB\u30FC\u30D7\u60C5\u5831\u3092\u66F4\u65B0\u3057\u307E\u3057\u305F");
+      onClose();
+    } catch (e) {
+      showNotification("\u66F4\u65B0\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+    }
+  };
+  const executeKick = async () => {
+    if (!kickTarget) return;
+    const { uid, name: memberName } = kickTarget;
+    try {
+      await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { participants: arrayRemove(uid) });
+      await addDoc(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "messages"), {
+        senderId: user.uid,
+        content: `${profile.name}\u304C${memberName}\u3092\u9000\u4F1A\u3055\u305B\u307E\u3057\u305F\u3002`,
+        type: "text",
+        createdAt: serverTimestamp(),
+        readBy: [user.uid]
+      });
+      showNotification(`${memberName}\u3092\u524A\u9664\u3057\u307E\u3057\u305F`);
+    } catch (e) {
+      showNotification("\u524A\u9664\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+    } finally {
+      setKickTarget(null);
+    }
+  };
+  return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm", children: [
+    /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl flex flex-col max-h-[85vh]", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex justify-between items-center mb-6 border-b pb-4 shrink-0", children: [
+        /* @__PURE__ */ jsx("h3", { className: "font-bold text-lg", children: "\u30B0\u30EB\u30FC\u30D7\u8A2D\u5B9A" }),
+        /* @__PURE__ */ jsx("button", { onClick: onClose, children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6 text-gray-500" }) })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto scrollbar-hide", children: [
+        /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center gap-6 mb-8", children: [
+          /* @__PURE__ */ jsxs("div", { className: "relative group", children: [
+            /* @__PURE__ */ jsx("img", { src: icon, className: "w-24 h-24 rounded-3xl object-cover bg-gray-100 border shadow-sm" }),
+            /* @__PURE__ */ jsxs("label", { className: "absolute bottom-0 right-0 bg-green-500 p-2 rounded-full text-white cursor-pointer shadow-lg border-2 border-white hover:bg-green-600 transition-colors", children: [
+              /* @__PURE__ */ jsx(CameraIcon, { className: "w-4 h-4" }),
+              /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*", onChange: (e) => handleCompressedUpload(e, (d) => setIcon(d)) })
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { className: "w-full", children: [
+            /* @__PURE__ */ jsx("label", { className: "text-xs font-bold text-gray-400 mb-1 block", children: "\u30B0\u30EB\u30FC\u30D7\u540D" }),
+            /* @__PURE__ */ jsx("input", { className: "w-full text-center text-lg font-bold border-b py-2 focus:outline-none focus:border-green-500 bg-transparent", placeholder: "\u30B0\u30EB\u30FC\u30D7\u540D\u3092\u5165\u529B", value: name, onChange: (e) => setName(e.target.value) })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "mb-6", children: [
+          /* @__PURE__ */ jsxs("h4", { className: "text-xs font-bold text-gray-400 mb-2 uppercase flex justify-between", children: [
+            /* @__PURE__ */ jsxs("span", { children: [
+              "\u30E1\u30F3\u30D0\u30FC (",
+              currentMembers.length,
+              ")"
+            ] }),
+            /* @__PURE__ */ jsx("span", { className: "text-[10px] text-gray-400 font-normal", children: "\u7BA1\u7406\u8005\u6A29\u9650: \u524A\u9664\u53EF\u80FD" })
+          ] }),
+          /* @__PURE__ */ jsx("div", { className: "space-y-2", children: currentMembers.map((uid) => {
+            const m = allUsers.find((u) => u.uid === uid);
+            if (!m) return null;
+            const isMe = uid === user.uid;
+            return /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 border border-transparent hover:border-gray-100", children: [
+              /* @__PURE__ */ jsx("img", { src: m.avatar, className: "w-10 h-10 rounded-full object-cover border" }),
+              /* @__PURE__ */ jsx("div", { className: "flex-1 min-w-0", children: /* @__PURE__ */ jsxs("div", { className: "font-bold text-sm truncate", children: [
+                m.name,
+                " ",
+                isMe && /* @__PURE__ */ jsx("span", { className: "text-gray-400 text-xs", children: "(\u81EA\u5206)" })
+              ] }) }),
+              !isMe && /* @__PURE__ */ jsxs("button", { onClick: () => setKickTarget({ uid, name: m.name }), className: "p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors flex items-center gap-1 group", title: "\u5F37\u5236\u9000\u4F1A", children: [
+                /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap", children: "\u5F37\u5236\u9000\u4F1A" }),
+                /* @__PURE__ */ jsx(UserMinus, { className: "w-5 h-5" })
+              ] })
+            ] }, uid);
+          }) })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsx("button", { onClick: handleUpdate, className: "w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-2xl shadow-lg transition-all shrink-0 mt-4", children: "\u4FDD\u5B58\u3059\u308B" })
+    ] }),
+    kickTarget && /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[400] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl", children: [
+      /* @__PURE__ */ jsx("h3", { className: "font-bold text-lg mb-2 text-center text-gray-800", children: "\u5F37\u5236\u9000\u4F1A\u306E\u78BA\u8A8D" }),
+      /* @__PURE__ */ jsxs("p", { className: "text-center text-gray-600 mb-6 text-sm", children: [
+        kickTarget.name,
+        " \u3092\u30B0\u30EB\u30FC\u30D7\u304B\u3089\u9000\u4F1A\u3055\u305B\u307E\u3059\u304B\uFF1F",
+        /* @__PURE__ */ jsx("br", {}),
+        /* @__PURE__ */ jsx("span", { className: "text-xs text-red-500", children: "\u3053\u306E\u64CD\u4F5C\u306F\u5143\u306B\u623B\u305B\u307E\u305B\u3093\u3002" })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "flex gap-3", children: [
+        /* @__PURE__ */ jsx("button", { onClick: () => setKickTarget(null), className: "flex-1 py-3 bg-gray-100 hover:bg-gray-200 font-bold rounded-2xl text-gray-600 transition-colors", children: "\u30AD\u30E3\u30F3\u30BB\u30EB" }),
+        /* @__PURE__ */ jsx("button", { onClick: executeKick, className: "flex-1 py-3 bg-red-500 hover:bg-red-600 font-bold rounded-2xl text-white transition-colors shadow-lg shadow-red-200", children: "\u9000\u4F1A\u3055\u305B\u308B" })
+      ] })
+    ] }) })
+  ] });
+};
+const LeaveGroupConfirmModal = ({ onClose, onLeave }) => /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-red-100", children: [
+  /* @__PURE__ */ jsxs("div", { className: "text-center mb-6", children: [
+    /* @__PURE__ */ jsx("div", { className: "mx-auto w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-3", children: /* @__PURE__ */ jsx(LogOut, { className: "w-6 h-6 text-red-600" }) }),
+    /* @__PURE__ */ jsx("h3", { className: "font-black text-lg text-red-700", children: "\u30B0\u30EB\u30FC\u30D7\u3092\u9000\u4F1A\u3057\u307E\u3059\u304B\uFF1F" }),
+    /* @__PURE__ */ jsxs("p", { className: "text-sm text-gray-600 mt-2", children: [
+      "\u3053\u306E\u64CD\u4F5C\u306F\u53D6\u308A\u6D88\u305B\u307E\u305B\u3093\u3002",
+      /* @__PURE__ */ jsx("br", {}),
+      "\u672C\u5F53\u306B\u9000\u4F1A\u3057\u3066\u3082\u3088\u308D\u3057\u3044\u3067\u3059\u304B\uFF1F"
+    ] })
+  ] }),
+  /* @__PURE__ */ jsxs("div", { className: "flex gap-3", children: [
+    /* @__PURE__ */ jsx("button", { onClick: onClose, className: "flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-2xl transition-colors", children: "\u30AD\u30E3\u30F3\u30BB\u30EB" }),
+    /* @__PURE__ */ jsx("button", { onClick: onLeave, className: "flex-1 py-3 bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl transition-colors shadow-lg shadow-red-200", children: "\u9000\u4F1A\u3059\u308B" })
+  ] })
+] }) });
+const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }) => {
+  const caller = allUsers.find((u) => u.uid === callData.callerId);
+  const isVideo = callData?.callType !== "audio";
+  return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[500] bg-gray-900 flex flex-col items-center justify-between py-16 px-6 animate-in fade-in duration-300", children: [
+    /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 z-0 overflow-hidden", children: [
+      /* @__PURE__ */ jsx(
+        "img",
+        {
+          src: caller?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=caller",
+          className: "w-full h-full object-cover blur-3xl opacity-50 scale-125",
+          alt: "background"
+        }
+      ),
+      /* @__PURE__ */ jsx("div", { className: "absolute inset-0 bg-black/40" })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "relative z-10 flex flex-col items-center gap-6 mt-12", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center gap-2", children: [
+        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-white/80 mb-2", children: [
+          /* @__PURE__ */ jsx(PhoneCall, { className: "w-5 h-5 animate-pulse" }),
+          /* @__PURE__ */ jsx("span", { className: "text-sm font-bold tracking-widest", children: "\u7740\u4FE1\u4E2D..." })
+        ] }),
+        /* @__PURE__ */ jsx("h2", { className: "text-4xl font-bold text-white drop-shadow-xl text-center leading-tight", children: caller?.name || "Unknown" }),
+        /* @__PURE__ */ jsx("div", { className: "text-white/70 text-sm font-bold mt-1", children: isVideo ? "\u30D3\u30C7\u30AA\u901A\u8A71" : "\u97F3\u58F0\u901A\u8A71" })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "relative mt-8", children: [
+        /* @__PURE__ */ jsx("div", { className: "absolute inset-0 rounded-full bg-white/20 animate-[ping_2s_ease-in-out_infinite]" }),
+        /* @__PURE__ */ jsx("div", { className: "absolute inset-0 rounded-full bg-white/10 animate-[ping_3s_ease-in-out_infinite_delay-500ms]" }),
+        /* @__PURE__ */ jsx(
+          "img",
+          {
+            src: caller?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=caller",
+            className: "w-40 h-40 rounded-full border-[6px] border-white/20 shadow-2xl object-cover relative z-10 bg-gray-800"
+          }
+        )
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "relative z-10 w-full flex justify-between items-end px-4 mb-8 max-w-sm", children: [
+      /* @__PURE__ */ jsxs("button", { onClick: onDecline, className: "flex flex-col items-center gap-4 group", children: [
+        /* @__PURE__ */ jsx("div", { className: "w-20 h-20 bg-red-500 rounded-full flex items-center justify-center shadow-lg group-active:scale-95 transition-all hover:bg-red-600 border border-red-400", children: /* @__PURE__ */ jsx(PhoneOff, { className: "w-10 h-10 text-white fill-current" }) }),
+        /* @__PURE__ */ jsx("span", { className: "text-white text-sm font-bold shadow-black drop-shadow-md", children: "\u62D2\u5426" })
+      ] }),
+      /* @__PURE__ */ jsxs("button", { onClick: onAccept, className: "flex flex-col items-center gap-4 group", children: [
+        /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+          /* @__PURE__ */ jsx("div", { className: "absolute inset-0 bg-green-500 rounded-full animate-ping opacity-50" }),
+          /* @__PURE__ */ jsx("div", { className: "w-20 h-20 bg-green-500 rounded-full flex items-center justify-center shadow-lg group-active:scale-95 transition-all hover:bg-green-600 border border-green-400 relative z-10", children: isVideo ? /* @__PURE__ */ jsx(Video, { className: "w-10 h-10 text-white fill-current" }) : /* @__PURE__ */ jsx(Phone, { className: "w-10 h-10 text-white fill-current" }) })
+        ] }),
+        /* @__PURE__ */ jsx("span", { className: "text-white text-sm font-bold shadow-black drop-shadow-md", children: "\u5FDC\u7B54" })
+      ] })
+    ] })
+  ] });
+};
+const GroupVideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerProp, isVideoEnabled = true, activeEffect, backgroundUrl, effects = [] }) => {
+  void callData;
+  void isCallerProp;
+  void activeEffect;
+  void backgroundUrl;
+  void effects;
+  const [remoteStreams, setRemoteStreams] = useState({});
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
+  const [callError, setCallError] = useState(null);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [needsRemotePlay, setNeedsRemotePlay] = useState(false);
+
+  const localVideoRef = useRef(null);
+  const pcsRef = useRef(new Map());
+  const localStreamRef = useRef(null);
+  const screenStreamRef = useRef(null);
+  const cameraDeviceIdsRef = useRef([]);
+  const cameraIndexRef = useRef(0);
+  const unsubscribersRef = useRef([]);
+  const isMountedRef = useRef(true);
+  const startedRef = useRef(false);
+
+  const safeSetState = (setter) => {
+    if (!isMountedRef.current) return;
+    setter();
+  };
+
+  const cleanup = () => {
+    unsubscribersRef.current.forEach((u) => {
+      try { u && u(); } catch {}
+    });
+    unsubscribersRef.current = [];
+    pcsRef.current.forEach((pc) => {
+      try { pc.ontrack = null; pc.onicecandidate = null; pc.onconnectionstatechange = null; pc.close(); } catch {}
+    });
+    pcsRef.current.clear();
+    if (screenStreamRef.current) {
+      try { screenStreamRef.current.getTracks().forEach((t) => t.stop()); } catch {}
+      screenStreamRef.current = null;
+    }
+    if (localStreamRef.current) {
+      try { localStreamRef.current.getTracks().forEach((t) => t.stop()); } catch {}
+      localStreamRef.current = null;
+    }
+    safeSetState(() => setRemoteStreams({}));
+  };
+
+  const end = () => {
+    cleanup();
+    try { onEndCall && onEndCall(); } catch {}
+  };
+
+  const ensureCameras = async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter((d) => d.kind === "videoinput").map((d) => d.deviceId).filter(Boolean);
+      cameraDeviceIdsRef.current = cams;
+      if (cameraIndexRef.current >= cams.length) cameraIndexRef.current = 0;
+    } catch {
+      cameraDeviceIdsRef.current = [];
+      cameraIndexRef.current = 0;
+    }
+  };
+
+  const getCameraStream = async (deviceId) => {
+    const constraints = {
+      audio: true,
+      video: isVideoOff ? false : (deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "user" })
+    };
+    return await navigator.mediaDevices.getUserMedia(constraints);
+  };
+
+  const replaceVideoTrackForAll = async (newTrack) => {
+    pcsRef.current.forEach((pc) => {
+      try {
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video") || pc.getSenders().find((s) => s.track?.kind === "video");
+        if (sender) sender.replaceTrack(newTrack);
+      } catch {}
+    });
+  };
+
+  const attachLocalPreview = (stream) => {
+    const el = localVideoRef.current;
+    if (!el) return;
+    try {
+      el.srcObject = stream;
+      el.muted = true;
+      const p = el.play?.();
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    } catch {}
+  };
+
+  const upsertRemoteStream = (peerId, stream) => {
+    safeSetState(() => setRemoteStreams((prev) => {
+      if (prev[peerId] === stream) return prev;
+      return { ...prev, [peerId]: stream };
+    }));
+  };
+
+  const createPeerConnection = async ({ peerId, isOfferer, connDocRef, offerCandidatesCol, answerCandidatesCol }) => {
+    const pc = new RTCPeerConnection(rtcConfig);
+    pcsRef.current.set(peerId, pc);
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      if (state === "failed") {
+        try { pc.restartIce && pc.restartIce(); } catch {}
+      }
+    };
+
+    pc.onicecandidate = (event) => {
+      if (!event.candidate) return;
+      try {
+        addDoc(isOfferer ? offerCandidatesCol : answerCandidatesCol, event.candidate.toJSON());
+      } catch {}
+    };
+
+    pc.ontrack = (event) => {
+      const [stream] = event.streams || [];
+      if (!stream) return;
+      upsertRemoteStream(peerId, stream);
+      safeSetState(() => setNeedsRemotePlay(true));
+    };
+
+    // Add local tracks
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        try { pc.addTrack(track, localStreamRef.current); } catch {}
+      });
+    }
+
+    // Listen candidates from the other side
+    const otherCandidatesCol = isOfferer ? answerCandidatesCol : offerCandidatesCol;
+    const unsubCand = onSnapshot(otherCandidatesCol, (snap) => {
+      snap.docChanges().forEach((change) => {
+        if (change.type !== "added") return;
+        const data = change.doc.data();
+        try { pc.addIceCandidate(new RTCIceCandidate(data)); } catch {}
+      });
+    });
+    unsubscribersRef.current.push(unsubCand);
+
+    // Listen for offer/answer updates
+    const unsubConn = onSnapshot(connDocRef, async (snap) => {
+      const data = snap.data();
+      if (!data) return;
+      try {
+        if (!isOfferer && data.offer && !pc.currentRemoteDescription) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await setDoc(connDocRef, { answer: { type: answer.type, sdp: answer.sdp }, answeredAt: serverTimestamp() }, { merge: true });
+        }
+        if (isOfferer && data.answer && !pc.currentRemoteDescription) {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        }
+      } catch {}
+    });
+    unsubscribersRef.current.push(unsubConn);
+
+    if (isOfferer) {
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await setDoc(connDocRef, {
+          offer: { type: offer.type, sdp: offer.sdp },
+          offerer: user.uid,
+          answerer: peerId,
+          createdAt: serverTimestamp()
+        }, { merge: true });
+      } catch (e) {
+        safeSetState(() => setCallError("通話の開始に失敗しました。"));
+      }
+    }
+  };
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
+  useEffect(() => {
+    const run = async () => {
+      if (startedRef.current) return;
+      startedRef.current = true;
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCallError("このブラウザは通話に対応していません。");
+        return;
+      }
+
+      await ensureCameras();
+
+      // local stream
+      try {
+        const deviceId = cameraDeviceIdsRef.current[cameraIndexRef.current];
+        const stream = await getCameraStream(deviceId);
+        localStreamRef.current = stream;
+        attachLocalPreview(stream);
+      } catch {
+        setCallError("カメラ/マイクにアクセスできません。");
+        return;
+      }
+
+      const basePath = ["artifacts", appId, "public", "data", "chats", chatId, "call_signaling"];
+      const participantsCol = collection(db, ...basePath, "participants");
+      const connectionsCol = collection(db, ...basePath, "connections");
+
+      // join
+      try {
+        await setDoc(doc(participantsCol, user.uid), { joinedAt: serverTimestamp() }, { merge: true });
+      } catch {}
+
+      const unsubParts = onSnapshot(participantsCol, async (snap) => {
+        const ids = snap.docs.map((d) => d.id).filter((id) => id && id !== user.uid);
+        for (const peerId of ids) {
+          if (pcsRef.current.has(peerId)) continue;
+
+          const sorted = [user.uid, peerId].sort();
+          const connId = `${sorted[0]}__${sorted[1]}`;
+          const connDocRef = doc(connectionsCol, connId);
+          const offerCandidatesCol = collection(connDocRef, "offerCandidates");
+          const answerCandidatesCol = collection(connDocRef, "answerCandidates");
+          const isOfferer = user.uid === sorted[0];
+
+          await createPeerConnection({ peerId, isOfferer, connDocRef, offerCandidatesCol, answerCandidatesCol });
+        }
+
+        // remove streams for peers that left
+        safeSetState(() => setRemoteStreams((prev) => {
+          const next = { ...prev };
+          Object.keys(next).forEach((pid) => {
+            if (!ids.includes(pid)) delete next[pid];
+          });
+          return next;
+        }));
+      });
+      unsubscribersRef.current.push(unsubParts);
+    };
+
+    run();
+
+    return () => {
+      // leave participant
+      const basePath = ["artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "participants"];
+      try { deleteDoc(doc(db, ...basePath, user.uid)); } catch {}
+      cleanup();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId]);
+
+  useEffect(() => {
+    if (!needsRemotePlay) return;
+    // attempt play on all remote videos via a tick; actual video elements handle this
+    const t = setTimeout(() => setNeedsRemotePlay(false), 300);
+    return () => clearTimeout(t);
+  }, [needsRemotePlay]);
+
+  const toggleMute = () => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      try {
+        localStreamRef.current?.getAudioTracks()?.forEach((t) => (t.enabled = !next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const toggleVideo = () => {
+    setIsVideoOff((prev) => {
+      const next = !prev;
+      try {
+        localStreamRef.current?.getVideoTracks()?.forEach((t) => (t.enabled = !next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleSwitchCamera = async () => {
+    try {
+      await ensureCameras();
+      const cams = cameraDeviceIdsRef.current;
+      if (!cams || cams.length === 0) return;
+
+      cameraIndexRef.current = (cameraIndexRef.current + 1) % cams.length;
+      const deviceId = cams[cameraIndexRef.current];
+
+      const newStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } }, audio: true });
+      const newVideoTrack = newStream.getVideoTracks()[0];
+
+      // keep existing audio track if present
+      const oldAudio = localStreamRef.current?.getAudioTracks?.()[0] || newStream.getAudioTracks()[0];
+
+      const composed = new MediaStream();
+      if (oldAudio) composed.addTrack(oldAudio);
+      if (newVideoTrack) composed.addTrack(newVideoTrack);
+
+      // stop old video tracks
+      try { localStreamRef.current?.getVideoTracks()?.forEach((t) => t.stop()); } catch {}
+      localStreamRef.current = composed;
+      attachLocalPreview(composed);
+
+      if (newVideoTrack) await replaceVideoTrackForAll(newVideoTrack);
+    } catch {}
+  };
+
+  const startScreenShare = async () => {
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      screenStreamRef.current = screenStream;
+      const screenTrack = screenStream.getVideoTracks()[0];
+      if (!screenTrack) return;
+
+      await replaceVideoTrackForAll(screenTrack);
+      // update local preview to screen
+      attachLocalPreview(screenStream);
+
+      setIsScreenSharing(true);
+
+      screenTrack.onended = async () => {
+        try { await stopScreenShare(); } catch {}
+      };
+    } catch {}
+  };
+
+  const stopScreenShare = async () => {
+    try {
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach((t) => t.stop());
+        screenStreamRef.current = null;
+      }
+      const cams = cameraDeviceIdsRef.current;
+      const deviceId = cams && cams.length ? cams[cameraIndexRef.current] : null;
+      const stream = await getCameraStream(deviceId);
+      const camTrack = stream.getVideoTracks()[0];
+
+      // keep audio from existing stream if possible
+      const audio = localStreamRef.current?.getAudioTracks?.()[0] || stream.getAudioTracks()[0];
+
+      const composed = new MediaStream();
+      if (audio) composed.addTrack(audio);
+      if (camTrack) composed.addTrack(camTrack);
+
+      // stop old video tracks
+      try { localStreamRef.current?.getVideoTracks()?.forEach((t) => t.stop()); } catch {}
+      localStreamRef.current = composed;
+
+      attachLocalPreview(composed);
+      if (camTrack) await replaceVideoTrackForAll(camTrack);
+
+      setIsScreenSharing(false);
+    } catch {}
+  };
+
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) return await stopScreenShare();
+    return await startScreenShare();
+  };
+
+  const remoteEntries = Object.entries(remoteStreams || {});
+  const tiles = 1 + remoteEntries.length;
+  const cols = Math.max(1, Math.min(3, Math.ceil(Math.sqrt(tiles))));
+  const gridStyle = { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: "8px" };
+
+  return /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 bg-black z-[9999] flex flex-col", children: [
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 p-3", children: [
+      callError ? /* @__PURE__ */ jsxs("div", { className: "text-white text-sm", children: [
+        /* @__PURE__ */ jsx("div", { className: "font-bold mb-2", children: "通話エラー" }),
+        /* @__PURE__ */ jsx("div", { className: "opacity-80", children: callError })
+      ] }) : null,
+      /* @__PURE__ */ jsxs("div", { style: gridStyle, className: "w-full h-full", children: [
+        /* local tile */
+        /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover rounded-xl", style: { willChange: "transform, filter" } }),
+        /* remote tiles */
+        ...remoteEntries.map(([peerId, stream]) => /* @__PURE__ */ jsx("video", {
+          autoPlay: true,
+          playsInline: true,
+          className: "w-full h-full object-cover rounded-xl",
+          ref: (el) => {
+            if (!el) return;
+            try {
+              if (el.srcObject !== stream) el.srcObject = stream;
+              const p = el.play?.();
+              if (p && typeof p.catch === "function") p.catch(() => {});
+            } catch {}
+          }
+        }, peerId))
+      ] })
+    ] }),
+    /* controls (reuse existing style classes as-is) */
+    /* @__PURE__ */ jsxs("div", { className: "p-3 flex items-center justify-center gap-2 bg-black/60", children: [
+      /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: "px-3 py-2 rounded-full bg-white/10 text-white text-xs font-bold", children: isMuted ? "ミュート解除" : "ミュート" }),
+      /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: "px-3 py-2 rounded-full bg-white/10 text-white text-xs font-bold", children: isVideoOff ? "ビデオON" : "ビデオOFF" }),
+      /* @__PURE__ */ jsx("button", { onClick: handleSwitchCamera, className: "px-3 py-2 rounded-full bg-white/10 text-white text-xs font-bold", children: "カメラ切替" }),
+      /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, className: "px-3 py-2 rounded-full bg-white/10 text-white text-xs font-bold", children: isScreenSharing ? "共有停止" : "画面共有" }),
+      /* @__PURE__ */ jsx("button", { onClick: end, className: "px-3 py-2 rounded-full bg-red-600 text-white text-xs font-bold", children: "終了" })
+    ] })
+  ] });
+};
+
+
+const OutgoingCallOverlay = ({ callData, onCancel, allUsers }) => /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[500] bg-gray-900 flex flex-col items-center justify-between py-24 px-6 animate-in fade-in duration-300", children: [
+  /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center gap-6 mt-10", children: [
+    /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+      /* @__PURE__ */ jsx("div", { className: "absolute inset-0 rounded-full bg-white/10 animate-pulse" }),
+      /* @__PURE__ */ jsx("div", { className: "w-32 h-32 rounded-full bg-gray-700 flex items-center justify-center border-4 border-white/50 shadow-2xl relative z-10", children: /* @__PURE__ */ jsx(Video, { className: "w-14 h-14 text-white opacity-80" }) })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "text-center text-white", children: [
+      /* @__PURE__ */ jsx("h2", { className: "text-2xl font-bold mb-2", children: "\u767A\u4FE1\u4E2D..." }),
+      /* @__PURE__ */ jsx("p", { className: "text-sm opacity-60", children: "\u76F8\u624B\u306E\u5FDC\u7B54\u3092\u5F85\u3063\u3066\u3044\u307E\u3059" })
+    ] })
+  ] }),
+  /* @__PURE__ */ jsx("div", { className: "w-full flex justify-center items-center mb-10", children: /* @__PURE__ */ jsxs("button", { onClick: onCancel, className: "flex flex-col items-center gap-3 group", children: [
+    /* @__PURE__ */ jsx("div", { className: "w-20 h-20 bg-red-500 rounded-full flex items-center justify-center shadow-lg group-active:scale-95 transition-all hover:bg-red-600", children: /* @__PURE__ */ jsx(X, { className: "w-10 h-10 text-white" }) }),
+    /* @__PURE__ */ jsx("span", { className: "text-white text-xs font-bold", children: "\u30AD\u30E3\u30F3\u30BB\u30EB" })
+  ] }) })
+] });
+const CallAcceptedOverlay = ({ callData, onJoin }) => /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[500] bg-gray-900/90 flex flex-col items-center justify-center px-6 animate-in fade-in duration-300 backdrop-blur-sm", children: /* @__PURE__ */ jsxs("div", { className: "bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border border-white/20", children: [
+  /* @__PURE__ */ jsx("div", { className: "w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce", children: /* @__PURE__ */ jsx(Video, { className: "w-10 h-10 text-green-600" }) }),
+  /* @__PURE__ */ jsx("h2", { className: "text-2xl font-bold text-gray-800 mb-2", children: "\u76F8\u624B\u304C\u5FDC\u7B54\u3057\u307E\u3057\u305F" }),
+  /* @__PURE__ */ jsx("p", { className: "text-gray-500 mb-8 text-sm", children: "\u4E0B\u306E\u30DC\u30BF\u30F3\u3092\u62BC\u3057\u3066\u901A\u8A71\u3092\u958B\u59CB\u3057\u3066\u304F\u3060\u3055\u3044" }),
+  /* @__PURE__ */ jsxs("button", { onClick: onJoin, className: "w-full py-4 bg-green-500 hover:bg-green-600 text-white font-bold rounded-2xl transition-all shadow-lg shadow-green-200 transform hover:scale-[1.02] flex items-center justify-center gap-2", children: [
+    /* @__PURE__ */ jsx(Video, { className: "w-5 h-5" }),
+    "\u901A\u8A71\u306B\u53C2\u52A0\u3059\u308B"
+  ] })
+] }) });
+const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, myProfile, allUsers, showNotification }) => {
+  const myFriends = myProfile?.friends || [];
+  const myFriendsSet = useMemo(() => new Set(myFriends), [myFriends]);
+  const friendFriends = friend?.friends || [];
+  const isFriend = myFriendsSet.has(friend?.uid);
+  const isHidden = (myProfile?.hiddenFriends || []).includes(friend?.uid);
+  const mutualCount = useMemo(() => {
+    let n = 0;
+    for (const uid of friendFriends) {
+      if (!uid || uid === myUid) continue;
+      if (myFriendsSet.has(uid)) n++;
+    }
+    return n;
+  }, [friendFriends, myFriendsSet, myUid]);
+  const fofCandidateCount = useMemo(() => {
+    let n = 0;
+    for (const uid of friendFriends) {
+      if (!uid || uid === myUid) continue;
+      if (!myFriendsSet.has(uid)) n++;
+    }
+    return n;
+  }, [friendFriends, myFriendsSet, myUid]);
+  const toggleHideFriend = async () => {
+    if (!myUid || !friend?.uid) return;
+    if (!isFriend) return;
+    try {
+      const userRef = doc(db, "artifacts", appId, "public", "data", "users", myUid);
+      if (isHidden) {
+        await updateDoc(userRef, { hiddenFriends: arrayRemove(friend.uid) });
+        showNotification?.("\u975E\u8868\u793A\u3092\u89E3\u9664\u3057\u307E\u3057\u305F");
+      } else {
+        const ok = window.confirm("\u3053\u306E\u53CB\u3060\u3061\u3092\u975E\u8868\u793A\u306B\u3057\u307E\u3059\u304B\uFF1F\n\uFF08\u53CB\u3060\u3061\u95A2\u4FC2\u306F\u89E3\u9664\u3055\u308C\u307E\u305B\u3093\uFF09");
+        if (!ok) return;
+        await updateDoc(userRef, { hiddenFriends: arrayUnion(friend.uid) });
+        showNotification?.("\u975E\u8868\u793A\u306B\u3057\u307E\u3057\u305F");
+      }
+      onClose?.();
+    } catch (e) {
+      console.error(e);
+      showNotification?.("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
+    }
+  };
+  return /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-[40px] overflow-hidden shadow-2xl relative flex flex-col items-center pb-8", children: [
+    /* @__PURE__ */ jsx("button", { onClick: onClose, className: "absolute top-4 right-4 z-10 bg-black/20 text-white p-2 rounded-full backdrop-blur-md hover:bg-black/30", children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) }),
+    /* @__PURE__ */ jsx("div", { className: "w-full h-48 bg-gray-200", children: /* @__PURE__ */ jsx("img", { src: friend.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80", className: "w-full h-full object-cover" }) }),
+    /* @__PURE__ */ jsx("div", { className: "-mt-16 mb-4 relative", children: /* @__PURE__ */ jsx("img", { src: friend.avatar, className: "w-32 h-32 rounded-[40px] border-[6px] border-white object-cover shadow-lg" }) }),
+    /* @__PURE__ */ jsx("h2", { className: "text-2xl font-bold mb-1", children: friend.name }),
+    /* @__PURE__ */ jsxs("p", { className: "text-xs text-gray-400 font-mono mb-4", children: [
+      "ID: ",
+      friend.id
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "w-full px-8 mb-4 grid grid-cols-3 gap-2", children: [
+      /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl p-3 text-center border", children: [
+        /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-400", children: "\u53CB\u3060\u3061" }),
+        /* @__PURE__ */ jsx("div", { className: "text-lg font-black text-gray-800", children: friendFriends.length })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl p-3 text-center border", children: [
+        /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-400", children: "\u5171\u901A" }),
+        /* @__PURE__ */ jsx("div", { className: "text-lg font-black text-gray-800", children: mutualCount })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl p-3 text-center border", children: [
+        /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-400", children: "\u53CB\u3060\u3061\u306E\u53CB\u3060\u3061" }),
+        /* @__PURE__ */ jsx("div", { className: "text-lg font-black text-gray-800", children: fofCandidateCount })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsx("div", { className: "w-full px-8 mb-6", children: /* @__PURE__ */ jsx("p", { className: "text-center text-sm text-gray-600 bg-gray-50 py-3 px-4 rounded-2xl border", children: friend.status || "\u30B9\u30C6\u30FC\u30BF\u30B9\u306A\u3057" }) }),
+    /* @__PURE__ */ jsxs("div", { className: "flex gap-3 w-full px-8", children: [
+      /* @__PURE__ */ jsxs(
+        "button",
+        {
+          onClick: () => {
+            onStartChat?.(friend.uid);
+            onClose?.();
+          },
+          className: "flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2",
+          children: [
+            /* @__PURE__ */ jsx(MessageCircle, { className: "w-5 h-5" }),
+            " \u30C8\u30FC\u30AF"
+          ]
+        }
+      ),
+      /* @__PURE__ */ jsxs(
+        "button",
+        {
+          onClick: onTransfer,
+          className: "flex-1 py-3 bg-yellow-500 text-white rounded-2xl font-bold shadow-lg shadow-yellow-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2",
+          children: [
+            /* @__PURE__ */ jsx(Coins, { className: "w-5 h-5" }),
+            " \u9001\u91D1"
+          ]
+        }
+      )
+    ] }),
+    isFriend && /* @__PURE__ */ jsx("div", { className: "w-full px-8 mt-3", children: /* @__PURE__ */ jsxs(
+      "button",
+      {
+        onClick: toggleHideFriend,
+        className: `w-full py-3 rounded-2xl font-bold border transition-colors flex items-center justify-center gap-2 ${isHidden ? "bg-white text-gray-700 hover:bg-gray-50" : "bg-gray-900 text-white hover:bg-black"}`,
+        children: [
+          isHidden ? /* @__PURE__ */ jsx(Eye, { className: "w-5 h-5" }) : /* @__PURE__ */ jsx(EyeOff, { className: "w-5 h-5" }),
+          isHidden ? "\u975E\u8868\u793A\u3092\u89E3\u9664" : "\u975E\u8868\u793A\u306B\u3059\u308B"
+        ]
+      }
+    ) })
+  ] }) });
+};
+const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appId2, chatId, addFriendById, onEdit, onDelete, onPreview, onReply, onReaction, allUsers, onStickerClick, onShowProfile, onJoinCall }) => {
+  const isMe = m.senderId === user.uid;
+  const [mediaSrc, setMediaSrc] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
+  const isInvalidBlob = !isMe && m.content?.startsWith("blob:");
+  const setBlobSrcFromBase64 = (base64Data, mimeType) => {
+    try {
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mimeType });
+      setMediaSrc(URL.createObjectURL(blob));
+    } catch (e) {
+      console.error("Blob creation failed", e);
+    }
+  };
+  useEffect(() => {
+    if (isMe && m.content?.startsWith("blob:")) {
+      setMediaSrc(m.content);
+      return;
+    }
+    return () => {
+      if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe) URL.revokeObjectURL(mediaSrc);
+    };
+  }, [isMe, m.content]);
+  useEffect(() => {
+    if (isMe && m.content?.startsWith("blob:")) return;
+    if (m.hasChunks) {
+      if (mediaSrc && !mediaSrc.startsWith("blob:") && mediaSrc !== m.preview) return;
+      setLoading(true);
+      (async () => {
+        try {
+          let base64Data = "";
+          const cacheKey = `msg:${chatId}:${m.id}`;
+          const cachedData = __mediaDataCache.get(cacheKey);
+          if (cachedData) {
+            base64Data = cachedData;
+          } else {
+            const chunksQ = query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc"));
+            let snap;
+            try {
+              snap = await getDocsFromCache(chunksQ);
+            } catch (e) {
+              snap = await getDocsFromServer(chunksQ);
+            }
+            const parts = [];
+            snap.forEach((d) => {
+              const v = d.data()?.data;
+              if (v) parts.push(v);
+            });
+            base64Data = parts.join("");
+            if (base64Data) __cacheSet(__mediaDataCache, cacheKey, base64Data);
+          }
+          if (base64Data) {
+            let mimeType = m.mimeType;
+            if (!mimeType) {
+              if (m.type === "video") mimeType = "video/mp4";
+              else if (m.type === "image") mimeType = "image/jpeg";
+              else if (m.type === "audio") mimeType = "audio/webm";
+              else mimeType = "application/octet-stream";
+            }
+            if (m.type !== "text" && m.type !== "contact") {
+              if (base64Data.startsWith("data:")) {
+                setMediaSrc(base64Data);
+              } else {
+                setBlobSrcFromBase64(base64Data, mimeType);
+              }
+            }
+          } else if (m.preview) {
+            setMediaSrc(m.preview);
+          }
+        } catch (e) {
+          console.error("Failed to load chunks", e);
+          if (m.preview) setMediaSrc(m.preview);
+        } finally {
+          setLoading(false);
+        }
+      })();
+    } else {
+      if (isInvalidBlob) {
+        setMediaSrc(m.preview);
+      } else {
+        setMediaSrc(m.content || m.preview);
+      }
+    }
+  }, [m.id, chatId, m.content, m.hasChunks, isMe, isInvalidBlob, m.preview, m.type, m.mimeType, m.chunkCount]);
+  const handleDownload = async () => {
+    if (m.content && m.content.startsWith("blob:")) {
+      const a = document.createElement("a");
+      a.href = m.content;
+      a.download = m.fileName || "download_file";
+      a.click();
+      return;
+    }
+    setLoading(true);
+    try {
+      let dataUrl = mediaSrc;
+      if (!dataUrl && m.hasChunks) {
+        let base64Data = "";
+        const cacheKey = `msg:${chatId}:${m.id}`;
+        const cachedData = __mediaDataCache.get(cacheKey);
+        if (cachedData) {
+          base64Data = cachedData;
+        } else {
+          const chunksQ = query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc"));
+          let snap;
+          try {
+            snap = await getDocsFromCache(chunksQ);
+          } catch (e) {
+            snap = await getDocsFromServer(chunksQ);
+          }
+          const parts = [];
+          snap.forEach((d) => {
+            const v = d.data()?.data;
+            if (v) parts.push(v);
+          });
+          base64Data = parts.join("");
+          if (base64Data) __cacheSet(__mediaDataCache, cacheKey, base64Data);
+        }
+        if (base64Data) {
+          const mimeType = m.mimeType || "application/octet-stream";
+          const byteCharacters = atob(base64Data);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+          const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+          dataUrl = URL.createObjectURL(blob);
+        }
+      } else if (!dataUrl) {
+        dataUrl = m.content;
+      }
+      if (dataUrl) {
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = m.fileName || "download_file";
+        a.click();
+      }
+    } catch (e) {
+      console.error("Download failed", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+  const handleStickerClick = (e) => {
+    e.stopPropagation();
+    if (m.audio) {
+      new Audio(m.audio).play().catch((e2) => console.error("Audio playback error:", e2));
+    }
+    if (onStickerClick && m.packId) {
+      onStickerClick(m.packId);
+    }
+  };
+  const readCount = (m.readBy?.length || 1) - 1;
+  const finalSrc = mediaSrc || m.preview;
+  const isShowingPreview = loading || isInvalidBlob || finalSrc === m.preview;
+  const handleBubbleClick = (e) => {
+    e.stopPropagation();
+    setShowMenu(!showMenu);
+  };
+  const renderContent = (text) => {
+    if (!text) return "";
+    const regex = /(https?:\/\/[^\s]+)|(@[^\s]+)/g;
+    const parts = text.split(regex);
+    return parts.map((part, i) => {
+      if (!part) return null;
+      if (part.match(/^https?:\/\//)) return /* @__PURE__ */ jsx("a", { href: part, target: "_blank", rel: "noopener noreferrer", className: "text-blue-600 underline break-all", onClick: (e) => e.stopPropagation(), children: part }, i);
+      if (part.startsWith("@")) {
+        const name = part.substring(1);
+        const mentionedUser = allUsers.find((u) => u.name === name);
+        if (mentionedUser) return /* @__PURE__ */ jsx("span", { className: "text-blue-500 font-bold cursor-pointer hover:underline bg-blue-50 px-1 rounded", onClick: (e) => {
+          e.stopPropagation();
+          onShowProfile && onShowProfile(mentionedUser);
+        }, children: part }, i);
+      }
+      return part;
+    });
+  };
+  const getUserNames = (uids) => {
+    if (!uids || !allUsers) return "";
+    return uids.map((uid) => {
+      const u = allUsers.find((user2) => user2.uid === uid);
+      return u ? u.name : "\u4E0D\u660E\u306A\u30E6\u30FC\u30B6\u30FC";
+    }).join(", ");
+  };
+  return /* @__PURE__ */ jsxs("div", { className: `flex ${isMe ? "justify-end" : "justify-start"} gap-2 relative group mb-3`, children: [
+    !isMe && /* @__PURE__ */ jsxs("div", { className: "relative mt-1 cursor-pointer", onClick: (e) => {
+      e.stopPropagation();
+      onShowProfile && onShowProfile(sender);
+    }, children: [
+      !avatarError && sender?.avatar ? /* @__PURE__ */ jsx("img", { src: sender?.avatar, className: "w-9 h-9 rounded-2xl object-cover border border-gray-200", loading: "lazy", onError: () => setAvatarError(true) }, sender?.avatar) : /* @__PURE__ */ jsx("div", { className: "w-9 h-9 rounded-2xl bg-[#7a54c5] text-white text-lg leading-none font-medium flex items-center justify-center", children: (sender?.name || sender?.id || "h").trim().charAt(0).toLowerCase() || "h" }),
+      isTodayBirthday(sender?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-[8px]", children: "\u{1F382}" })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: `flex flex-col ${isMe ? "items-end" : "items-start"} max-w-[75%]`, children: [
+      !isMe && isGroup && /* @__PURE__ */ jsx("div", { className: "text-[9px] text-gray-600 font-bold mb-1 ml-1 cursor-pointer hover:underline", onClick: () => onShowProfile && onShowProfile(sender), children: sender?.name }),
+      /* @__PURE__ */ jsx("div", { className: "relative", children: /* @__PURE__ */ jsxs("div", { onClick: handleBubbleClick, className: `p-1.5 px-2.5 rounded-[18px] text-[11px] shadow-sm relative cursor-pointer ${m.type === "sticker" ? "bg-transparent shadow-none p-0" : isMe ? "bg-[#76ff03] text-black" : "bg-white text-black"} ${["image", "video", "call_invite"].includes(m.type) ? "p-0 bg-transparent shadow-none" : ""}`, children: [
+        m.replyTo && m.type !== "sticker" && /* @__PURE__ */ jsxs("div", { className: `mb-2 p-2 rounded-lg border-l-4 text-xs opacity-70 ${isMe ? "bg-black/5 border-white/50" : "bg-gray-100 border-gray-300"}`, children: [
+          /* @__PURE__ */ jsx("div", { className: "font-bold text-[10px] mb-0.5", children: m.replyTo.senderName }),
+          /* @__PURE__ */ jsxs("div", { className: "truncate flex items-center gap-1", children: [
+            m.replyTo.type === "image" && /* @__PURE__ */ jsx(ImageIcon, { className: "w-3 h-3" }),
+            m.replyTo.type === "video" && /* @__PURE__ */ jsx(Video, { className: "w-3 h-3" }),
+            ["image", "video"].includes(m.replyTo.type) ? m.replyTo.type === "image" ? "[\u753B\u50CF]" : "[\u52D5\u753B]" : m.replyTo.content || "[\u30E1\u30C3\u30BB\u30FC\u30B8]"
+          ] })
+        ] }),
+        m.type === "text" && /* @__PURE__ */ jsxs("div", { className: "whitespace-pre-wrap", children: [
+          renderContent(m.content),
+          m.isEdited && /* @__PURE__ */ jsx("div", { className: "text-[9px] text-black/40 text-right mt-1 font-bold", children: "(\u7DE8\u96C6\u6E08)" })
+        ] }),
+        m.type === "call_invite" && /* @__PURE__ */ jsxs("div", { className: "bg-white border rounded-2xl p-4 w-64 shadow-sm flex flex-col items-center gap-2", children: [
+          /* @__PURE__ */ jsx("div", { className: "w-12 h-12 bg-green-100 rounded-full flex items-center justify-center animate-pulse", children: m.callType === "video" ? /* @__PURE__ */ jsx(Video, { className: "w-6 h-6 text-green-600" }) : /* @__PURE__ */ jsx(Phone, { className: "w-6 h-6 text-green-600" }) }),
+          /* @__PURE__ */ jsxs("div", { className: "font-bold text-center", children: [
+            m.callType === "video" ? "\u30D3\u30C7\u30AA\u901A\u8A71" : "\u97F3\u58F0\u901A\u8A71",
+            "\u3092\u958B\u59CB\u3057\u307E\u3057\u305F"
+          ] }),
+          /* @__PURE__ */ jsx("button", { onClick: (e) => {
+            e.stopPropagation();
+            onJoinCall(m.callType === "video", m.senderId);
+          }, className: "w-full bg-green-500 text-white font-bold py-2 rounded-xl shadow mt-2 hover:bg-green-600 transition-colors", children: "\u53C2\u52A0\u3059\u308B" })
+        ] }),
+        m.type === "sticker" && /* @__PURE__ */ jsxs("div", { className: "relative group/sticker", onClick: handleStickerClick, children: [
+          /* @__PURE__ */ jsx("img", { src: m.content || "", className: "w-32 h-32 object-contain drop-shadow-sm hover:scale-105 transition-transform" }),
+          m.audio && /* @__PURE__ */ jsx("div", { className: "absolute bottom-0 right-0 bg-black/20 text-white rounded-full p-1", children: /* @__PURE__ */ jsx(Volume2, { className: "w-3 h-3" }) })
+        ] }),
+        (m.type === "image" || m.type === "video") && /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+          isShowingPreview && !finalSrc ? /* @__PURE__ */ jsxs("div", { className: "p-4 bg-gray-100 rounded-xl flex flex-col items-center justify-center gap-2 min-w-[150px] min-h-[100px] border border-gray-200", children: [
+            /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-8 h-8 text-green-500" }),
+            /* @__PURE__ */ jsx("span", { className: "text-[10px] text-gray-500 font-bold", children: m.type === "video" ? "\u52D5\u753B\u3092\u53D7\u4FE1\u4E2D..." : "\u753B\u50CF\u3092\u53D7\u4FE1\u4E2D..." })
+          ] }) : /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+            m.type === "video" ? /* @__PURE__ */ jsx("video", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md bg-black ${showMenu ? "brightness-50 transition-all" : ""}`, controls: true, playsInline: true, preload: "metadata" }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy" }),
+            m.type === "video" && !isShowingPreview && !finalSrc && /* @__PURE__ */ jsx("div", { className: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none", children: /* @__PURE__ */ jsx("div", { className: "bg-black/30 rounded-full p-2 backdrop-blur-sm", children: /* @__PURE__ */ jsx(Play, { className: "w-8 h-8 text-white fill-white opacity-90" }) }) }),
+            isShowingPreview && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-2 right-2 bg-black/60 text-white text-[9px] px-2 py-0.5 rounded-full backdrop-blur-md flex items-center gap-1", children: [
+              /* @__PURE__ */ jsx(Loader2, { className: "w-3 h-3 animate-spin" }),
+              " ",
+              isInvalidBlob ? "\u9001\u4FE1\u4E2D..." : "\u53D7\u4FE1\u4E2D..."
+            ] })
+          ] }),
+          isMe && m.isUploading && /* @__PURE__ */ jsx("div", { className: "absolute bottom-2 right-2 bg-black/50 text-white text-[9px] px-2 py-0.5 rounded-full backdrop-blur-sm", children: "\u9001\u4FE1\u4E2D..." })
+        ] }),
+        m.type === "audio" && /* @__PURE__ */ jsx("div", { className: "flex items-center gap-2 py-1 px-1", children: loading ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-4 h-4 text-gray-400" }) : /* @__PURE__ */ jsx("audio", { src: mediaSrc || "", controls: true, className: "h-8 max-w-[200px]" }) }),
+        m.type === "file" && /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 p-2 min-w-[200px]", children: [
+          /* @__PURE__ */ jsx("div", { className: "w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center shrink-0 border", children: /* @__PURE__ */ jsx(FileText, { className: "w-6 h-6 text-gray-500" }) }),
+          /* @__PURE__ */ jsxs("div", { className: "flex-1 min-w-0", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-sm font-bold truncate", children: m.fileName || "\u4E0D\u660E\u306A\u30D5\u30A1\u30A4\u30EB" }),
+            /* @__PURE__ */ jsx("div", { className: "text-[10px] text-gray-400", children: m.fileSize ? `${(m.fileSize / 1024).toFixed(1)} KB` : "\u30B5\u30A4\u30BA\u4E0D\u660E" })
+          ] }),
+          /* @__PURE__ */ jsx("button", { onClick: (e) => {
+            e.stopPropagation();
+            handleDownload();
+          }, className: "w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded-full transition-colors", disabled: loading, children: loading ? /* @__PURE__ */ jsx(Loader2, { className: "w-4 h-4 animate-spin text-gray-500" }) : /* @__PURE__ */ jsx(Download, { className: "w-4 h-4 text-gray-600" }) })
+        ] }),
+        m.type === "contact" && /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2 min-w-[150px] p-1", children: [
+          /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-400 mb-1 border-b border-gray-100 pb-1", children: "\u9023\u7D61\u5148" }),
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+            /* @__PURE__ */ jsx("img", { src: m.contactAvatar, className: "w-10 h-10 rounded-full border shadow-sm", loading: "lazy" }),
+            /* @__PURE__ */ jsx("span", { className: "font-bold text-sm truncate", children: m.contactName })
+          ] }),
+          !isMe && /* @__PURE__ */ jsxs("button", { onClick: (e) => {
+            e.stopPropagation();
+            addFriendById(m.contactId);
+          }, className: "bg-black/5 hover:bg-black/10 text-xs font-bold py-2 rounded-xl mt-1 w-full flex items-center justify-center gap-2", children: [
+            /* @__PURE__ */ jsx(UserPlus, { className: "w-3 h-3" }),
+            " \u53CB\u3060\u3061\u8FFD\u52A0"
+          ] })
+        ] }),
+        /* @__PURE__ */ jsx("div", { className: `text-[6px] mt-1 ${m.type === "image" || m.type === "video" ? "mx-auto w-fit px-3 py-0.5 rounded-full bg-white/30 text-[#8ea0ad] font-bold" : "opacity-50 text-right"} ${m.type === "sticker" ? "text-gray-500 font-bold bg-white/50 px-1 rounded" : ""}`, children: formatDateTime(m.createdAt) }),
+        showMenu && /* @__PURE__ */ jsxs("div", { className: `absolute top-full ${isMe ? "right-0" : "left-0"} mt-1 z-[100] flex flex-col bg-white rounded-xl shadow-2xl border overflow-hidden min-w-[180px] animate-in slide-in-from-top-2 duration-200`, children: [
+          /* @__PURE__ */ jsx("div", { className: "flex justify-between items-center p-2 bg-gray-50 border-b gap-1 overflow-x-auto scrollbar-hide", children: REACTION_EMOJIS.map((emoji) => /* @__PURE__ */ jsx("button", { onClick: (e) => {
+            e.stopPropagation();
+            onReaction(m.id, emoji);
+            setShowMenu(false);
+          }, className: "hover:scale-125 transition-transform text-lg p-1", children: emoji }, emoji)) }),
+          /* @__PURE__ */ jsxs("button", { onClick: (e) => {
+            e.stopPropagation();
+            onReply(m);
+            setShowMenu(false);
+          }, className: "flex items-center gap-3 px-4 py-3 hover:bg-gray-100 text-xs font-bold text-gray-700 text-left", children: [
+            /* @__PURE__ */ jsx(Reply, { className: "w-4 h-4" }),
+            "\u30EA\u30D7\u30E9\u30A4"
+          ] }),
+          (m.type === "image" || m.type === "video") && /* @__PURE__ */ jsxs("button", { onClick: (e) => {
+            e.stopPropagation();
+            onPreview(finalSrc, m.type);
+            setShowMenu(false);
+          }, className: "flex items-center gap-3 px-4 py-3 hover:bg-gray-100 text-xs font-bold text-gray-700 text-left border-t border-gray-100", children: [
+            /* @__PURE__ */ jsx(Maximize, { className: "w-4 h-4" }),
+            "\u62E1\u5927\u8868\u793A"
+          ] }),
+          m.type === "file" && /* @__PURE__ */ jsxs("button", { onClick: (e) => {
+            e.stopPropagation();
+            handleDownload();
+            setShowMenu(false);
+          }, className: "flex items-center gap-3 px-4 py-3 hover:bg-gray-100 text-xs font-bold text-gray-700 text-left border-t border-gray-100", children: [
+            /* @__PURE__ */ jsx(Download, { className: "w-4 h-4" }),
+            "\u4FDD\u5B58"
+          ] }),
+          m.type === "text" && isMe && /* @__PURE__ */ jsxs("button", { onClick: (e) => {
+            e.stopPropagation();
+            onEdit(m.id, m.content);
+            setShowMenu(false);
+          }, className: "flex items-center gap-3 px-4 py-3 hover:bg-gray-100 text-xs font-bold text-gray-700 text-left border-t border-gray-100", children: [
+            /* @__PURE__ */ jsx(Edit2, { className: "w-4 h-4" }),
+            "\u7DE8\u96C6"
+          ] }),
+          isMe && /* @__PURE__ */ jsxs("button", { onClick: (e) => {
+            e.stopPropagation();
+            onDelete(m.id);
+            setShowMenu(false);
+          }, className: "flex items-center gap-3 px-4 py-3 hover:bg-red-50 text-xs font-bold text-red-500 text-left border-t border-gray-100", children: [
+            /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }),
+            "\u9001\u4FE1\u53D6\u6D88"
+          ] })
+        ] })
+      ] }) }),
+      m.reactions && Object.keys(m.reactions).some((k) => m.reactions[k]?.length > 0) && /* @__PURE__ */ jsx("div", { className: `flex flex-wrap gap-1 mt-1 ${isMe ? "justify-end" : "justify-start"}`, children: Object.entries(m.reactions).map(([emoji, uids]) => uids?.length > 0 && /* @__PURE__ */ jsxs("button", { onClick: () => onReaction(m.id, emoji), title: getUserNames(uids), className: `flex items-center gap-1 px-2 py-1 rounded-full text-xs shadow-sm border transition-all hover:scale-105 active:scale-95 ${uids.includes(user.uid) ? "bg-white border-green-500 text-green-600 ring-1 ring-green-100" : "bg-white border-gray-100 text-gray-600"}`, children: [
+        /* @__PURE__ */ jsx("span", { className: "text-sm", children: emoji }),
+        /* @__PURE__ */ jsx("span", { className: "font-bold text-[10px]", children: uids.length })
+      ] }, emoji)) }),
+      isMe && readCount > 0 && /* @__PURE__ */ jsxs("div", { className: "text-[10px] font-bold text-green-600 mt-0.5", children: [
+        "\u65E2\u8AAD ",
+        isGroup ? readCount : ""
+      ] })
+    ] })
+  ] });
 });
-
-
-// Fast + stable: stream-decode chunks into Blob URL without building one giant base64 string.
+const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => {
+  const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
+  const [postPreview, setPostPreview] = useState(null);
+  const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
+  const isMe = post.userId === user.uid;
+  useEffect(() => {
+    if (post.hasChunks && !mediaSrc) {
+      const cacheKey = `post:${post.id}`;
+      const cached = __mediaDataCache.get(cacheKey);
+      const cachedUrl = __mediaUrlCache.get(cacheKey);
+      if (cachedUrl) {
+        setMediaSrc(cachedUrl);
+        return;
+      }
+      if (cached) {
+        setMediaSrc(cached);
+        return;
+      }
+      setIsLoadingMedia(true);
+      (async () => {
+        try {
+          let base64Data = "";
+          const chunksQ = query(
+            collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"),
+            orderBy("index", "asc")
+          );
+          // Prefer local cache first; fall back to server if needed (faster on repeat views)
+          let snap;
+          try {
+            snap = await getDocsFromCache(chunksQ);
+          } catch (e) {
+            snap = await getDocsFromServer(chunksQ);
+          }
+          const parts = [];
+          snap.forEach((d) => {
+            const v = d.data()?.data;
+            if (v) parts.push(v);
+          });
+          // Fast + stable: decode chunks to Blob URL without concatenating into one huge base64 string.
 if (parts.length) {
   try {
-    // If the reconstructed payload is a data URL split across chunks, __chunksToObjectUrl extracts mimeType.
-    const fallbackMimeType =
-      post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
-    const url = __chunksToObjectUrl(parts, fallbackMimeType);
-    if (url) {
-      __cacheSet(__mediaUrlCache, cacheKey, url);
-      setMediaSrc(url);
+    if (parts.length === 1 && typeof parts[0] === "string" && parts[0].startsWith("data:")) {
+      __cacheSet(__mediaDataCache, cacheKey, parts[0]);
+      setMediaSrc(parts[0]);
+    } else {
+      const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
+      const url = __chunksToObjectUrl(parts, mimeType);
+      if (url) {
+        __cacheSet(__mediaUrlCache, cacheKey, url);
+        setMediaSrc(url);
+      }
     }
   } catch (e) {
     console.error("Post media decode error", e);
   }
 }
-      
-  } catch (e) {
-    console.error("Post media load error", e);
-  } finally {
-    setIsLoadingMedia(false);
-  }
-})();
+          }
+        } catch (e) {
+          console.error("Post media load error", e);
+        } finally {
+          setIsLoadingMedia(false);
+        }
+      })();
     }
   }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, mediaSrc]);
   useEffect(() => {
@@ -355,7 +2778,11 @@ const BirthdayCardBox = ({ user, setView }) => {
       setMyCards(cards);
     });
     return () => unsub();
-  }, [user]);
+  }, [user, postsLimit]);
+  const loadMorePosts = useCallback(() => {
+    setPostsLimit((prev) => prev + 5);
+  }, []);
+
   const getColorClass = (color) => {
     switch (color) {
       case "pink":
@@ -1511,7 +3938,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   const [editingText, setEditingText] = useState("");
   const scrollRef = useRef(null);
   const isFirstLoad = useRef(true);
-  const [messageLimit, setMessageLimit] = useState(50);
+  const [messageLimit, setMessageLimit] = useState(5);
   const lastMessageIdRef = useRef(null);
   const [backgroundSrc, setBackgroundSrc] = useState(null);
   const [stickerMenuOpen, setStickerMenuOpen] = useState(false);
@@ -2089,7 +4516,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       /* @__PURE__ */ jsx("button", { onClick: () => setCardModalOpen(true), className: "bg-pink-500 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm", children: "\u30AB\u30FC\u30C9\u3092\u66F8\u304F" })
     ] }),
     /* @__PURE__ */ jsxs("div", { className: `flex-1 overflow-y-auto px-3 py-2.5 space-y-3 scrollbar-hide ${backgroundSrc ? "bg-white/40 backdrop-blur-sm" : ""}`, children: [
-      messages.length >= messageLimit && /* @__PURE__ */ jsx("div", { className: "flex justify-center py-2", children: /* @__PURE__ */ jsxs("button", { onClick: () => setMessageLimit((prev) => prev + 50), className: "bg-white/50 backdrop-blur-md px-4 py-1 rounded-full text-xs font-bold text-gray-700 shadow-sm flex items-center gap-1 hover:bg-white/70", children: [
+      messages.length >= messageLimit && /* @__PURE__ */ jsx("div", { className: "flex justify-center py-2", children: /* @__PURE__ */ jsxs("button", { onClick: () => setMessageLimit((prev) => prev + 5), className: "bg-white/50 backdrop-blur-md px-4 py-1 rounded-full text-xs font-bold text-gray-700 shadow-sm flex items-center gap-1 hover:bg-white/70", children: [
         /* @__PURE__ */ jsx(ArrowUpCircle, { className: "w-4 h-4" }),
         " \u4EE5\u524D\u306E\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u8AAD\u307F\u8FBC\u3080"
       ] }) }),
@@ -2211,8 +4638,29 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     coinModalTarget && /* @__PURE__ */ jsx(CoinTransferModal, { onClose: () => setCoinModalTarget(null), myWallet: profile.wallet, myUid: user.uid, targetUid: coinModalTarget.uid, targetName: coinModalTarget.name, showNotification })
   ] });
 };
-const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, appId: appId2 }) => {
+const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, appId: appId2, loadMorePosts, hasMorePosts }) => {
   const [content, setContent] = useState(""), [media, setMedia] = useState(null), [mediaType, setMediaType] = useState("image"), [isUploading, setIsUploading] = useState(false), [uploadProgress, setUploadProgress] = useState(0);
+  const loadMoreRef = useRef(null);
+  useEffect(() => {
+    if (!loadMoreRef.current) return;
+    if (!hasMorePosts) return;
+    const el = loadMoreRef.current;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0];
+        if (first && first.isIntersecting) {
+          loadMorePosts && loadMorePosts();
+        }
+      },
+      { root: null, rootMargin: "200px", threshold: 0 }
+    );
+    obs.observe(el);
+    return () => {
+      try { obs.unobserve(el); } catch {}
+      try { obs.disconnect(); } catch {}
+    };
+  }, [hasMorePosts, loadMorePosts]);
+
   const postMessage = async () => {
     if (profile?.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     if (!content && !media || isUploading) return;
@@ -2295,7 +4743,8 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
           /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || media ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: isUploading ? `投稿 ${uploadProgress}%` : "投稿" })
         ] })
       ] }),
-      posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id))
+      posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id)),
+      /* @__PURE__ */ jsx("div", { ref: loadMoreRef, style: { height: 1 } })
     ] })
   ] });
 };
@@ -2836,6 +5285,7 @@ function App() {
   const [allUsers, setAllUsers] = useState([]);
   const [chats, setChats] = useState([]);
   const [posts, setPosts] = useState([]);
+  const [postsLimit, setPostsLimit] = useState(5);
   const [notification, setNotification] = useState(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -3146,7 +5596,7 @@ const handleLogout = async () => {
         return null;
       });
     });
-    const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(5)), (snap) => {
+    const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(postsLimit)), (snap) => {
       setPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
     return () => {
@@ -3390,7 +5840,7 @@ const handleLogout = async () => {
         ] })
       ] }) : /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden relative", children: [
         view === "home" && /* @__PURE__ */ jsx(HomeView, { user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }),
-        view === "voom" && /* @__PURE__ */ jsx(VoomView, { user, allUsers, profile, posts, showNotification, db, appId }),
+        view === "voom" && /* @__PURE__ */ jsx(VoomView, { user, allUsers, profile, posts, showNotification, db, appId, loadMorePosts, hasMorePosts: posts.length >= postsLimit }),
         view === "chatroom" && /* @__PURE__ */ jsx(ChatRoomView, { user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }),
         view === "profile" && /* @__PURE__ */ jsx(ProfileEditView, { user, profile, setView, showNotification, copyToClipboard, handleLogout }),
         view === "qr" && /* @__PURE__ */ jsx(QRScannerView, { user, setView, addFriendById }),
