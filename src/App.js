@@ -2509,64 +2509,191 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
   const [postPreview, setPostPreview] = useState(null);
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
-  useEffect(() => {
-    if (post.hasChunks && !mediaSrc) {
+  // --- 修正後の PostItem コンポーネント (丸ごとコピー用) ---
+const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => {
+  const [commentText, setCommentText] = useState("");
+  // 初期状態ではメディアを読み込まない (nullにする)
+  const [mediaSrc, setMediaSrc] = useState(post.hasChunks ? null : post.media);
+  const [isLoadingMedia, setIsLoadingMedia] = useState(false);
+  const [postPreview, setPostPreview] = useState(null);
+  
+  const u = allUsers.find((x) => x.uid === post.userId);
+  const isLiked = post.likes?.includes(user?.uid);
+  const isMe = post.userId === user.uid;
+
+  // ★変更点1: ボタンを押した時だけ実行される読み込み関数
+  const loadMedia = async () => {
+    if (mediaSrc || isLoadingMedia) return;
+    
+    setIsLoadingMedia(true);
+    try {
       const cacheKey = `post:${post.id}`;
-      const cached = __mediaDataCache.get(cacheKey);
+      // キャッシュがあればそれを使う
       const cachedUrl = __mediaUrlCache.get(cacheKey);
       if (cachedUrl) {
         setMediaSrc(cachedUrl);
+        setIsLoadingMedia(false);
         return;
       }
-      if (cached) {
-        setMediaSrc(cached);
-        return;
+
+      // Firestoreからデータを取得
+      const chunksQ = query(
+        collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"),
+        orderBy("index", "asc")
+      );
+
+      let snap;
+      try {
+        snap = await getDocsFromCache(chunksQ);
+        if (snap.empty) throw new Error("Cache empty");
+      } catch (e) {
+        snap = await getDocsFromServer(chunksQ);
       }
-      setIsLoadingMedia(true);
-      (async () => {
-        try {
-          let base64Data = "";
-          const chunksQ = query(
-            collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"),
-            orderBy("index", "asc")
-          );
-          // Prefer local cache first; fall back to server if needed (faster on repeat views)
-          let snap;
-          try {
-            snap = await getDocsFromCache(chunksQ);
-          } catch (e) {
-            snap = await getDocsFromServer(chunksQ);
-          }
-          const parts = [];
-          snap.forEach((d) => {
-            const v = d.data()?.data;
-            if (v) parts.push(v);
-          });
-          const mergedData = parts.join("");
-          if (mergedData) {
-            try {
-              if (mergedData.startsWith("data:")) {
-                __cacheSet(__mediaDataCache, cacheKey, mergedData);
-                setMediaSrc(mergedData);
-              } else {
-                const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
-                // Faster than manual charCode loop in many browsers
-                const blob = await (await fetch(`data:${mimeType};base64,${mergedData}`)).blob();
-                const url = URL.createObjectURL(blob);
-                __cacheSet(__mediaUrlCache, cacheKey, url);
-                setMediaSrc(url);
-              }
-            } catch (e) {
-              console.error("Post media decode error", e);
-            }
-          }
-        } catch (e) {
-          console.error("Post media load error", e);
-        } finally {
-          setIsLoadingMedia(false);
-        }
-      })();
+
+      const parts = [];
+      snap.forEach((d) => {
+        const v = d.data()?.data;
+        if (v) parts.push(v);
+      });
+      
+      const mergedData = parts.join("");
+      
+      if (mergedData) {
+        // ★変更点2: fetchを使った高速変換 (ループ処理を排除)
+        const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
+        const res = await fetch(`data:${mimeType};base64,${mergedData}`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        
+        // キャッシュしてセット
+        __cacheSet(__mediaUrlCache, cacheKey, url);
+        setMediaSrc(url);
+      }
+    } catch (e) {
+      console.error("Post media load error", e);
+    } finally {
+      setIsLoadingMedia(false);
     }
+  };
+
+  // クリーンアップ処理
+  useEffect(() => {
+    return () => {
+      // 必要に応じてURLをrevoke（キャッシュ管理との兼ね合いでコメントアウト推奨）
+      // if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe) URL.revokeObjectURL(mediaSrc);
+    };
+  }, [mediaSrc, isMe]);
+
+  const toggleLike = async () => await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { likes: isLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
+
+  const deletePost = async () => {
+    if (!isMe) return;
+    const ok = window.confirm("この投稿を削除しますか？");
+    if (!ok) return;
+    try {
+      const postRef = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id);
+      // 関連データの削除処理は省略（必要に応じてchunksなども削除）
+      await deleteDoc(postRef);
+    } catch (e) {
+      console.error("Delete post failed:", e);
+    }
+  };
+
+  const submitComment = async () => {
+    if (!commentText.trim()) return;
+    await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { comments: arrayUnion({ userId: user.uid, userName: profile.name, text: commentText, createdAt: (/* @__PURE__ */ new Date()).toISOString() }) });
+    setCommentText("");
+  };
+
+  return /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2 border-b", children: [
+    /* ヘッダー部分 */
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
+      /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+        /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
+        isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" }),
+        isMe && /* @__PURE__ */ jsx("button", { onClick: deletePost, className: "ml-auto p-2 rounded-full hover:bg-red-50 text-red-500", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) }),
+      ] }),
+      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
+    ] }),
+    
+    /* 投稿本文 */
+    /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
+    
+    /* ★変更点3: メディア表示エリア（読み込みボタンとコンテンツの切り替え） */
+    (post.media || post.hasChunks) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[200px] relative overflow-hidden border border-gray-100", children: [
+      
+      // A. ロード中
+      isLoadingMedia && /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center gap-2", children: [
+        /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-8 h-8 text-green-500" }),
+        /* @__PURE__ */ jsx("span", { className: "text-xs text-gray-400 font-bold", children: "読み込み中..." })
+      ]}),
+
+      // B. 未ロード状態でチャンクがある場合 -> 「読み込むボタン」を表示
+      !mediaSrc && !isLoadingMedia && post.hasChunks && /* @__PURE__ */ jsxs("button", { 
+        onClick: loadMedia,
+        className: "flex flex-col items-center gap-2 p-4 hover:bg-gray-100 rounded-xl transition-colors",
+        children: [
+          post.mediaType === "video" ? /* @__PURE__ */ jsx(Video, { className: "w-10 h-10 text-gray-400" }) : /* @__PURE__ */ jsx(ImageIcon, { className: "w-10 h-10 text-gray-400" }),
+          /* @__PURE__ */ jsx("span", { className: "text-sm font-bold text-gray-500", children: "メディアを読み込む" }),
+          /* @__PURE__ */ jsx("span", { className: "text-xs text-gray-400", children: "(タップして表示)" })
+        ] 
+      }),
+
+      // C. ロード済みの場合 -> 画像/動画を表示
+      !isLoadingMedia && mediaSrc && (
+        post.mediaType === "video" ? /* @__PURE__ */ jsx("video", { 
+          src: mediaSrc, 
+          className: "w-full rounded-2xl max-h-96 bg-black cursor-pointer", 
+          controls: true, 
+          playsInline: true,
+          preload: "metadata",
+          onClick: () => setPostPreview({ src: mediaSrc, type: "video" }) 
+        }) : /* @__PURE__ */ jsx("img", { 
+          src: mediaSrc, 
+          className: "w-full rounded-2xl max-h-96 object-cover cursor-pointer", 
+          loading: "lazy", 
+          onClick: () => setPostPreview({ src: mediaSrc, type: "image" }) 
+        })
+      ),
+
+      // 拡大ボタン
+      !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: post.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
+        /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
+        "\u62E1\u5927"
+      ] })
+    ] }),
+
+    /* 以下、変更なし（アクションボタンなど） */
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-6 py-2 border-y mb-3", children: [
+      /* @__PURE__ */ jsxs("button", { onClick: toggleLike, className: "flex items-center gap-1.5", children: [
+        /* @__PURE__ */ jsx(Heart, { className: `w-5 h-5 ${isLiked ? "fill-red-500 text-red-500" : "text-gray-400"}` }),
+        /* @__PURE__ */ jsx("span", { className: "text-xs", children: post.likes?.length || 0 })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5 text-gray-400", children: [
+        /* @__PURE__ */ jsx(MessageCircle, { className: "w-5 h-5" }),
+        /* @__PURE__ */ jsx("span", { className: "text-xs", children: post.comments?.length || 0 })
+      ] })
+    ] }),
+    
+    /* コメント一覧 */
+    /* @__PURE__ */ jsx("div", { className: "space-y-3 mb-4", children: post.comments?.map((c, i) => /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-3 py-2", children: [
+      /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-500", children: c.userName }),
+      /* @__PURE__ */ jsx("div", { className: "text-xs", children: c.text })
+    ] }, i)) }),
+    
+    /* コメント入力 */
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 bg-gray-100 rounded-full px-4 py-1", children: [
+      /* @__PURE__ */ jsx("input", { className: "flex-1 bg-transparent text-xs py-2 outline-none", placeholder: "\u30B3\u30E1\u30F3\u30C8...", value: commentText, onChange: (e) => setCommentText(e.target.value), onKeyPress: (e) => e.key === "Enter" && submitComment() }),
+      /* @__PURE__ */ jsx("button", { onClick: submitComment, className: "text-green-500", children: /* @__PURE__ */ jsx(Send, { className: "w-4 h-4" }) })
+    ] }),
+
+    /* プレビューモーダル */
+    postPreview && /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1200] bg-black/95 flex items-center justify-center p-4", onClick: () => setPostPreview(null), children: [
+      /* @__PURE__ */ jsx("button", { className: "absolute top-5 right-5 text-white p-2 rounded-full bg-white/20", onClick: () => setPostPreview(null), children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) }),
+      postPreview.type === "video" ? /* @__PURE__ */ jsx("video", { src: postPreview.src, controls: true, autoPlay: true, className: "max-w-full max-h-[88vh] rounded-xl bg-black", onClick: (e) => e.stopPropagation() }) : /* @__PURE__ */ jsx("img", { src: postPreview.src, className: "max-w-full max-h-[88vh] object-contain rounded-xl", onClick: (e) => e.stopPropagation() })
+    ] })
+  ] });
+};
   }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, mediaSrc]);
   useEffect(() => {
     return () => {
