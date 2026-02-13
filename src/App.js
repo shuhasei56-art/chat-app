@@ -5778,6 +5778,8 @@ const handleLogout = async () => {
         /* @__PURE__ */ jsx("input", { className: "w-full bg-gray-50 rounded-2xl py-4 px-6 mb-6 outline-none", placeholder: "ID\u3092\u5165\u529B", value: searchQuery, onChange: (e) => setSearchQuery(e.target.value) }),
         /* @__PURE__ */ jsxs("div", { className: "flex gap-4", children: [
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 text-gray-600 font-bold", onClick: () => setSearchModalOpen(false), children: "\u9589\u3058\u308B" }),
+          /* @__PURE__ */ jsxs("div", { className: "flex gap-4", children: [
+          /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 text-gray-600 font-bold", onClick: () => setSearchModalOpen(false), children: "\u9589\u3058\u308B" }),
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
       ] }) }),
