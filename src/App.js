@@ -2505,12 +2505,6 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
   ] });
 });
 const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => {
-  const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
-  const [postPreview, setPostPreview] = useState(null);
-  const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
-  const isMe = post.userId === user.uid;
-  // --- 修正後の PostItem コンポーネント (丸ごとコピー用) ---
-const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => {
   const [commentText, setCommentText] = useState("");
   // 初期状態ではメディアを読み込まない (nullにする)
   const [mediaSrc, setMediaSrc] = useState(post.hasChunks ? null : post.media);
@@ -2592,7 +2586,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
     if (!ok) return;
     try {
       const postRef = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id);
-      // 関連データの削除処理は省略（必要に応じてchunksなども削除）
+      // 関連データの削除処理は省略
       await deleteDoc(postRef);
     } catch (e) {
       console.error("Delete post failed:", e);
@@ -2611,9 +2605,10 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
       /* @__PURE__ */ jsxs("div", { className: "relative", children: [
         /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
         isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" }),
-        isMe && /* @__PURE__ */ jsx("button", { onClick: deletePost, className: "ml-auto p-2 rounded-full hover:bg-red-50 text-red-500", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) }),
       ] }),
-      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
+      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name }),
+      /* 自分の投稿なら削除ボタンを表示 */
+      isMe && /* @__PURE__ */ jsx("button", { onClick: deletePost, className: "ml-auto p-2 rounded-full hover:bg-red-50 text-red-500", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) }),
     ] }),
     
     /* 投稿本文 */
