@@ -4187,10 +4187,10 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         setTimeout(() => {
           scrollRef.current?.scrollIntoView({ behavior: "auto" });
         }, 100);
-      }
 
-// Upload media via Firebase Storage (same system as VOOM) to avoid base64/memory issues and stabilize playback.
-if (file && ["image", "video", "audio", "file"].includes(type)) {
+
+// Upload the file via Firebase Storage (VOOM same system) and then update message content to the download URL.
+try {
   const ext = file.name && file.name.includes(".") ? file.name.split(".").pop() : "";
   const safeExt = ext ? `.${ext}` : "";
   const storagePath = `artifacts/${appId2}/chats/${activeChatId}/${user.uid}/${Date.now()}_${Math.random().toString(16).slice(2)}${safeExt}`;
@@ -4224,31 +4224,12 @@ if (file && ["image", "video", "audio", "file"].includes(type)) {
       }
     );
   });
-} else {
-  // Non-file messages (text/sticker/etc.)
-  if (typeof content === "object" && content !== null && type === "sticker") {
-    const stickerContent = content.image || content;
-    const stickerAudio = content.audio || null;
-    await setDoc(newMsgRef, { senderId: user.uid, content: stickerContent, audio: stickerAudio, type, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, createdAt: serverTimestamp(), readBy: [user.uid] });
-  } else {
-    await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, createdAt: serverTimestamp(), readBy: [user.uid] });
-  }
-  await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
-  setText("");
-  setPlusMenuOpen(false);
-  setContactModalOpen(false);
-  setTimeout(() => {
-    scrollRef.current?.scrollIntoView({ behavior: "auto" });
-  }, 100);
+} catch (e) {
+  // If upload fails, keep local preview (blob URL) but mark as not uploading
+  try {
+    await updateDoc(newMsgRef, { isUploading: false });
+  } catch {}
 }
-          await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
-          setText("");
-          setPlusMenuOpen(false);
-          setContactModalOpen(false);
-          setTimeout(() => {
-            scrollRef.current?.scrollIntoView({ behavior: "auto" });
-          }, 100);
-        }
       }
     } catch (e) {
       console.error(e);
