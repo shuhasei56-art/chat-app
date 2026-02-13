@@ -188,11 +188,18 @@ const CHUNK_SIZE = 716799;
 // Fast media caches (no UI change)
 const __mediaUrlCache = new Map();
 const __mediaDataCache = new Map();
-const __cacheSet = (map, key, val, max=60) => {
+const __cacheSet = (map, key, val, max = 60) => {
+  // simple LRU: re-insert key to mark as recently used
+  if (map.has(key)) map.delete(key);
   map.set(key, val);
   if (map.size > max) {
     const firstKey = map.keys().next().value;
+    const oldVal = map.get(firstKey);
     map.delete(firstKey);
+    // revoke evicted blob URLs to avoid leaking memory
+    if (typeof oldVal === "string" && oldVal.startsWith("blob:")) {
+      try { URL.revokeObjectURL(oldVal); } catch {}
+    }
   }
 };
 const REACTION_EMOJIS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F525}"];
@@ -2266,9 +2273,6 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
       setMediaSrc(m.content);
       return;
     }
-    return () => {
-      if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe) URL.revokeObjectURL(mediaSrc);
-    };
   }, [isMe, m.content]);
   useEffect(() => {
     if (isMe && m.content?.startsWith("blob:")) return;
@@ -2638,11 +2642,6 @@ if (parts.length) {
       })();
     }
   }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, mediaSrc]);
-  useEffect(() => {
-    return () => {
-      if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe) URL.revokeObjectURL(mediaSrc);
-    };
-  }, [mediaSrc, isMe]);
   const toggleLike = async () => await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { likes: isLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
 
   const deletePost = async () => {
