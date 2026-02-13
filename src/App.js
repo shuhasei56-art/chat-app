@@ -2777,11 +2777,7 @@ const BirthdayCardBox = ({ user, setView }) => {
       setMyCards(cards);
     });
     return () => unsub();
-  }, [user, postsLimit]);
-  const loadMorePosts = useCallback(() => {
-    setPostsLimit((prev) => prev + 5);
-  }, []);
-
+  }, [user]);
   const getColorClass = (color) => {
     switch (color) {
       case "pink":
@@ -5285,6 +5281,9 @@ function App() {
   const [chats, setChats] = useState([]);
   const [posts, setPosts] = useState([]);
   const [postsLimit, setPostsLimit] = useState(5);
+const loadMorePosts = useCallback(() => {
+  setPostsLimit((prev) => prev + 5);
+}, []);
 
   const [notification, setNotification] = useState(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
