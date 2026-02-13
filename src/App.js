@@ -184,11 +184,13 @@ snap.forEach((d) => {
   if (v) parts.push(v);
 });
 
+
 // Fast + stable: stream-decode chunks into Blob URL without building one giant base64 string.
 if (parts.length) {
   try {
     // If the reconstructed payload is a data URL split across chunks, __chunksToObjectUrl extracts mimeType.
-    const fallbackMimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
+    const fallbackMimeType =
+      post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
     const url = __chunksToObjectUrl(parts, fallbackMimeType);
     if (url) {
       __cacheSet(__mediaUrlCache, cacheKey, url);
@@ -198,16 +200,13 @@ if (parts.length) {
     console.error("Post media decode error", e);
   }
 }
-            } catch (e) {
-              console.error("Post media decode error", e);
-            }
-          }
-        } catch (e) {
-          console.error("Post media load error", e);
-        } finally {
-          setIsLoadingMedia(false);
-        }
-      })();
+      
+  } catch (e) {
+    console.error("Post media load error", e);
+  } finally {
+    setIsLoadingMedia(false);
+  }
+})();
     }
   }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, mediaSrc]);
   useEffect(() => {
