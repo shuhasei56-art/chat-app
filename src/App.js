@@ -2505,180 +2505,68 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
   ] });
 });
 const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => {
-  const [commentText, setCommentText] = useState("");
-  const [mediaSrc, setMediaSrc] = useState(post.hasChunks ? null : post.media);
-  const [isLoadingMedia, setIsLoadingMedia] = useState(false);
+  const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [postPreview, setPostPreview] = useState(null);
-  
-  const u = allUsers.find((x) => x.uid === post.userId);
-  const isLiked = post.likes?.includes(user?.uid);
+  const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
-
-  const loadMedia = async () => {
-    if (mediaSrc || isLoadingMedia) return;
-    
-    setIsLoadingMedia(true);
-    try {
+  useEffect(() => {
+    if (post.hasChunks && !mediaSrc) {
       const cacheKey = `post:${post.id}`;
+      const cached = __mediaDataCache.get(cacheKey);
       const cachedUrl = __mediaUrlCache.get(cacheKey);
       if (cachedUrl) {
         setMediaSrc(cachedUrl);
-        setIsLoadingMedia(false);
         return;
       }
-
-      const chunksQ = query(
-        collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"),
-        orderBy("index", "asc")
-      );
-
-      let snap;
-      try {
-        snap = await getDocsFromCache(chunksQ);
-        if (snap.empty) throw new Error("Cache empty");
-      } catch (e) {
-        snap = await getDocsFromServer(chunksQ);
+      if (cached) {
+        setMediaSrc(cached);
+        return;
       }
-
-      const parts = [];
-      snap.forEach((d) => {
-        const v = d.data()?.data;
-        if (v) parts.push(v);
-      });
-      
-      const mergedData = parts.join("");
-      
-      if (mergedData) {
-        const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
-        const res = await fetch(`data:${mimeType};base64,${mergedData}`);
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        
-        __cacheSet(__mediaUrlCache, cacheKey, url);
-        setMediaSrc(url);
-      }
-    } catch (e) {
-      console.error("Post media load error", e);
-    } finally {
-      setIsLoadingMedia(false);
+      setIsLoadingMedia(true);
+      (async () => {
+        try {
+          let base64Data = "";
+          const chunksQ = query(
+            collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"),
+            orderBy("index", "asc")
+          );
+          // Prefer local cache first; fall back to server if needed (faster on repeat views)
+          let snap;
+          try {
+            snap = await getDocsFromCache(chunksQ);
+          } catch (e) {
+            snap = await getDocsFromServer(chunksQ);
+          }
+          const parts = [];
+          snap.forEach((d) => {
+            const v = d.data()?.data;
+            if (v) parts.push(v);
+          });
+          const mergedData = parts.join("");
+          if (mergedData) {
+            try {
+              if (mergedData.startsWith("data:")) {
+                __cacheSet(__mediaDataCache, cacheKey, mergedData);
+                setMediaSrc(mergedData);
+              } else {
+                const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
+                // Faster than manual charCode loop in many browsers
+                const blob = await (await fetch(`data:${mimeType};base64,${mergedData}`)).blob();
+                const url = URL.createObjectURL(blob);
+                __cacheSet(__mediaUrlCache, cacheKey, url);
+                setMediaSrc(url);
+              }
+            } catch (e) {
+              console.error("Post media decode error", e);
+            }
+          }
+        } catch (e) {
+          console.error("Post media load error", e);
+        } finally {
+          setIsLoadingMedia(false);
+        }
+      })();
     }
-  };
-
-  useEffect(() => {
-    return () => {
-      // 必要に応じてURLをrevoke
-    };
-  }, [mediaSrc, isMe]);
-
-  const toggleLike = async () => await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { likes: isLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
-
-  const deletePost = async () => {
-    if (!isMe) return;
-    const ok = window.confirm("この投稿を削除しますか？");
-    if (!ok) return;
-    try {
-      const postRef = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id);
-      await deleteDoc(postRef);
-    } catch (e) {
-      console.error("Delete post failed:", e);
-    }
-  };
-
-  const submitComment = async () => {
-    if (!commentText.trim()) return;
-    await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { comments: arrayUnion({ userId: user.uid, userName: profile.name, text: commentText, createdAt: (new Date()).toISOString() }) });
-    setCommentText("");
-  };
-
-  return /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2 border-b", children: [
-    /* ヘッダー部分 */
-    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
-      /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-        /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
-        isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
-      ] }),
-      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name }),
-      isMe && /* @__PURE__ */ jsx("button", { onClick: deletePost, className: "ml-auto p-2 rounded-full hover:bg-red-50 text-red-500", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) })
-    ] }),
-    
-    /* 投稿本文 */
-    /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
-    
-    /* メディア表示エリア */
-    (post.media || post.hasChunks) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[200px] relative overflow-hidden border border-gray-100", children: [
-      
-      // A. ロード中
-      isLoadingMedia && /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center gap-2", children: [
-        /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-8 h-8 text-green-500" }),
-        /* @__PURE__ */ jsx("span", { className: "text-xs text-gray-400 font-bold", children: "読み込み中..." })
-      ]}),
-
-      // B. 未ロード状態でチャンクがある場合 -> 「読み込むボタン」
-      (!mediaSrc && !isLoadingMedia && post.hasChunks) && /* @__PURE__ */ jsxs("button", { 
-        onClick: loadMedia,
-        className: "flex flex-col items-center gap-2 p-4 hover:bg-gray-100 rounded-xl transition-colors",
-        children: [
-          post.mediaType === "video" ? /* @__PURE__ */ jsx(Video, { className: "w-10 h-10 text-gray-400" }) : /* @__PURE__ */ jsx(ImageIcon, { className: "w-10 h-10 text-gray-400" }),
-          /* @__PURE__ */ jsx("span", { className: "text-sm font-bold text-gray-500", children: "メディアを読み込む" }),
-          /* @__PURE__ */ jsx("span", { className: "text-xs text-gray-400", children: "(タップして表示)" })
-        ] 
-      }),
-
-      // C. ロード済みの場合 -> 画像/動画を表示
-      (!isLoadingMedia && mediaSrc) && (
-        post.mediaType === "video" ? /* @__PURE__ */ jsx("video", { 
-          src: mediaSrc, 
-          className: "w-full rounded-2xl max-h-96 bg-black cursor-pointer", 
-          controls: true, 
-          playsInline: true, 
-          preload: "metadata",
-          onClick: () => setPostPreview({ src: mediaSrc, type: "video" }) 
-        }) : /* @__PURE__ */ jsx("img", { 
-          src: mediaSrc, 
-          className: "w-full rounded-2xl max-h-96 object-cover cursor-pointer", 
-          loading: "lazy", 
-          onClick: () => setPostPreview({ src: mediaSrc, type: "image" }) 
-        })
-      ),
-
-      // 拡大ボタン
-      (!isLoadingMedia && mediaSrc) && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: post.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
-        /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
-        "\u62E1\u5927"
-      ] })
-    ] }),
-
-    /* アクションボタン */
-    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-6 py-2 border-y mb-3", children: [
-      /* @__PURE__ */ jsxs("button", { onClick: toggleLike, className: "flex items-center gap-1.5", children: [
-        /* @__PURE__ */ jsx(Heart, { className: `w-5 h-5 ${isLiked ? "fill-red-500 text-red-500" : "text-gray-400"}` }),
-        /* @__PURE__ */ jsx("span", { className: "text-xs", children: post.likes?.length || 0 })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5 text-gray-400", children: [
-        /* @__PURE__ */ jsx(MessageCircle, { className: "w-5 h-5" }),
-        /* @__PURE__ */ jsx("span", { className: "text-xs", children: post.comments?.length || 0 })
-      ] })
-    ] }),
-    
-    /* コメント一覧 */
-    /* @__PURE__ */ jsx("div", { className: "space-y-3 mb-4", children: post.comments?.map((c, i) => /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-3 py-2", children: [
-      /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-500", children: c.userName }),
-      /* @__PURE__ */ jsx("div", { className: "text-xs", children: c.text })
-    ] }, i)) }),
-    
-    /* コメント入力 */
-    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 bg-gray-100 rounded-full px-4 py-1", children: [
-      /* @__PURE__ */ jsx("input", { className: "flex-1 bg-transparent text-xs py-2 outline-none", placeholder: "\u30B3\u30E1\u30F3\u30C8...", value: commentText, onChange: (e) => setCommentText(e.target.value), onKeyPress: (e) => e.key === "Enter" && submitComment() }),
-      /* @__PURE__ */ jsx("button", { onClick: submitComment, className: "text-green-500", children: /* @__PURE__ */ jsx(Send, { className: "w-4 h-4" }) })
-    ] }),
-
-    /* プレビューモーダル */
-    postPreview && /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1200] bg-black/95 flex items-center justify-center p-4", onClick: () => setPostPreview(null), children: [
-      /* @__PURE__ */ jsx("button", { className: "absolute top-5 right-5 text-white p-2 rounded-full bg-white/20", onClick: () => setPostPreview(null), children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) }),
-      postPreview.type === "video" ? /* @__PURE__ */ jsx("video", { src: postPreview.src, controls: true, autoPlay: true, className: "max-w-full max-h-[88vh] rounded-xl bg-black", onClick: (e) => e.stopPropagation() }) : /* @__PURE__ */ jsx("img", { src: postPreview.src, className: "max-w-full max-h-[88vh] object-contain rounded-xl", onClick: (e) => e.stopPropagation() })
-    ] })
-  ] });
-};
   }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, mediaSrc]);
   useEffect(() => {
     return () => {
@@ -2721,22 +2609,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
     (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
-      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : 
-post.mediaType === "video" ? /* @__PURE__ */ jsx("video", { 
-  src: mediaSrc || "", 
-  className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", 
-  controls: true, 
-  playsInline: true, 
-  preload: "metadata", // ★追加：再生するまで動画本体を読み込まない
-  poster: mediaSrc + "#t=0.1", // ★追加：動画の最初のコマをサムネイルとして表示
-  onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) 
-}) : /* @__PURE__ */ jsx("img", { 
-  src: mediaSrc || "", 
-  className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", 
-  loading: "lazy", 
-  decoding: "async", // ★追加：画像のデコードを非同期にしてカクつきを防止
-  onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) 
-})
+      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : post.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
       !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: post.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
         /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
         "\u62E1\u5927"
@@ -5632,7 +5505,7 @@ const handleLogout = async () => {
         return null;
       });
     });
-    const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(15)), (snap) => {
+    const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(50)), (snap) => {
       setPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
     return () => {
@@ -5885,7 +5758,6 @@ const handleLogout = async () => {
         view === "sticker-create" && /* @__PURE__ */ jsx(StickerEditor, { user, profile, onClose: () => setView("sticker-store"), showNotification }),
         view === "sticker-store" && /* @__PURE__ */ jsx(StickerStoreView, { user, setView, showNotification, profile, allUsers })
       ] }),
-      // 1. 検索モーダル
       searchModalOpen && /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/60", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-[32px] p-8", children: [
         /* @__PURE__ */ jsx("h2", { className: "text-xl font-bold mb-6", children: "\u691C\u7D22" }),
         /* @__PURE__ */ jsx("input", { className: "w-full bg-gray-50 rounded-2xl py-4 px-6 mb-6 outline-none", placeholder: "ID\u3092\u5165\u529B", value: searchQuery, onChange: (e) => setSearchQuery(e.target.value) }),
@@ -5893,19 +5765,7 @@ const handleLogout = async () => {
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 text-gray-600 font-bold", onClick: () => setSearchModalOpen(false), children: "\u9589\u3058\u308B" }),
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
-      ] }) }), // ←ここにカンマを追加
-
-      // 2. VOOM画面
-      view === "voom" && /* @__PURE__ */ jsx(VoomView, { 
-        db, 
-        appId, 
-        user, 
-        allUsers, 
-        profile, 
-        onBack: () => setView("home") 
-      }), // ←ここにカンマを追加
-
-      // 3. 下部ナビゲーション
+      ] }) }),
       user && !activeCall && ["home", "voom"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0", children: [
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("home"), children: [
           /* @__PURE__ */ jsx(Home, { className: "w-6 h-6" }),
@@ -5920,7 +5780,6 @@ const handleLogout = async () => {
     /* @__PURE__ */ jsx("style", { children: `.scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }` })
   ] }) });
 }
-
 var App_13_default = App;
 export {
   App_13_default as default
