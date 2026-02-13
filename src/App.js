@@ -132,6 +132,33 @@ const __cacheSet = (map, key, val, max=60) => {
     map.delete(firstKey);
   }
 };
+
+// Robust + fast base64 -> Blob/ObjectURL (fallback if fetch(data:) fails)
+const __base64ToBlob = async (base64Data, mimeType) => {
+  // Try using fetch(data:) first (often fastest), but some browsers fail for large payloads.
+  try {
+    const res = await fetch(`data:${mimeType};base64,${base64Data}`);
+    return await res.blob();
+  } catch (e) {
+    // Fallback: manual decode in slices to avoid huge allocations
+    const sliceSize = 1024 * 1024; // 1MB
+    const byteChars = atob(base64Data);
+    const byteArrays = [];
+    for (let offset = 0; offset < byteChars.length; offset += sliceSize) {
+      const slice = byteChars.slice(offset, offset + sliceSize);
+      const byteNumbers = new Array(slice.length);
+      for (let i = 0; i < slice.length; i++) byteNumbers[i] = slice.charCodeAt(i);
+      byteArrays.push(new Uint8Array(byteNumbers));
+    }
+    return new Blob(byteArrays, { type: mimeType });
+  }
+};
+const __base64ToMediaSrc = async (mergedData, mimeType) => {
+  if (!mergedData) return null;
+  if (mergedData.startsWith("data:")) return mergedData;
+  const blob = await __base64ToBlob(mergedData, mimeType);
+  return URL.createObjectURL(blob);
+};
 const REACTION_EMOJIS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F525}"];
 const rtcConfig = {
   iceServers: [
@@ -2550,11 +2577,12 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
                 setMediaSrc(mergedData);
               } else {
                 const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
-                // Faster than manual charCode loop in many browsers
-                const blob = await (await fetch(`data:${mimeType};base64,${mergedData}`)).blob();
-                const url = URL.createObjectURL(blob);
-                __cacheSet(__mediaUrlCache, cacheKey, url);
-                setMediaSrc(url);
+                const src = await __base64ToMediaSrc(mergedData, mimeType);
+                if (src) {
+                  if (src.startsWith("blob:")) __cacheSet(__mediaUrlCache, cacheKey, src);
+                  else __cacheSet(__mediaDataCache, cacheKey, src);
+                  setMediaSrc(src);
+                }
               }
             } catch (e) {
               console.error("Post media decode error", e);
