@@ -2609,7 +2609,22 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
     (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
-      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : post.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
+      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : 
+post.mediaType === "video" ? /* @__PURE__ */ jsx("video", { 
+  src: mediaSrc || "", 
+  className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", 
+  controls: true, 
+  playsInline: true, 
+  preload: "metadata", // ★追加：再生するまで動画本体を読み込まない
+  poster: mediaSrc + "#t=0.1", // ★追加：動画の最初のコマをサムネイルとして表示
+  onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) 
+}) : /* @__PURE__ */ jsx("img", { 
+  src: mediaSrc || "", 
+  className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", 
+  loading: "lazy", 
+  decoding: "async", // ★追加：画像のデコードを非同期にしてカクつきを防止
+  onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) 
+})
       !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: post.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
         /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
         "\u62E1\u5927"
@@ -5505,7 +5520,7 @@ const handleLogout = async () => {
         return null;
       });
     });
-    const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(20)), (snap) => {
+    const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(15)), (snap) => {
       setPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
     return () => {
