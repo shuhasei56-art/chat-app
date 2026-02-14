@@ -4228,6 +4228,7 @@ if (["image", "video"].includes(type)) {
         storagePath: null,
         hasChunks: false,
         chunkCount: 0,
+      complete: true,
         isUploading: true,
         createdAt: serverTimestamp(),
         readBy: [user.uid]
@@ -4281,6 +4282,7 @@ try {
         ...fileData,
         hasChunks: false,
         chunkCount: 0,
+      complete: true,
         isUploading: false,
         createdAt: serverTimestamp(),
         readBy: [user.uid]
@@ -4295,6 +4297,7 @@ try {
         ...fileData,
         hasChunks: false,
         chunkCount: 0,
+      complete: true,
         isUploading: false,
         createdAt: serverTimestamp(),
         readBy: [user.uid]
@@ -4782,6 +4785,7 @@ const postMessage = async () => {
         mimeType,
         hasChunks: true,
         chunkCount: 0,
+      complete: true,
         isUploading: true,
         likes: [],
         comments: [],
@@ -4818,6 +4822,7 @@ const postMessage = async () => {
       mimeType,
       hasChunks: false,
       chunkCount: 0,
+      complete: true,
       isUploading: false,
       likes: [],
       comments: [],
@@ -5529,6 +5534,28 @@ async function __idbSet(key, blob, mimeType) {
     });
   } catch {}
 }
+async function __sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+// Wait until meta doc is written AND marked complete (best-effort, no UI change)
+async function waitForMediaMetaComplete({ db2, appId2, parentPathParts, timeoutMs = 20000 }) {
+  const started = Date.now();
+  let last = null;
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const metaSnap = await getDoc(doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts));
+      if (metaSnap.exists()) {
+        last = metaSnap.data();
+        // accept if chunkCount present and either complete flag true or no flag (backward compatibility)
+        if (typeof last?.chunkCount === "number" && last.chunkCount > 0 && (last.complete === true || last.complete == null)) {
+          return last;
+        }
+      }
+    } catch {}
+    await __sleep(400);
+  }
+  return last;
+}
+
 
 async function downloadChunksToBlobUrlFast({ db2, appId2, parentPathParts, mimeType, cacheKey }) {
   // 1) memory cache
@@ -5547,16 +5574,13 @@ async function downloadChunksToBlobUrlFast({ db2, appId2, parentPathParts, mimeT
     }
   }
 
-  // 3) fetch meta to know chunkCount + mimeType
-  let chunkCount = null;
-  try {
-    const metaSnap = await getDoc(doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts));
-    const meta = metaSnap.exists() ? metaSnap.data() : null;
+  // 3) fetch meta to know chunkCount + mimeType (wait until writer finishes)
+  let meta = await waitForMediaMetaComplete({ db2, appId2, parentPathParts, timeoutMs: 20000 });
+  if (meta) {
     chunkCount = meta?.chunkCount ?? null;
     mimeType = mimeType || meta?.mimeType || null;
-  } catch {}
-
-  // If chunkCount missing, fall back to query+orderBy (safe)
+  }
+// If chunkCount missing, fall back to query+orderBy (safe)
   if (!chunkCount || typeof chunkCount !== "number" || chunkCount < 1) {
     const url = await downloadChunksToBlobUrl({ db2, appId2, parentPathParts, mimeType });
     if (cacheKey) __mediaCacheSet(cacheKey, url);
@@ -5596,6 +5620,7 @@ async function downloadChunksToBlobUrlFast({ db2, appId2, parentPathParts, mimeT
 
   if (missing.length) {
     // retry missing chunks (short & targeted)
+
     for (let attempt = 0; attempt < 2 && missing.length; attempt++) {
       const still = [];
       for (const i of missing) {
@@ -5610,6 +5635,21 @@ async function downloadChunksToBlobUrlFast({ db2, appId2, parentPathParts, mimeT
       missing.length = 0;
       missing.push(...still);
     }
+  }
+
+  if (missing.length) {
+    // writer might still be committing: wait briefly then retry missing once more
+    await waitForMediaMetaComplete({ db2, appId2, parentPathParts, timeoutMs: 8000 });
+    const still2 = [];
+    for (const i of missing) {
+      try {
+        const v = await fetchOne(i);
+        if (v) parts[i] = v;
+        else still2.push(i);
+      } catch { still2.push(i); }
+    }
+    missing.length = 0;
+    missing.push(...still2);
   }
 
   if (missing.length) {
