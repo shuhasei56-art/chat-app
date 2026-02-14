@@ -4802,7 +4802,7 @@ const postMessage = async () => {
       await updateDoc(newPostRef, { media: null, isUploading: false }).catch(() => {});
 
       setContent("");
-      try { if (localPreviewUrl && localPreviewUrl.startsWith("blob:")) /* keep localPreviewUrl alive */ } catch {}
+      // keep localPreviewUrl (do not revoke blob URL here)
       setMediaPreviewUrl(null);
       setMedia(null);
       showNotification("投稿しました");
