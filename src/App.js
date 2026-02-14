@@ -3504,8 +3504,8 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
       ] })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: localPost.content }),
-    (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
-      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : localPost.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
+    (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-black/5 rounded-2xl flex items-center justify-center min-h-[140px] max-h-96 relative overflow-hidden", children: [
+      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : localPost.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full h-full max-h-96 rounded-2xl bg-black object-contain cursor-zoom-in", controls: true, playsInline: true, preload: "metadata", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full h-full max-h-96 rounded-2xl object-contain bg-black/5 cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
       !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: localPost.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
         /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
         "\u62E1\u5927"
@@ -6645,6 +6645,8 @@ function App() {
   const [userEffects, setUserEffects] = useState([]);
   const [activeEffect, setActiveEffect] = useState("Normal");
   const [currentChatBackground, setCurrentChatBackground] = useState(null);
+  const [voomUnreadCount, setVoomUnreadCount] = useState(0);
+  const voomLastSeenAtRef = useRef(0);
   const processedMsgIds = useRef(/* @__PURE__ */ new Set());
   const toggleMuteChat = (chatId) => {
     setMutedChats((prev) => {
@@ -6745,6 +6747,44 @@ function App() {
     navigator.clipboard.writeText(text);
     showNotification("ID\u3092\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F");
   };
+  useEffect(() => {
+    if (!user?.uid) {
+      voomLastSeenAtRef.current = 0;
+      setVoomUnreadCount(0);
+      return;
+    }
+    const storageKey = `voomLastSeenAt:${user.uid}`;
+    const saved = Number(localStorage.getItem(storageKey) || "0");
+    voomLastSeenAtRef.current = Number.isFinite(saved) ? saved : 0;
+    const postsQuery = query(
+      collection(db, "artifacts", appId, "public", "data", "posts"),
+      orderBy("createdAt", "desc"),
+      limit(100)
+    );
+    const unsubPosts = onSnapshot(postsQuery, (snap) => {
+      if (view === "voom") {
+        voomLastSeenAtRef.current = Date.now();
+        localStorage.setItem(storageKey, String(voomLastSeenAtRef.current));
+        setVoomUnreadCount(0);
+        return;
+      }
+      let unread = 0;
+      snap.forEach((d) => {
+        const data = d.data();
+        if (data?.userId === user.uid) return;
+        if (toMillisSafe(data?.createdAt) > voomLastSeenAtRef.current) unread++;
+      });
+      setVoomUnreadCount(unread);
+    });
+    return () => unsubPosts();
+  }, [user?.uid, view]);
+  useEffect(() => {
+    if (!user?.uid || view !== "voom") return;
+    const storageKey = `voomLastSeenAt:${user.uid}`;
+    voomLastSeenAtRef.current = Date.now();
+    localStorage.setItem(storageKey, String(voomLastSeenAtRef.current));
+    setVoomUnreadCount(0);
+  }, [view, user?.uid]);
   useEffect(() => {
     if (!user) return;
     const unsubProfile = onSnapshot(doc(db, "artifacts", appId, "public", "data", "users", user.uid), (doc2) => {
@@ -7139,7 +7179,10 @@ function App() {
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u30DB\u30FC\u30E0" })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "voom" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("voom"), children: [
-          /* @__PURE__ */ jsx(LayoutGrid, { className: "w-6 h-6" }),
+          /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+            /* @__PURE__ */ jsx(LayoutGrid, { className: "w-6 h-6" }),
+            voomUnreadCount > 0 && /* @__PURE__ */ jsx("span", { className: "absolute -right-2 -bottom-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] leading-[18px] text-center font-black border border-white", children: voomUnreadCount > 99 ? "99+" : voomUnreadCount })
+          ] }),
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "VOOM" })
         ] })
       ] })
