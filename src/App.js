@@ -5547,6 +5547,95 @@ async function downloadChunksToBlobUrlFast({ db2, appId2, parentPathParts, mimeT
     }
   }
 
+  // 3) fetch meta to know chunkCount + mimeType
+  let chunkCount = null;
+  try {
+    const metaSnap = await getDoc(doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts));
+    const meta = metaSnap.exists() ? metaSnap.data() : null;
+    chunkCount = meta?.chunkCount ?? null;
+    mimeType = mimeType || meta?.mimeType || null;
+  } catch {}
+
+  // If chunkCount missing, fall back to query+orderBy (safe)
+  if (!chunkCount || typeof chunkCount !== "number" || chunkCount < 1) {
+    const url = await downloadChunksToBlobUrl({ db2, appId2, parentPathParts, mimeType });
+    if (cacheKey) __mediaCacheSet(cacheKey, url);
+    return url;
+  }
+
+  // 4) parallel getDoc for each chunk id ("0".."n-1") with concurrency limit
+  const CONCURRENCY = 10;
+  const parts = new Array(chunkCount);
+  let cursor = 0;
+
+  const fetchOne = async (i) => {
+    const snap = await getDoc(
+      doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts, "chunks", String(i))
+    );
+    const data = snap.exists() ? snap.data() : null;
+    if (data?.b) return data.b.toUint8Array();
+    return null;
+  };
+
+  const worker = async () => {
+    while (cursor < chunkCount) {
+      const i = cursor++;
+      try {
+        parts[i] = await fetchOne(i);
+      } catch {
+        parts[i] = null;
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
+  // 5) Ensure ALL chunks exist. If missing, retry a few times; if still missing, fall back to slow-safe loader.
+  const missing = [];
+  for (let i = 0; i < chunkCount; i++) if (!parts[i]) missing.push(i);
+
+  if (missing.length) {
+    // retry missing chunks (short & targeted)
+    for (let attempt = 0; attempt < 2 && missing.length; attempt++) {
+      const still = [];
+      for (const i of missing) {
+        try {
+          const v = await fetchOne(i);
+          if (v) parts[i] = v;
+          else still.push(i);
+        } catch {
+          still.push(i);
+        }
+      }
+      missing.length = 0;
+      missing.push(...still);
+    }
+  }
+
+  if (missing.length) {
+    // fallback: query all chunks ordered by index (slower but reliable)
+    const url = await downloadChunksToBlobUrl({ db2, appId2, parentPathParts, mimeType });
+    if (cacheKey) __mediaCacheSet(cacheKey, url);
+    return url;
+  }
+
+  // 6) Create Blob in the correct order. If mimeType missing, guess video/mp4 for videos.
+  const type =
+    mimeType ||
+    (cacheKey && String(cacheKey).includes("video") ? "video/mp4" : "application/octet-stream");
+
+  const blob = new Blob(parts, { type });
+  const url = URL.createObjectURL(blob);
+
+  if (cacheKey) {
+    __mediaCacheSet(cacheKey, url);
+    // persist cache (best-effort)
+    __idbSet(cacheKey, blob, type);
+  }
+  return url;
+}
+  }
+
   // 3) fetch meta to know chunkCount
   let chunkCount = null;
   try {
