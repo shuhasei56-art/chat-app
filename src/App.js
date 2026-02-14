@@ -327,7 +327,29 @@ const formatDateTimeWithSeconds = (timestamp) => {
   const hh = String(date.getHours()).padStart(2, "0");
   const min = String(date.getMinutes()).padStart(2, "0");
   const ss = String(date.getSeconds()).padStart(2, "0");
-  return `${yyyy}年${mm}月${dd}日 ${hh}時${min}分${ss}秒`;
+  return `${yyyy}/${mm}/${dd} ${hh}:${min}:${ss}`;
+};
+const toMillisSafe = (value) => {
+  if (!value) return 0;
+  if (typeof value === "number") return value;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value?.toMillis === "function") return value.toMillis();
+  if (typeof value?.toDate === "function") return value.toDate().getTime();
+  if (typeof value?.seconds === "number") return value.seconds * 1e3;
+  return 0;
+};
+const getCallStatusTimestampMs = (callStatus) => {
+  if (!callStatus) return 0;
+  return toMillisSafe(callStatus.acceptedAt) || toMillisSafe(callStatus.timestamp) || toMillisSafe(callStatus.updatedAt);
+};
+const isCallStatusStale = (callStatus) => {
+  if (!callStatus?.status) return true;
+  const ts = getCallStatusTimestampMs(callStatus);
+  if (!ts) return false;
+  const ageMs = Date.now() - ts;
+  if (callStatus.status === "ringing") return ageMs > 12e4;
+  if (callStatus.status === "accepted") return ageMs > 6e5;
+  return ageMs > 12e4;
 };
 const getProfileCacheKey = (uid) => `profileCache:${uid}`;
 const normalizeProfileForCache = (uid, profile) => {
@@ -634,130 +656,6 @@ const handleCompressedUpload = (e, callback) => {
     img.src = event.target.result;
   };
   reader.readAsDataURL(file);
-};
-const pickSupportedRecorderMimeType = () => {
-  if (typeof MediaRecorder === "undefined") return "";
-  const candidates = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
-  for (const mime of candidates) {
-    try {
-      if (MediaRecorder.isTypeSupported?.(mime)) return mime;
-    } catch {
-    }
-  }
-  return "";
-};
-const ensureVoomVideoCompatibility = async (file) => {
-  if (!file || !file.type?.startsWith("video/")) return file;
-  if (file.type === "video/webm") return file;
-  const recorderMime = pickSupportedRecorderMimeType();
-  if (!recorderMime) return file;
-  const src = URL.createObjectURL(file);
-  const video = document.createElement("video");
-  video.preload = "metadata";
-  video.muted = true;
-  video.playsInline = true;
-  video.src = src;
-  const cleanup = () => {
-    try {
-      video.pause();
-      video.src = "";
-      video.load();
-    } catch {
-    }
-    URL.revokeObjectURL(src);
-  };
-  try {
-    await new Promise((resolve, reject) => {
-      const onLoaded = () => {
-        video.removeEventListener("loadedmetadata", onLoaded);
-        video.removeEventListener("error", onError);
-        resolve();
-      };
-      const onError = () => {
-        video.removeEventListener("loadedmetadata", onLoaded);
-        video.removeEventListener("error", onError);
-        reject(new Error("VIDEO_METADATA_LOAD_FAILED"));
-      };
-      video.addEventListener("loadedmetadata", onLoaded);
-      video.addEventListener("error", onError);
-    });
-    if (!video.videoWidth || !video.videoHeight || !video.captureStream) {
-      cleanup();
-      return file;
-    }
-    const maxW = 1280;
-    const maxH = 720;
-    let w = video.videoWidth;
-    let h = video.videoHeight;
-    if (w > h && w > maxW) {
-      h = Math.round(h * (maxW / w));
-      w = maxW;
-    } else if (h > maxH) {
-      w = Math.round(w * (maxH / h));
-      h = maxH;
-    }
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(2, w);
-    canvas.height = Math.max(2, h);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      cleanup();
-      return file;
-    }
-    const sourceStream = video.captureStream(24);
-    const canvasStream = canvas.captureStream(24);
-    const mixedStream = new MediaStream([
-      ...canvasStream.getVideoTracks(),
-      ...sourceStream.getAudioTracks()
-    ]);
-    const chunks = [];
-    const recorder = new MediaRecorder(mixedStream, {
-      mimeType: recorderMime,
-      videoBitsPerSecond: 1200000,
-      audioBitsPerSecond: 96000
-    });
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunks.push(e.data);
-    };
-    let rafId = null;
-    const drawLoop = () => {
-      if (video.paused || video.ended) return;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      rafId = requestAnimationFrame(drawLoop);
-    };
-    await video.play();
-    recorder.start(1000);
-    drawLoop();
-    await new Promise((resolve) => {
-      const finish = () => {
-        try {
-          if (rafId) cancelAnimationFrame(rafId);
-        } catch {
-        }
-        if (recorder.state !== "inactive") {
-          recorder.onstop = () => resolve();
-          recorder.stop();
-        } else {
-          resolve();
-        }
-      };
-      video.onended = finish;
-      video.onerror = finish;
-      setTimeout(finish, Math.min(180000, Math.max(15000, Math.floor((video.duration || 15) * 1000 + 3000))));
-    });
-    mixedStream.getTracks().forEach((t) => t.stop());
-    sourceStream.getTracks().forEach((t) => t.stop());
-    canvasStream.getTracks().forEach((t) => t.stop());
-    cleanup();
-    if (chunks.length === 0) return file;
-    const blob = new Blob(chunks, { type: recorder.mimeType || "video/webm" });
-    if (!blob.size) return file;
-    const baseName = (file.name || "voom_video").replace(/\.[^/.]+$/, "");
-    return new File([blob], `${baseName}.webm`, { type: blob.type || "video/webm", lastModified: Date.now() });
-  } catch {
-    cleanup();
-    return file;
-  }
 };
 const generateThumbnail = (file) => {
   return new Promise((resolve) => {
@@ -3494,31 +3392,14 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
   const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [postPreview, setPostPreview] = useState(null);
   const [localPost, setLocalPost] = useState(post);
-  const [isVideoActivated, setIsVideoActivated] = useState(post.mediaType !== "video");
-  const [isVideoPlaybackError, setIsVideoPlaybackError] = useState(false);
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = localPost.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
-  const isVideoPost = localPost.mediaType === "video";
-  const shouldLoadPostMedia = !isVideoPost || isVideoActivated;
-  const shouldShowMediaBlock = !!mediaSrc || isLoadingMedia || isVideoPost && (localPost.hasChunks || !!localPost.media);
   const postDateTime = formatDateTimeWithSeconds(localPost.createdAt);
   useEffect(() => {
     setLocalPost(post);
-    setIsVideoPlaybackError(false);
-    if (post.mediaType === "video") {
-      setIsVideoActivated(false);
-      setMediaSrc(null);
-      setIsLoadingMedia(false);
-    } else {
-      setIsVideoActivated(true);
-    }
   }, [post]);
   useEffect(() => {
     let cancelled = false;
-    if (!shouldLoadPostMedia) {
-      setIsLoadingMedia(false);
-      return;
-    }
     if (!post.hasChunks) {
       setMediaSrc(post.media || null);
       return;
@@ -3545,7 +3426,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
     return () => {
       cancelled = true;
     };
-  }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, post.media, mediaSrc, db2, appId2, shouldLoadPostMedia]);
+  }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, post.media, mediaSrc, db2, appId2]);
   useEffect(() => {
     return () => {
       if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe && !isCachedPostMediaUrl(mediaSrc)) URL.revokeObjectURL(mediaSrc);
@@ -3585,7 +3466,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "flex-1", children: [
         /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name }),
-        postDateTime && /* @__PURE__ */ jsx("div", { className: "text-[9px] text-gray-400 leading-none mt-0.5", children: postDateTime })
+        postDateTime && /* @__PURE__ */ jsx("div", { className: "text-[10px] text-gray-400 leading-none mt-0.5", children: postDateTime })
       ] }),
       isMe && /* @__PURE__ */ jsxs("button", { onClick: () => onDelete?.(post), className: "text-[11px] font-bold text-red-500 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50", children: [
         /* @__PURE__ */ jsx(Trash2, { className: "w-3.5 h-3.5 inline mr-1" }),
@@ -3593,12 +3474,8 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
       ] })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: localPost.content }),
-    shouldShowMediaBlock && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
-      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : isVideoPost && !isVideoActivated ? /* @__PURE__ */ jsxs("button", { onClick: () => setIsVideoActivated(true), className: "w-full min-h-[180px] bg-black text-white flex flex-col items-center justify-center gap-2", children: [
-        /* @__PURE__ */ jsx(Play, { className: "w-8 h-8" }),
-        /* @__PURE__ */ jsx("span", { className: "text-xs font-bold opacity-90", children: "\u30BF\u30C3\u30D7\u3067\u52D5\u753B\u3092\u8AAD\u307F\u8FBC\u307F" })
-      ] }) : isVideoPost ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, muted: false, preload: "metadata", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }), onLoadedData: () => setIsVideoPlaybackError(false), onError: () => setIsVideoPlaybackError(true) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
-      isVideoPost && isVideoPlaybackError && /* @__PURE__ */ jsx("div", { className: "absolute inset-x-2 bottom-2 bg-red-600/90 text-white text-[11px] font-bold px-3 py-2 rounded-xl", children: "\u3053\u306E\u7AEF\u672B\u3067\u306F\u52D5\u753B\u3092\u518D\u751F\u3067\u304D\u306A\u3044\u53EF\u80FD\u6027\u304C\u3042\u308A\u307E\u3059\u3002\u5225\u306E\u7AEF\u672B\u3067\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002" }),
+    (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
+      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : localPost.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
       !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: localPost.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
         /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
         "\u62E1\u5927"
@@ -3624,7 +3501,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
     ] }),
     postPreview && /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1200] bg-black/95 flex items-center justify-center p-4", onClick: () => setPostPreview(null), children: [
       /* @__PURE__ */ jsx("button", { className: "absolute top-5 right-5 text-white p-2 rounded-full bg-white/20", onClick: () => setPostPreview(null), children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) }),
-      postPreview.type === "video" ? /* @__PURE__ */ jsx("video", { src: postPreview.src, controls: true, autoPlay: true, playsInline: true, preload: "metadata", className: "max-w-full max-h-[88vh] rounded-xl bg-black", onClick: (e) => e.stopPropagation(), onError: () => setIsVideoPlaybackError(true) }) : /* @__PURE__ */ jsx("img", { src: postPreview.src, className: "max-w-full max-h-[88vh] object-contain rounded-xl", onClick: (e) => e.stopPropagation() })
+      postPreview.type === "video" ? /* @__PURE__ */ jsx("video", { src: postPreview.src, controls: true, autoPlay: true, className: "max-w-full max-h-[88vh] rounded-xl bg-black", onClick: (e) => e.stopPropagation() }) : /* @__PURE__ */ jsx("img", { src: postPreview.src, className: "max-w-full max-h-[88vh] object-contain rounded-xl", onClick: (e) => e.stopPropagation() })
     ] })
   ] });
 };
@@ -4902,7 +4779,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   }, [allUsers, chats, profile?.friends, profile?.hiddenFriends, user.uid]);
   const isGroup = chatData?.isGroup || false;
   const activeChatCallStatus = chatData?.callStatus || null;
-  const hasJoinableCall = !!activeChatCallStatus?.sessionId && (activeChatCallStatus.status === "ringing" || activeChatCallStatus.status === "accepted");
+  const activeChatCallIsFresh = !!activeChatCallStatus && !isCallStatusStale(activeChatCallStatus);
+  const hasJoinableCall = activeChatCallIsFresh && !!activeChatCallStatus?.sessionId && (activeChatCallStatus.status === "ringing" || activeChatCallStatus.status === "accepted");
   let partnerId = null;
   let partnerData = null;
   if (chatData && !isGroup) {
@@ -4939,13 +4817,14 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   const handleJoinCall = (isVideo, callerId, sessionId = "") => {
     startVideoCall(activeChatId, isVideo, true, callerId, sessionId);
   };
-  const joinCurrentCall = () => {
-    if (!activeChatCallStatus?.sessionId) {
+  const joinCurrentCall = async () => {
+    if (!activeChatCallStatus?.sessionId || !activeChatCallIsFresh) {
       showNotification("\u53C2\u52A0\u3067\u304D\u308B\u901A\u8A71\u304C\u3042\u308A\u307E\u305B\u3093");
-      return;
+      return false;
     }
     const isVideoCall = activeChatCallStatus.callType !== "audio";
-    startVideoCall(activeChatId, isVideoCall, true, activeChatCallStatus.callerId, activeChatCallStatus.sessionId);
+    await startVideoCall(activeChatId, isVideoCall, true, activeChatCallStatus.callerId, activeChatCallStatus.sessionId);
+    return true;
   };
   useEffect(() => {
     isMountedRef.current = true;
@@ -5583,10 +5462,10 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     }
     await sendMessage(text);
   };
-  const handleVideoCallButton = (isVideo) => {
+  const handleVideoCallButton = async (isVideo) => {
     if (hasJoinableCall) {
-      joinCurrentCall();
-      return;
+      const joined = await joinCurrentCall();
+      if (joined) return;
     }
     startVideoCall(activeChatId, isVideo);
   };
@@ -6014,8 +5893,7 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
     if (!inputFile) return;
     e.target.value = "";
     const processed = await processFileBeforeUpload(inputFile);
-    const normalized = processed instanceof File ? processed : new File([processed], inputFile.name, { type: processed?.type || inputFile.type || "application/octet-stream", lastModified: Date.now() });
-    const file = normalized.type.startsWith("video/") ? await ensureVoomVideoCompatibility(normalized) : normalized;
+    const file = processed instanceof File ? processed : new File([processed], inputFile.name, { type: processed?.type || inputFile.type || "application/octet-stream", lastModified: Date.now() });
     if (media && media.startsWith("blob:")) {
       URL.revokeObjectURL(media);
     }
@@ -6859,7 +6737,9 @@ function App() {
       });
       setChats(chatList);
       setActiveCall((prev) => {
-        const incoming = chatList.find((c) => c.callStatus?.status === "ringing" && c.callStatus.callerId !== user.uid);
+        const incoming = chatList.find(
+          (c) => c.callStatus?.status === "ringing" && !isCallStatusStale(c.callStatus) && c.callStatus.callerId !== user.uid
+        );
         if (incoming && (!prev || prev.chatId !== incoming.id || prev?.callData?.sessionId !== incoming.callStatus?.sessionId)) {
           return {
             chatId: incoming.id,
@@ -6874,6 +6754,7 @@ function App() {
         if (prev.isGroupCall) return prev;
         const currentChat = chatList.find((c) => c.id === prev.chatId);
         const status = currentChat?.callStatus?.status;
+        if (currentChat?.callStatus && isCallStatusStale(currentChat.callStatus)) return null;
         if (!currentChat || !currentChat.callStatus) return null;
         if (status === "accepted") {
           return { ...prev, phase: "inCall", callData: currentChat.callStatus, isVideo: currentChat.callStatus?.callType !== "audio", isCaller: currentChat.callStatus?.callerId === user.uid };
