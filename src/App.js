@@ -119,7 +119,7 @@ const __chunksToObjectUrl = (chunkStrings, fallbackMimeType) => {
   let carry = "";
 
   const first = chunkStrings[0] || "";
-  if (first.startsWith("data:")) {
+  if (typeof first === "string" && first.startsWith("data:")) {
     const commaIdx = first.indexOf(",");
     if (commaIdx !== -1) {
       const header = first.slice(0, commaIdx);
@@ -130,129 +130,53 @@ const __chunksToObjectUrl = (chunkStrings, fallbackMimeType) => {
     }
   }
 
-  const parts = [];
-    snap.forEach((d) => {
-      const v = d.data()?.data;
-      if (v) parts.push(v);
-    });
+  const byteParts = [];
+  const pushDecoded = (b64) => {
+    if (!b64) return;
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+    byteParts.push(bytes);
+  };
 
-    // Prefer Firestore Bytes chunks (b) when available (faster / avoids huge base64 strings).
-    if (!parts.length) {
-      const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
-      try {
-        const blobUrl = await downloadChunksToBlobUrlFast({
-          db2,
-          appId2,
-          parentPathParts: ["posts", post.id],
-          mimeType,
-          cacheKey
-        });
-        if (blobUrl) {
-          __cacheSet(__mediaUrlCache, cacheKey, blobUrl);
-          setMediaSrc(blobUrl);
-          return;
-        }
-      } catch (e) {
-        console.warn("Binary chunk download failed (post)", e);
+  for (; i < chunkStrings.length; i++) {
+    const s = chunkStrings[i];
+    if (!s) continue;
+
+    // Some implementations store raw base64, others store full data URLs for the first chunk.
+    if (typeof s === "string" && s.startsWith("data:")) {
+      const comma = s.indexOf(",");
+      if (comma !== -1) {
+        const header = s.slice(0, comma);
+        const mt = header.split(";")[0]?.split(":")[1];
+        if (mt) mimeType = mt;
+        carry += s.slice(comma + 1);
+      } else {
+        carry += s;
       }
-    }
-
-    // Fast + stable: decode chunks to Blob URL without concatenating into one huge base64 string.
-    if (parts.length) {
-  try {
-    if (parts.length === 1 && typeof parts[0] === "string" && parts[0].startsWith("data:")) {
-      __cacheSet(__mediaDataCache, cacheKey, parts[0]);
-      setMediaSrc(parts[0]);
     } else {
-      const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
-      const url = __chunksToObjectUrl(parts, mimeType);
-      if (url) {
-        __cacheSet(__mediaUrlCache, cacheKey, url);
-        setMediaSrc(url);
-      }
+      carry += s;
     }
-  } catch (e) {
-    console.error("Post media decode error", e);
-  }
-}
-        } catch (e) {
-          console.error("Post media load error", e);
-        } finally {
-          setIsLoadingMedia(false);
-        }
-      })();
-    }
-  }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, mediaSrc]);
-  const toggleLike = async () => await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { likes: isLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
 
-  const deletePost = async () => {
-    if (!isMe) return;
-    const ok = window.confirm("この投稿を削除しますか？");
-    if (!ok) return;
-    try {
-      const postRef = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id);
-      if (post.storagePath) {
-}
-      const chunksSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"));
-      const commentsSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "comments"));
-      const batch = writeBatch(db2);
-      chunksSnap.forEach((d) => batch.delete(d.ref));
-      commentsSnap.forEach((d) => batch.delete(d.ref));
-      batch.delete(postRef);
-      await batch.commit();
-    } catch (e) {
-      console.error("Delete post failed:", e);
+    // Decode only full 4-char blocks. Keep remainder in carry.
+    const usableLen = carry.length - (carry.length % 4);
+    if (usableLen > 0) {
+      const toDecode = carry.slice(0, usableLen);
+      carry = carry.slice(usableLen);
+      pushDecoded(toDecode);
     }
-  };
-  const submitComment = async () => {
-    if (!commentText.trim()) return;
-    await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { comments: arrayUnion({ userId: user.uid, userName: profile.name, text: commentText, createdAt: (/* @__PURE__ */ new Date()).toISOString() }) });
-    setCommentText("");
-  };
-  return /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2 border-b", children: [
-    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
-      /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-        /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
-        isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
-      ,
-        isMe && /* @__PURE__ */ jsx("button", { onClick: deletePost, className: "ml-auto p-2 rounded-full hover:bg-red-50 text-red-500", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) }),
-] }),
-      /* @__PURE__ */ jsxs("div", { className: "flex flex-col", children: [
-        /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name }),
-        /* @__PURE__ */ jsx("div", { className: "text-[10px] text-gray-400 font-bold", children: formatDateTime(post.createdAt) })
-      ] })
-    ] }),
-    /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
-    (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
-      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : post.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
-      !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: post.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
-        /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
-        "\u62E1\u5927"
-      ] })
-    ] }),
-    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-6 py-2 border-y mb-3", children: [
-      /* @__PURE__ */ jsxs("button", { onClick: toggleLike, className: "flex items-center gap-1.5", children: [
-        /* @__PURE__ */ jsx(Heart, { className: `w-5 h-5 ${isLiked ? "fill-red-500 text-red-500" : "text-gray-400"}` }),
-        /* @__PURE__ */ jsx("span", { className: "text-xs", children: post.likes?.length || 0 })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5 text-gray-400", children: [
-        /* @__PURE__ */ jsx(MessageCircle, { className: "w-5 h-5" }),
-        /* @__PURE__ */ jsx("span", { className: "text-xs", children: post.comments?.length || 0 })
-      ] })
-    ] }),
-    /* @__PURE__ */ jsx("div", { className: "space-y-3 mb-4", children: post.comments?.map((c, i) => /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-3 py-2", children: [
-      /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-500", children: c.userName }),
-      /* @__PURE__ */ jsx("div", { className: "text-xs", children: c.text })
-    ] }, i)) }),
-    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 bg-gray-100 rounded-full px-4 py-1", children: [
-      /* @__PURE__ */ jsx("input", { className: "flex-1 bg-transparent text-xs py-2 outline-none", placeholder: "\u30B3\u30E1\u30F3\u30C8...", value: commentText, onChange: (e) => setCommentText(e.target.value), onKeyPress: (e) => e.key === "Enter" && submitComment() }),
-      /* @__PURE__ */ jsx("button", { onClick: submitComment, className: "text-green-500", children: /* @__PURE__ */ jsx(Send, { className: "w-4 h-4" }) })
-    ] }),
-    postPreview && /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1200] bg-black/95 flex items-center justify-center p-4", onClick: () => setPostPreview(null), children: [
-      /* @__PURE__ */ jsx("button", { className: "absolute top-5 right-5 text-white p-2 rounded-full bg-white/20", onClick: () => setPostPreview(null), children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) }),
-      postPreview.type === "video" ? /* @__PURE__ */ jsx("video", { src: postPreview.src, controls: true, autoPlay: true, className: "max-w-full max-h-[88vh] rounded-xl bg-black", onClick: (e) => e.stopPropagation() }) : /* @__PURE__ */ jsx("img", { src: postPreview.src, className: "max-w-full max-h-[88vh] object-contain rounded-xl", onClick: (e) => e.stopPropagation() })
-    ] })
-  ] });
+  }
+
+  // Decode whatever is left (pad if necessary)
+  if (carry.length) {
+    let padded = carry;
+    while (padded.length % 4 !== 0) padded += "=";
+    pushDecoded(padded);
+  }
+
+  if (!byteParts.length) return null;
+  const blob = new Blob(byteParts, { type: mimeType });
+  return URL.createObjectURL(blob);
 };
 const GroupCreateView = ({ user, profile, allUsers, chats, setView, showNotification }) => {
   const [groupName, setGroupName] = useState("");
