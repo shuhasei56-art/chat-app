@@ -203,16 +203,41 @@ const __cacheSet = (map, key, val, max = 60) => {
   }
 };
 const REACTION_EMOJIS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F525}"];
+const __turnUrlsRaw = (process.env.REACT_APP_TURN_URLS || "").trim();
+const __turnUser = (process.env.REACT_APP_TURN_USERNAME || "").trim();
+const __turnCred = (process.env.REACT_APP_TURN_CREDENTIAL || "").trim();
+const __turnUrls = __turnUrlsRaw ? __turnUrlsRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+
 const rtcConfig = {
+  // ICE server list tuned for cross-network / symmetric NAT cases.
   iceServers: [
-    { urls: ["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302","stun:stun2.l.google.com:19302","stun:stun3.l.google.com:19302","stun:stun4.l.google.com:19302"] },
-    // TURN (NAT越え安定化). 公開リレーを使用（無料枠/制限がある場合あり）
-    { urls: ["turn:openrelay.metered.ca:80"], username: "openrelayproject", credential: "openrelayproject" },
-    { urls: ["turn:openrelay.metered.ca:443"], username: "openrelayproject", credential: "openrelayproject" },
-    { urls: ["turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" }
+    // Multiple STUN providers for resilience
+    { urls: [
+      "stun:stun.l.google.com:19302",
+      "stun:stun1.l.google.com:19302",
+      "stun:stun2.l.google.com:19302",
+      "stun:stun3.l.google.com:19302",
+      "stun:stun4.l.google.com:19302",
+      "stun:global.stun.twilio.com:3478",
+      "stun:stun.cloudflare.com:3478"
+    ] },
+    // TURN (required for many NAT/CGNAT / different Wi‑Fi environments).
+    // If you have your own TURN, set:
+    //   REACT_APP_TURN_URLS="turn:your.turn:3478?transport=udp,turn:your.turn:3478?transport=tcp"
+    //   REACT_APP_TURN_USERNAME="user"
+    //   REACT_APP_TURN_CREDENTIAL="pass"
+    ...(__turnUrls.length && __turnUser && __turnCred
+      ? [{ urls: __turnUrls, username: __turnUser, credential: __turnCred }]
+      : [
+          // Public relay (may have limits). Works out-of-the-box in many cases.
+          { urls: ["turn:openrelay.metered.ca:80"], username: "openrelayproject", credential: "openrelayproject" },
+          { urls: ["turn:openrelay.metered.ca:443"], username: "openrelayproject", credential: "openrelayproject" },
+          { urls: ["turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" }
+        ])
   ],
   iceCandidatePoolSize: 10,
-  bundlePolicy: "max-bundle"
+  bundlePolicy: "max-bundle",
+  rtcpMuxPolicy: "require"
 };
 
 // Optional custom TURN (より安定させたい場合): .env に以下を設定すると優先利用します。
@@ -871,7 +896,32 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       };
       pc.oniceconnectionstatechange = async () => {
         try {
-          const iceState = pc.iceConnectionState;
+          
+const iceState = pc.iceConnectionState;
+          if (iceState === "disconnected") {
+            // Often happens on Wi‑Fi change / NAT rebinding. Try ICE restart quickly.
+            try { pc.restartIce?.(); } catch {}
+            if (isCaller) {
+              try {
+                const offer = await pc.createOffer({ iceRestart: true, offerToReceiveAudio: true, offerToReceiveVideo: !!isVideoEnabled });
+                await pc.setLocalDescription(offer);
+                await setDoc(
+                  signalingRef,
+                  {
+                    sessionId,
+                    callerId: callData?.callerId || user.uid,
+                    offerSdp: offer.sdp,
+                    offererId: user.uid,
+                    iceRestart: true,
+                    updatedAt: serverTimestamp()
+                  },
+                  { merge: true }
+                );
+              } catch (e) {
+                console.warn("ICE restart (disconnected) offer failed:", e);
+              }
+            }
+          }
           if (iceState === "failed") {
             // Try ICE restart (helps on NAT changes / Wi-Fi switch)
             try {
