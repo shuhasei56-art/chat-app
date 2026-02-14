@@ -1651,11 +1651,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
       const pc = new RTCPeerConnection(buildRtcConfig(false));
       pcRef.current = pc;
-      try {
-        pc.addTransceiver("audio", { direction: "sendrecv" });
-        if (isVideoEnabled) pc.addTransceiver("video", { direction: "sendrecv" });
-      } catch {
-      }
       const applyAdaptiveProfile = async (profile) => {
         if (!pcRef.current) return;
         const key = `${profile.videoBitrate}-${profile.videoScale}-${profile.videoFps}-${profile.audioBitrate}`;
@@ -6944,12 +6939,37 @@ function App() {
   };
   const startVideoCall = async (chatId, isVideo = true, isJoin = false, joinCallerId, joinSessionId = "") => {
     initAudioContext();
+    const chatRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId);
     const chat = chats.find((c) => c.id === chatId);
     const isGroup = chat?.isGroup;
+    if (!isJoin) {
+      let latestCallStatus = chat?.callStatus || null;
+      try {
+        const latestChatSnap = await getDoc(chatRef);
+        if (latestChatSnap.exists()) {
+          latestCallStatus = latestChatSnap.data()?.callStatus || latestCallStatus;
+        }
+      } catch (e) {
+        console.warn("Failed to load latest callStatus before start:", e);
+      }
+      const hasActiveCall = latestCallStatus?.status && !isCallStatusStale(latestCallStatus);
+      if (hasActiveCall && latestCallStatus?.sessionId) {
+        const nextPhase = latestCallStatus.status === "accepted" ? "inCall" : latestCallStatus.callerId === user.uid ? "dialing" : "incoming";
+        setActiveCall({
+          chatId,
+          callData: latestCallStatus,
+          isVideo: latestCallStatus.callType !== "audio",
+          isGroupCall: !!isGroup,
+          isCaller: latestCallStatus.callerId === user.uid,
+          phase: nextPhase
+        });
+        return;
+      }
+    }
     if (isJoin) {
       let latestCallStatus = chat?.callStatus || null;
       try {
-        const latestChatSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId));
+        const latestChatSnap = await getDoc(chatRef);
         if (latestChatSnap.exists()) {
           latestCallStatus = latestChatSnap.data()?.callStatus || latestCallStatus;
         }
@@ -6997,7 +7017,7 @@ function App() {
           timestamp: Date.now(),
           isGroupCall: true
         };
-        await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { callStatus: groupCallData });
+        await updateDoc(chatRef, { callStatus: groupCallData });
         await addDoc(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "messages"), {
           senderId: user.uid,
           content: "\u901A\u8A71\u3092\u958B\u59CB\u3057\u307E\u3057\u305F",
@@ -7015,7 +7035,7 @@ function App() {
       try {
         const sessionId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
         await cleanupCallSignaling(chatId);
-        await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), {
+        await updateDoc(chatRef, {
           callStatus: {
             status: "ringing",
             callerId: user.uid,
@@ -7039,17 +7059,33 @@ function App() {
     }
   };
   const endCall = async (chatId, callData, { clearStatus = true, cleanupSignaling = true } = {}) => {
+    const chatRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId);
+    const currentSessionId = callData?.sessionId || "";
     try {
       if (clearStatus) {
-        await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { callStatus: deleteField() });
+        if (!currentSessionId) {
+          await updateDoc(chatRef, { callStatus: deleteField() });
+        } else {
+          const chatSnap = await getDoc(chatRef).catch(() => null);
+          const liveCallStatus = chatSnap?.data?.()?.callStatus;
+          if (!liveCallStatus || liveCallStatus.sessionId === currentSessionId) {
+            await updateDoc(chatRef, { callStatus: deleteField() });
+          }
+        }
       }
       if (cleanupSignaling) {
-        await cleanupCallSignaling(chatId, callData?.sessionId || null);
+        await cleanupCallSignaling(chatId, currentSessionId || null);
       }
     } catch (e) {
       console.error("Failed to end call:", e);
     } finally {
-      setActiveCall(null);
+      setActiveCall((prev) => {
+        if (!prev) return null;
+        if (prev.chatId !== chatId) return prev;
+        const prevSessionId = prev.callData?.sessionId || "";
+        if (currentSessionId && prevSessionId && prevSessionId !== currentSessionId) return prev;
+        return null;
+      });
     }
   };
   const acceptIncomingCall = async () => {
@@ -7057,16 +7093,33 @@ function App() {
     initAudioContext();
     try {
       const callData = activeCallChat?.callStatus || activeCall.callData || {};
+      const chatRef = doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId);
+      const latestChatSnap = await getDoc(chatRef).catch(() => null);
+      const latestCallData = latestChatSnap?.data?.()?.callStatus || callData;
+      if (!latestCallData || isCallStatusStale(latestCallData)) {
+        showNotification("\u901A\u8A71\u304C\u7D42\u4E86\u3057\u3066\u3044\u307E\u3059");
+        setActiveCall(null);
+        return;
+      }
+      if (latestCallData.status === "accepted") {
+        setActiveCall((prev) => prev ? { ...prev, phase: "inCall", callData: latestCallData, isCaller: latestCallData.callerId === user.uid } : prev);
+        return;
+      }
+      if (latestCallData.status !== "ringing") {
+        showNotification("\u901A\u8A71\u306B\u53C2\u52A0\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F");
+        setActiveCall(null);
+        return;
+      }
       const nextCallData = {
-        ...callData,
+        ...latestCallData,
         status: "accepted",
-        callerId: callData.callerId,
-        callType: callData.callType || (activeCall?.isVideo ? "video" : "audio"),
-        sessionId: callData.sessionId || `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        callerId: latestCallData.callerId,
+        callType: latestCallData.callType || (activeCall?.isVideo ? "video" : "audio"),
+        sessionId: latestCallData.sessionId || `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
         acceptedBy: user.uid,
         acceptedAt: Date.now()
       };
-      await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", activeCall.chatId), { callStatus: nextCallData });
+      await updateDoc(chatRef, { callStatus: nextCallData });
       setActiveCall((prev) => prev ? { ...prev, phase: "inCall", callData: nextCallData, isCaller: false } : prev);
     } catch (e) {
       console.error(e);
