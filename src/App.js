@@ -123,13 +123,14 @@ const VOOM_PAGE_SIZE = 5;
 const getUploadConcurrency = () => {
   const net = navigator.connection?.effectiveType || "";
   const hw = navigator.hardwareConcurrency || 8;
-  let base = 12;
-  if (net === "slow-2g" || net === "2g") base = 4;
-  else if (net === "3g") base = 7;
-  else if (net === "4g") base = 12;
-  if (navigator.connection?.saveData) base = Math.min(base, 6);
-  const hwBoost = Math.max(1, Math.min(10, Math.floor(hw / 2)));
-  return Math.max(4, Math.min(28, base + hwBoost));
+  let base = 18;
+  if (net === "slow-2g") base = 3;
+  else if (net === "2g") base = 4;
+  else if (net === "3g") base = 9;
+  else if (net === "4g") base = 18;
+  if (navigator.connection?.saveData) base = Math.min(base, 5);
+  const hwBoost = Math.max(1, Math.min(16, Math.floor(hw * 0.75)));
+  return Math.max(4, Math.min(40, base + hwBoost));
 };
 const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -4920,7 +4921,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       if (file && ["image", "video", "audio", "file"].includes(type)) {
         localBlobUrl = URL.createObjectURL(file);
         storedContent = localBlobUrl;
-        if (["image", "video"].includes(type)) {
+        // Video thumbnail extraction is expensive; skip it to start upload immediately.
+        if (type === "image") {
           previewData = await generateThumbnail(file);
         }
         await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, preview: previewData, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, isUploading: true, createdAt: serverTimestamp(), readBy: [user.uid] });
@@ -5674,6 +5676,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
 };
 const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: appId2 }) => {
   const [content, setContent] = useState(""), [media, setMedia] = useState(null), [mediaFile, setMediaFile] = useState(null), [mediaType, setMediaType] = useState("image"), [isUploading, setIsUploading] = useState(false);
+  const [voomUploadProgress, setVoomUploadProgress] = useState(0);
   const [voomPosts, setVoomPosts] = useState([]);
   const [lastPostCursor, setLastPostCursor] = useState(null);
   const [isPostsLoading, setIsPostsLoading] = useState(false);
@@ -5725,6 +5728,7 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
     if (profile?.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
     if (!content && !mediaFile || isUploading) return;
     setIsUploading(true);
+    setVoomUploadProgress(0);
     try {
       let hasChunks = false;
       let chunkCount = 0;
@@ -5732,7 +5736,6 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
       let mimeType = null;
       const newPostRef = doc(collection(db2, "artifacts", appId2, "public", "data", "posts"));
       if (mediaFile) {
-        hasChunks = true;
         mimeType = mediaFile.type || null;
         const fileDataUrl = await readFileAsDataUrl(mediaFile);
         if (!mimeType) {
@@ -5744,23 +5747,42 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
         }
         const base64Payload = String(fileDataUrl || "").split(",")[1] || "";
         if (!base64Payload) throw new Error("EMPTY_POST_BASE64");
-        chunkCount = Math.ceil(base64Payload.length / CHUNK_SIZE);
-        const CONCURRENCY = getUploadConcurrency();
-        const executing = /* @__PURE__ */ new Set();
-        for (let i = 0; i < chunkCount; i++) {
-          const start = i * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, base64Payload.length);
-          const base64Data = base64Payload.slice(start, end);
-          const p = setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: base64Data, index: i });
-          executing.add(p);
-          p.finally(() => executing.delete(p));
-          if (executing.size >= CONCURRENCY) {
-            await Promise.race(executing);
+        // Fast path: small media is stored directly to avoid chunk write overhead.
+        if (base64Payload.length <= CHUNK_SIZE) {
+          hasChunks = false;
+          chunkCount = 0;
+          storedMedia = fileDataUrl;
+          setVoomUploadProgress(100);
+        } else {
+          hasChunks = true;
+          chunkCount = Math.ceil(base64Payload.length / CHUNK_SIZE);
+          const CONCURRENCY = getUploadConcurrency();
+          const executing = /* @__PURE__ */ new Set();
+          let completed = 0;
+          let lastProgressAt = 0;
+          for (let i = 0; i < chunkCount; i++) {
+            const start = i * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, base64Payload.length);
+            const base64Data = base64Payload.slice(start, end);
+            const p = setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: base64Data, index: i }).then(() => {
+              completed++;
+              const now = Date.now();
+              if (completed === chunkCount || now - lastProgressAt >= 120) {
+                lastProgressAt = now;
+                setVoomUploadProgress(Math.round(completed / chunkCount * 100));
+              }
+            });
+            executing.add(p);
+            p.finally(() => executing.delete(p));
+            if (executing.size >= CONCURRENCY) {
+              await Promise.race(executing);
+            }
           }
+          await Promise.all(executing);
         }
-        await Promise.all(executing);
       }
       await setDoc(newPostRef, { userId: user.uid, content, media: storedMedia, mediaType, mimeType, hasChunks, chunkCount, likes: [], comments: [], createdAt: serverTimestamp() });
+      setVoomUploadProgress(100);
       setContent("");
       if (media && media.startsWith("blob:")) {
         URL.revokeObjectURL(media);
@@ -5773,6 +5795,7 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
       await loadVoomPosts(true);
     } finally {
       setIsUploading(false);
+      setVoomUploadProgress(0);
     }
   };
   const handleVoomFileUpload = async (e) => {
@@ -5809,8 +5832,15 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
             /* @__PURE__ */ jsx(ImageIcon, { className: "w-5 h-5 text-gray-400" }),
             /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*,video/*", onChange: handleVoomFileUpload })
           ] }),
-          /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || mediaFile ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: "\u6295\u7A3F" })
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+            isUploading && /* @__PURE__ */ jsxs("div", { className: "text-[10px] font-black text-green-600", children: [
+              voomUploadProgress,
+              "%"
+            ] }),
+            /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || mediaFile ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: isUploading ? "\u6295\u7A3F\u4E2D..." : "\u6295\u7A3F" })
+          ] })
         ] })
+      , isUploading && /* @__PURE__ */ jsx("div", { className: "mt-2 h-1.5 w-full rounded-full bg-gray-100 overflow-hidden", children: /* @__PURE__ */ jsx("div", { className: "h-full bg-green-500 transition-all duration-150", style: { width: `${voomUploadProgress}%` } }) })
       ] }),
       isPostsLoading ? /* @__PURE__ */ jsx("div", { className: "py-10 flex items-center justify-center", children: /* @__PURE__ */ jsx(Loader2, { className: "w-6 h-6 animate-spin text-gray-400" }) }) : voomPosts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id)),
       !isPostsLoading && voomPosts.length === 0 && /* @__PURE__ */ jsx("div", { className: "text-center text-sm text-gray-400 py-10", children: "投稿がありません" }),
