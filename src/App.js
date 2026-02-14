@@ -4834,7 +4834,7 @@ const postMessage = async () => {
   } finally {
     setIsUploading(false);
     setUploadProgress(0);
-    try { if (localPreviewUrl && localPreviewUrl.startsWith("blob:")) /* keep localPreviewUrl alive */ } catch {}
+    try { if (localPreviewUrl && localPreviewUrl.startsWith("blob:")) { /* keep localPreviewUrl alive */ } } catch {}
   }
 };
 
