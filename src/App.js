@@ -4261,7 +4261,7 @@ try {
 } catch (e) {
   try { await updateDoc(newMsgRef, { isUploading: false }).catch(() => {}); } catch {}
 } finally {
-  try { if (localBlobUrl && localBlobUrl.startsWith("blob:")) URL.revokeObjectURL(localBlobUrl); } catch {}
+  /* keep localBlobUrl alive for playback */
 }
 
       return;
@@ -4802,7 +4802,7 @@ const postMessage = async () => {
       await updateDoc(newPostRef, { media: null, isUploading: false }).catch(() => {});
 
       setContent("");
-      try { if (localPreviewUrl && localPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(localPreviewUrl); } catch {}
+      try { if (localPreviewUrl && localPreviewUrl.startsWith("blob:")) /* keep localPreviewUrl alive */ } catch {}
       setMediaPreviewUrl(null);
       setMedia(null);
       showNotification("投稿しました");
@@ -4834,7 +4834,7 @@ const postMessage = async () => {
   } finally {
     setIsUploading(false);
     setUploadProgress(0);
-    try { if (localPreviewUrl && localPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(localPreviewUrl); } catch {}
+    try { if (localPreviewUrl && localPreviewUrl.startsWith("blob:")) /* keep localPreviewUrl alive */ } catch {}
   }
 };
 
