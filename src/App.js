@@ -3355,11 +3355,15 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
     ] })
   ] });
 });
-const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => {
+const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDelete }) => {
   const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [postPreview, setPostPreview] = useState(null);
-  const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
+  const [localPost, setLocalPost] = useState(post);
+  const u = allUsers.find((x) => x.uid === post.userId), isLiked = localPost.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
+  useEffect(() => {
+    setLocalPost(post);
+  }, [post]);
   useEffect(() => {
     let cancelled = false;
     if (!post.hasChunks) {
@@ -3394,10 +3398,30 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
       if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe && !isCachedPostMediaUrl(mediaSrc)) URL.revokeObjectURL(mediaSrc);
     };
   }, [mediaSrc, isMe]);
-  const toggleLike = async () => await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { likes: isLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
+  const toggleLike = async () => {
+    if (!user?.uid) return;
+    const currentLikes = Array.isArray(localPost.likes) ? localPost.likes : [];
+    const optimisticLikes = isLiked ? currentLikes.filter((uid) => uid !== user.uid) : Array.from(new Set([...currentLikes, user.uid]));
+    setLocalPost((prev) => ({ ...prev, likes: optimisticLikes }));
+    try {
+      const postRef = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id);
+      await runTransaction(db2, async (tx) => {
+        const snap = await tx.get(postRef);
+        if (!snap.exists()) return;
+        const likes = Array.isArray(snap.data()?.likes) ? snap.data().likes : [];
+        const next = likes.includes(user.uid) ? likes.filter((uid) => uid !== user.uid) : Array.from(new Set([...likes, user.uid]));
+        tx.update(postRef, { likes: next });
+      });
+    } catch (e) {
+      console.error("VOOM reaction failed:", e);
+      setLocalPost((prev) => ({ ...prev, likes: currentLikes }));
+    }
+  };
   const submitComment = async () => {
     if (!commentText.trim()) return;
-    await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { comments: arrayUnion({ userId: user.uid, userName: profile.name, text: commentText, createdAt: (/* @__PURE__ */ new Date()).toISOString() }) });
+    const newComment = { userId: user.uid, userName: profile.name, text: commentText, createdAt: (/* @__PURE__ */ new Date()).toISOString() };
+    setLocalPost((prev) => ({ ...prev, comments: [...(Array.isArray(prev.comments) ? prev.comments : []), newComment] }));
+    await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { comments: arrayUnion(newComment) });
     setCommentText("");
   };
   return /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2 border-b", children: [
@@ -3406,12 +3430,16 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
         /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
         isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
       ] }),
-      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
+      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm flex-1", children: u?.name }),
+      isMe && /* @__PURE__ */ jsxs("button", { onClick: () => onDelete?.(post), className: "text-[11px] font-bold text-red-500 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50", children: [
+        /* @__PURE__ */ jsx(Trash2, { className: "w-3.5 h-3.5 inline mr-1" }),
+        "\u524A\u9664"
+      ] })
     ] }),
-    /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
+    /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: localPost.content }),
     (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
-      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : post.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
-      !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: post.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
+      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : localPost.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
+      !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: localPost.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
         /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
         "\u62E1\u5927"
       ] })
@@ -3419,14 +3447,14 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
     /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-6 py-2 border-y mb-3", children: [
       /* @__PURE__ */ jsxs("button", { onClick: toggleLike, className: "flex items-center gap-1.5", children: [
         /* @__PURE__ */ jsx(Heart, { className: `w-5 h-5 ${isLiked ? "fill-red-500 text-red-500" : "text-gray-400"}` }),
-        /* @__PURE__ */ jsx("span", { className: "text-xs", children: post.likes?.length || 0 })
+        /* @__PURE__ */ jsx("span", { className: "text-xs", children: localPost.likes?.length || 0 })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5 text-gray-400", children: [
         /* @__PURE__ */ jsx(MessageCircle, { className: "w-5 h-5" }),
-        /* @__PURE__ */ jsx("span", { className: "text-xs", children: post.comments?.length || 0 })
+        /* @__PURE__ */ jsx("span", { className: "text-xs", children: localPost.comments?.length || 0 })
       ] })
     ] }),
-    /* @__PURE__ */ jsx("div", { className: "space-y-3 mb-4", children: post.comments?.map((c, i) => /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-3 py-2", children: [
+    /* @__PURE__ */ jsx("div", { className: "space-y-3 mb-4", children: localPost.comments?.map((c, i) => /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-3 py-2", children: [
       /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-500", children: c.userName }),
       /* @__PURE__ */ jsx("div", { className: "text-xs", children: c.text })
     ] }, i)) }),
@@ -5835,6 +5863,25 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
     setMediaFile(file);
     setMediaType(file.type.startsWith("video") ? "video" : "image");
   };
+  const handleDeletePost = async (post) => {
+    if (!post?.id || !user?.uid) return;
+    if (post.userId !== user.uid) return;
+    const ok = window.confirm("この投稿を削除しますか？");
+    if (!ok) return;
+    try {
+      const chunksRef = collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks");
+      const chunksSnap = await getDocs(chunksRef);
+      for (const c of chunksSnap.docs) {
+        await deleteDoc(c.ref);
+      }
+      await deleteDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id));
+      setVoomPosts((prev) => prev.filter((p) => p.id !== post.id));
+      showNotification("\u6295\u7A3F\u3092\u524A\u9664\u3057\u307E\u3057\u305F");
+    } catch (e) {
+      console.error("Failed to delete VOOM post:", e);
+      showNotification("\u6295\u7A3F\u306E\u524A\u9664\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+    }
+  };
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-gray-50", children: [
     /* @__PURE__ */ jsx("div", { className: "bg-white p-4 border-b shrink-0", children: /* @__PURE__ */ jsx("h1", { className: "text-xl font-bold", children: "VOOM" }) }),
     /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto scrollbar-hide pb-20", children: [
@@ -5865,7 +5912,7 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
         ] })
       , isUploading && /* @__PURE__ */ jsx("div", { className: "mt-2 h-1.5 w-full rounded-full bg-gray-100 overflow-hidden", children: /* @__PURE__ */ jsx("div", { className: "h-full bg-green-500 transition-all duration-150", style: { width: `${voomUploadProgress}%` } }) })
       ] }),
-      isPostsLoading ? /* @__PURE__ */ jsx("div", { className: "py-10 flex items-center justify-center", children: /* @__PURE__ */ jsx(Loader2, { className: "w-6 h-6 animate-spin text-gray-400" }) }) : voomPosts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id)),
+      isPostsLoading ? /* @__PURE__ */ jsx("div", { className: "py-10 flex items-center justify-center", children: /* @__PURE__ */ jsx(Loader2, { className: "w-6 h-6 animate-spin text-gray-400" }) }) : voomPosts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile, onDelete: handleDeletePost }, p.id)),
       !isPostsLoading && voomPosts.length === 0 && /* @__PURE__ */ jsx("div", { className: "text-center text-sm text-gray-400 py-10", children: "投稿がありません" }),
       hasMorePosts && !isPostsLoading && /* @__PURE__ */ jsx("div", { className: "px-4 py-6", children: /* @__PURE__ */ jsx("button", { onClick: () => loadVoomPosts(false), disabled: isLoadingMorePosts, className: "w-full py-3 rounded-xl bg-white border font-bold text-sm text-gray-700", children: isLoadingMorePosts ? /* @__PURE__ */ jsx(Loader2, { className: "w-4 h-4 animate-spin mx-auto" }) : "さらに読み込む" }) })
     ] })
