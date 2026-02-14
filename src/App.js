@@ -635,6 +635,130 @@ const handleCompressedUpload = (e, callback) => {
   };
   reader.readAsDataURL(file);
 };
+const pickSupportedRecorderMimeType = () => {
+  if (typeof MediaRecorder === "undefined") return "";
+  const candidates = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+  for (const mime of candidates) {
+    try {
+      if (MediaRecorder.isTypeSupported?.(mime)) return mime;
+    } catch {
+    }
+  }
+  return "";
+};
+const ensureVoomVideoCompatibility = async (file) => {
+  if (!file || !file.type?.startsWith("video/")) return file;
+  if (file.type === "video/webm") return file;
+  const recorderMime = pickSupportedRecorderMimeType();
+  if (!recorderMime) return file;
+  const src = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  video.muted = true;
+  video.playsInline = true;
+  video.src = src;
+  const cleanup = () => {
+    try {
+      video.pause();
+      video.src = "";
+      video.load();
+    } catch {
+    }
+    URL.revokeObjectURL(src);
+  };
+  try {
+    await new Promise((resolve, reject) => {
+      const onLoaded = () => {
+        video.removeEventListener("loadedmetadata", onLoaded);
+        video.removeEventListener("error", onError);
+        resolve();
+      };
+      const onError = () => {
+        video.removeEventListener("loadedmetadata", onLoaded);
+        video.removeEventListener("error", onError);
+        reject(new Error("VIDEO_METADATA_LOAD_FAILED"));
+      };
+      video.addEventListener("loadedmetadata", onLoaded);
+      video.addEventListener("error", onError);
+    });
+    if (!video.videoWidth || !video.videoHeight || !video.captureStream) {
+      cleanup();
+      return file;
+    }
+    const maxW = 1280;
+    const maxH = 720;
+    let w = video.videoWidth;
+    let h = video.videoHeight;
+    if (w > h && w > maxW) {
+      h = Math.round(h * (maxW / w));
+      w = maxW;
+    } else if (h > maxH) {
+      w = Math.round(w * (maxH / h));
+      h = maxH;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(2, w);
+    canvas.height = Math.max(2, h);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      cleanup();
+      return file;
+    }
+    const sourceStream = video.captureStream(24);
+    const canvasStream = canvas.captureStream(24);
+    const mixedStream = new MediaStream([
+      ...canvasStream.getVideoTracks(),
+      ...sourceStream.getAudioTracks()
+    ]);
+    const chunks = [];
+    const recorder = new MediaRecorder(mixedStream, {
+      mimeType: recorderMime,
+      videoBitsPerSecond: 1200000,
+      audioBitsPerSecond: 96000
+    });
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    };
+    let rafId = null;
+    const drawLoop = () => {
+      if (video.paused || video.ended) return;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      rafId = requestAnimationFrame(drawLoop);
+    };
+    await video.play();
+    recorder.start(1000);
+    drawLoop();
+    await new Promise((resolve) => {
+      const finish = () => {
+        try {
+          if (rafId) cancelAnimationFrame(rafId);
+        } catch {
+        }
+        if (recorder.state !== "inactive") {
+          recorder.onstop = () => resolve();
+          recorder.stop();
+        } else {
+          resolve();
+        }
+      };
+      video.onended = finish;
+      video.onerror = finish;
+      setTimeout(finish, Math.min(180000, Math.max(15000, Math.floor((video.duration || 15) * 1000 + 3000))));
+    });
+    mixedStream.getTracks().forEach((t) => t.stop());
+    sourceStream.getTracks().forEach((t) => t.stop());
+    canvasStream.getTracks().forEach((t) => t.stop());
+    cleanup();
+    if (chunks.length === 0) return file;
+    const blob = new Blob(chunks, { type: recorder.mimeType || "video/webm" });
+    if (!blob.size) return file;
+    const baseName = (file.name || "voom_video").replace(/\.[^/.]+$/, "");
+    return new File([blob], `${baseName}.webm`, { type: blob.type || "video/webm", lastModified: Date.now() });
+  } catch {
+    cleanup();
+    return file;
+  }
+};
 const generateThumbnail = (file) => {
   return new Promise((resolve) => {
     if (!file) {
@@ -3471,7 +3595,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
       isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : isVideoPost && !isVideoActivated ? /* @__PURE__ */ jsxs("button", { onClick: () => setIsVideoActivated(true), className: "w-full min-h-[180px] bg-black text-white flex flex-col items-center justify-center gap-2", children: [
         /* @__PURE__ */ jsx(Play, { className: "w-8 h-8" }),
         /* @__PURE__ */ jsx("span", { className: "text-xs font-bold opacity-90", children: "\u30BF\u30C3\u30D7\u3067\u52D5\u753B\u3092\u8AAD\u307F\u8FBC\u307F" })
-      ] }) : isVideoPost ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, preload: "metadata", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
+      ] }) : isVideoPost ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, muted: false, preload: "metadata", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
       !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: localPost.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
         /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
         "\u62E1\u5927"
@@ -5887,7 +6011,8 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
     if (!inputFile) return;
     e.target.value = "";
     const processed = await processFileBeforeUpload(inputFile);
-    const file = processed instanceof File ? processed : new File([processed], inputFile.name, { type: processed?.type || inputFile.type || "application/octet-stream", lastModified: Date.now() });
+    const normalized = processed instanceof File ? processed : new File([processed], inputFile.name, { type: processed?.type || inputFile.type || "application/octet-stream", lastModified: Date.now() });
+    const file = normalized.type.startsWith("video/") ? await ensureVoomVideoCompatibility(normalized) : normalized;
     if (media && media.startsWith("blob:")) {
       URL.revokeObjectURL(media);
     }
