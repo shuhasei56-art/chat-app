@@ -2653,24 +2653,24 @@ if (parts.length) {
   }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, mediaSrc]);
   const toggleLike = async () => await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { likes: isLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
 
-  const deletePost = async () => {
-    if (!isMe) return;
-    const ok = window.confirm("この投稿を削除しますか？");
-    if (!ok) return;
-    try {
-      const postRef = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id);
-      }
-      const chunksSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"));
-      const commentsSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "comments"));
-      const batch = writeBatch(db2);
-      chunksSnap.forEach((d) => batch.delete(d.ref));
-      commentsSnap.forEach((d) => batch.delete(d.ref));
-      batch.delete(postRef);
-      await batch.commit();
-    } catch (e) {
-      console.error("Delete post failed:", e);
-    }
-  };
+  
+const deletePost = async () => {
+  if (!isMe) return;
+  const ok = window.confirm("この投稿を削除しますか？");
+  if (!ok) return;
+  try {
+    const postRef = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id);
+    const chunksSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"));
+    const commentsSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "comments"));
+    const batch = writeBatch(db2);
+    chunksSnap.forEach((d) => batch.delete(d.ref));
+    commentsSnap.forEach((d) => batch.delete(d.ref));
+    batch.delete(postRef);
+    await batch.commit();
+  } catch (e) {
+    console.error("Delete post failed:", e);
+  }
+};
   const submitComment = async () => {
     if (!commentText.trim()) return;
     await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { comments: arrayUnion({ userId: user.uid, userName: profile.name, text: commentText, createdAt: (/* @__PURE__ */ new Date()).toISOString() }) });
