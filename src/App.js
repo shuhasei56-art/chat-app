@@ -131,15 +131,12 @@ const getUploadConcurrency = () => {
   const hwBoost = Math.max(1, Math.min(10, Math.floor(hw / 2)));
   return Math.max(4, Math.min(28, base + hwBoost));
 };
-const bytesToBase64 = (bytes) => {
-  let binary = "";
-  const step = 32768;
-  for (let i = 0; i < bytes.length; i += step) {
-    const chunk = bytes.subarray(i, i + step);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
-};
+const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = (e) => resolve(e?.target?.result || "");
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
 const MAX_MEDIA_CACHE_SIZE = 180;
 const messageMediaUrlCache = /* @__PURE__ */ new Map();
 const messageMediaPromiseCache = /* @__PURE__ */ new Map();
@@ -4937,34 +4934,25 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       let hasChunks = false, chunkCount = 0;
       if (file && file.size > CHUNK_SIZE) {
         hasChunks = true;
-        chunkCount = Math.ceil(file.size / CHUNK_SIZE);
+        const fileDataUrl = await readFileAsDataUrl(file);
+        const base64Payload = String(fileDataUrl || "").split(",")[1] || "";
+        if (!base64Payload) throw new Error("EMPTY_FILE_BASE64");
+        chunkCount = Math.ceil(base64Payload.length / CHUNK_SIZE);
         const CONCURRENCY = getUploadConcurrency();
         const executing = /* @__PURE__ */ new Set();
         let completed = 0;
         let lastProgressAt = 0;
         for (let i = 0; i < chunkCount; i++) {
           const start = i * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, file.size);
-          const blobSlice = file.slice(start, end);
-          const p = new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-              try {
-                const base64Data = e.target.result.split(",")[1];
-                await setDoc(doc(msgCol, newMsgRef.id, "chunks", `${i}`), { data: base64Data, index: i });
-                completed++;
-                const now = Date.now();
-                if (completed === chunkCount || now - lastProgressAt >= 120) {
-                  lastProgressAt = now;
-                  setUploadProgressSafe(Math.round(completed / chunkCount * 100));
-                }
-                resolve(null);
-              } catch (err) {
-                reject(err);
-              }
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blobSlice);
+          const end = Math.min(start + CHUNK_SIZE, base64Payload.length);
+          const base64Data = base64Payload.slice(start, end);
+          const p = setDoc(doc(msgCol, newMsgRef.id, "chunks", `${i}`), { data: base64Data, index: i }).then(() => {
+            completed++;
+            const now = Date.now();
+            if (completed === chunkCount || now - lastProgressAt >= 120) {
+              lastProgressAt = now;
+              setUploadProgressSafe(Math.round(completed / chunkCount * 100));
+            }
           });
           executing.add(p);
           p.finally(() => executing.delete(p));
@@ -5730,18 +5718,18 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
       const newPostRef = doc(collection(db2, "artifacts", appId2, "public", "data", "posts"));
       if (mediaFile) {
         hasChunks = true;
-        chunkCount = Math.ceil(mediaFile.size / CHUNK_SIZE);
         mimeType = mediaFile.type || null;
+        const fileDataUrl = await readFileAsDataUrl(mediaFile);
+        const base64Payload = String(fileDataUrl || "").split(",")[1] || "";
+        if (!base64Payload) throw new Error("EMPTY_POST_BASE64");
+        chunkCount = Math.ceil(base64Payload.length / CHUNK_SIZE);
         const CONCURRENCY = getUploadConcurrency();
         const executing = /* @__PURE__ */ new Set();
         for (let i = 0; i < chunkCount; i++) {
           const start = i * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, mediaFile.size);
-          const blobSlice = mediaFile.slice(start, end);
-          const p = blobSlice.arrayBuffer().then(async (buf) => {
-            const base64Data = bytesToBase64(new Uint8Array(buf));
-            await setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: base64Data, index: i });
-          });
+          const end = Math.min(start + CHUNK_SIZE, base64Payload.length);
+          const base64Data = base64Payload.slice(start, end);
+          const p = setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: base64Data, index: i });
           executing.add(p);
           p.finally(() => executing.delete(p));
           if (executing.size >= CONCURRENCY) {
