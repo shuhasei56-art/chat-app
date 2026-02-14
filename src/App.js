@@ -186,6 +186,9 @@ const db = getFirestore(app);
 const appId = "messenger-app-v9-integrated";
 const CHUNK_SIZE = 716799;
 
+
+const CHUNK_SIZE_BYTES = 950 * 1024; // close to 1MiB doc limit (faster)
+const CHUNK_BATCH_SIZE = 20; // writeBatch commit size
 // Fast media caches (no UI change)
 const __mediaUrlCache = new Map();
 const __mediaDataCache = new Map();
