@@ -137,10 +137,18 @@ const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
   reader.onerror = reject;
   reader.readAsDataURL(file);
 });
+const getMimeTypeFromDataUrl = (dataUrl) => {
+  const s = String(dataUrl || "");
+  const m = s.match(/^data:([^;,]+)[;,]/i);
+  return m?.[1] || "";
+};
 const MAX_MEDIA_CACHE_SIZE = 180;
 const messageMediaUrlCache = /* @__PURE__ */ new Map();
 const messageMediaPromiseCache = /* @__PURE__ */ new Map();
 const messageMediaUrlSet = /* @__PURE__ */ new Set();
+const postMediaUrlCache = /* @__PURE__ */ new Map();
+const postMediaPromiseCache = /* @__PURE__ */ new Map();
+const postMediaUrlSet = /* @__PURE__ */ new Set();
 const getDefaultMimeTypeByMessageType = (type) => {
   if (type === "video") return "video/mp4";
   if (type === "image") return "image/jpeg";
@@ -163,6 +171,7 @@ const evictOldestMessageMediaCache = () => {
   }
 };
 const isCachedMessageMediaUrl = (url) => !!url && messageMediaUrlSet.has(url);
+const isCachedPostMediaUrl = (url) => !!url && postMediaUrlSet.has(url);
 const loadChunkedMessageMedia = async ({ db: db2, appId: appId2, chatId, message }) => {
   const cacheKey = buildMessageMediaCacheKey(chatId, message.id, message.chunkCount, message.mimeType, message.type);
   const cached = messageMediaUrlCache.get(cacheKey);
@@ -3148,6 +3157,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
   };
   const readCount = (m.readBy?.length || 1) - 1;
   const finalSrc = mediaSrc || m.preview;
+  const isVideoPreviewOnly = m.type === "video" && typeof finalSrc === "string" && finalSrc.startsWith("data:image/");
   const isShowingPreview = loading || isInvalidBlob || finalSrc === m.preview;
   const handleBubbleClick = (e) => {
     e.stopPropagation();
@@ -3221,10 +3231,10 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
             /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-8 h-8 text-green-500" }),
             /* @__PURE__ */ jsx("span", { className: "text-[10px] text-gray-500 font-bold", children: m.type === "video" ? "\u52D5\u753B\u3092\u53D7\u4FE1\u4E2D..." : "\u753B\u50CF\u3092\u53D7\u4FE1\u4E2D..." })
           ] }) : /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-            m.type === "video" ? /* @__PURE__ */ jsx("video", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md bg-black ${showMenu ? "brightness-50 transition-all" : ""}`, controls: true, playsInline: true, preload: "metadata", onError: () => {
-              if (hasLocalBlobContent && m.hasChunks) setForceChunkLoad(true);
-            } }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy", onError: () => {
-              if (hasLocalBlobContent && m.hasChunks) setForceChunkLoad(true);
+            m.type === "video" && !isVideoPreviewOnly ? /* @__PURE__ */ jsx("video", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md bg-black ${showMenu ? "brightness-50 transition-all" : ""}`, controls: true, playsInline: true, preload: "metadata", onError: () => {
+              if (m.hasChunks) setForceChunkLoad(true);
+            } }) : /* @__PURE__ */ jsx("img", { src: finalSrc || m.preview || "", className: `max-w-full rounded-xl border border-white/50 shadow-md ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy", onError: () => {
+              if (m.hasChunks) setForceChunkLoad(true);
             } }),
             m.type === "video" && !isShowingPreview && !finalSrc && /* @__PURE__ */ jsx("div", { className: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none", children: /* @__PURE__ */ jsx("div", { className: "bg-black/30 rounded-full p-2 backdrop-blur-sm", children: /* @__PURE__ */ jsx(Play, { className: "w-8 h-8 text-white fill-white opacity-90" }) }) }),
             isShowingPreview && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-2 right-2 bg-black/60 text-white text-[9px] px-2 py-0.5 rounded-full backdrop-blur-md flex items-center gap-1", children: [
@@ -3327,44 +3337,37 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
   useEffect(() => {
-    if (post.hasChunks && !mediaSrc) {
-      setIsLoadingMedia(true);
-      (async () => {
-        let mergedData = "";
-        if (post.chunkCount) {
-          const chunkPromises = [];
-          for (let i = 0; i < post.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks", `${i}`)));
-          const chunkDocs = await Promise.all(chunkPromises);
-          chunkDocs.forEach((d) => {
-            if (d.exists()) mergedData += d.data().data;
-          });
-        } else {
-          const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"), orderBy("index", "asc")));
-          snap.forEach((d) => mergedData += d.data().data);
-        }
-        if (mergedData) {
-          try {
-            if (mergedData.startsWith("data:")) {
-              setMediaSrc(mergedData);
-            } else {
-              const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
-              const byteCharacters = atob(mergedData);
-              const byteNumbers = new Array(byteCharacters.length);
-              for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
-              const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
-              setMediaSrc(URL.createObjectURL(blob));
-            }
-          } catch (e) {
-            console.error("Post media load error", e);
-          }
-        }
-        setIsLoadingMedia(false);
-      })();
+    let cancelled = false;
+    if (!post.hasChunks) {
+      setMediaSrc(post.media || null);
+      return;
     }
-  }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, mediaSrc]);
+    if (mediaSrc && mediaSrc !== post.media) {
+      if (mediaSrc.startsWith("blob:") || mediaSrc.startsWith("data:")) return;
+    }
+    setIsLoadingMedia(true);
+    (async () => {
+      try {
+        const loadedUrl = await loadChunkedPostMedia({ db: db2, appId: appId2, post });
+        if (cancelled) return;
+        if (loadedUrl) {
+          setMediaSrc(loadedUrl);
+        } else if (post.media) {
+          setMediaSrc(post.media);
+        }
+      } catch (e) {
+        console.error("Post media load error", e);
+      } finally {
+        if (!cancelled) setIsLoadingMedia(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, post.media, mediaSrc, db2, appId2]);
   useEffect(() => {
     return () => {
-      if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe) URL.revokeObjectURL(mediaSrc);
+      if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe && !isCachedPostMediaUrl(mediaSrc)) URL.revokeObjectURL(mediaSrc);
     };
   }, [mediaSrc, isMe]);
   const toggleLike = async () => await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { likes: isLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
@@ -4901,7 +4904,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       let storedContent = content;
       let previewData = null;
       const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: usersByUid.get(currentReply.senderId)?.name || "Unknown", type: currentReply.type } } : {};
-      const fileData = file ? { fileName: file.name, fileSize: file.size, mimeType: file.type } : {};
+      const fileData = file ? { fileName: file.name, fileSize: file.size, mimeType: file.type || "" } : {};
       const currentChat = chats.find((c) => c.id === activeChatId);
       const updateData = {
         lastMessage: { content: type === "text" ? content : `[${type}]`, senderId: user.uid, readBy: [user.uid] },
@@ -4932,9 +4935,14 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         }
       }
       let hasChunks = false, chunkCount = 0;
-      if (file && file.size > CHUNK_SIZE) {
+      const shouldChunkMedia = !!file && (file.size > CHUNK_SIZE || type === "video");
+      if (shouldChunkMedia) {
         hasChunks = true;
         const fileDataUrl = await readFileAsDataUrl(file);
+        if (!fileData.mimeType) {
+          const sniffedMime = getMimeTypeFromDataUrl(fileDataUrl);
+          if (sniffedMime) fileData.mimeType = sniffedMime;
+        }
         const base64Payload = String(fileDataUrl || "").split(",")[1] || "";
         if (!base64Payload) throw new Error("EMPTY_FILE_BASE64");
         chunkCount = Math.ceil(base64Payload.length / CHUNK_SIZE);
@@ -4964,6 +4972,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         await updateDoc(newMsgRef, {
           hasChunks: true,
           chunkCount,
+          mimeType: fileData.mimeType || file.type || getDefaultMimeTypeByMessageType(type),
           // blob URL is session-local. Keep message reloadable from chunk docs.
           content: previewData || "",
           isUploading: false
@@ -4974,7 +4983,13 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
           reader.readAsDataURL(file);
           await new Promise((resolve) => {
             reader.onload = async (e) => {
-              await updateDoc(newMsgRef, { content: e.target.result, isUploading: false });
+              const dataUrl = e?.target?.result || "";
+              const fallbackMime = getMimeTypeFromDataUrl(dataUrl);
+              await updateDoc(newMsgRef, {
+                content: dataUrl,
+                mimeType: fileData.mimeType || fallbackMime || file.type || getDefaultMimeTypeByMessageType(type),
+                isUploading: false
+              });
               resolve(null);
             };
           });
@@ -5720,6 +5735,13 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
         hasChunks = true;
         mimeType = mediaFile.type || null;
         const fileDataUrl = await readFileAsDataUrl(mediaFile);
+        if (!mimeType) {
+          const sniffedMime = getMimeTypeFromDataUrl(fileDataUrl);
+          if (sniffedMime) mimeType = sniffedMime;
+        }
+        if (!mimeType) {
+          mimeType = getDefaultMimeTypeByMessageType(mediaType === "video" ? "video" : "image");
+        }
         const base64Payload = String(fileDataUrl || "").split(",")[1] || "";
         if (!base64Payload) throw new Error("EMPTY_POST_BASE64");
         chunkCount = Math.ceil(base64Payload.length / CHUNK_SIZE);
@@ -5795,6 +5817,83 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
       hasMorePosts && !isPostsLoading && /* @__PURE__ */ jsx("div", { className: "px-4 py-6", children: /* @__PURE__ */ jsx("button", { onClick: () => loadVoomPosts(false), disabled: isLoadingMorePosts, className: "w-full py-3 rounded-xl bg-white border font-bold text-sm text-gray-700", children: isLoadingMorePosts ? /* @__PURE__ */ jsx(Loader2, { className: "w-4 h-4 animate-spin mx-auto" }) : "さらに読み込む" }) })
     ] })
   ] });
+};
+const buildPostMediaCacheKey = (postId, chunkCount, mimeType, mediaType) => {
+  const resolvedMimeType = mimeType || getDefaultMimeTypeByMessageType(mediaType === "video" ? "video" : "image");
+  return `${postId}:${chunkCount || 0}:${resolvedMimeType}`;
+};
+const evictOldestPostMediaCache = () => {
+  if (postMediaUrlCache.size < MAX_MEDIA_CACHE_SIZE) return;
+  const oldestKey = postMediaUrlCache.keys().next().value;
+  if (!oldestKey) return;
+  const oldestUrl = postMediaUrlCache.get(oldestKey);
+  postMediaUrlCache.delete(oldestKey);
+  if (oldestUrl) {
+    postMediaUrlSet.delete(oldestUrl);
+    if (oldestUrl.startsWith("blob:")) URL.revokeObjectURL(oldestUrl);
+  }
+};
+const loadChunkedPostMedia = async ({ db: db2, appId: appId2, post }) => {
+  const cacheKey = buildPostMediaCacheKey(post.id, post.chunkCount, post.mimeType, post.mediaType);
+  const cached = postMediaUrlCache.get(cacheKey);
+  if (cached) return cached;
+  const inFlight = postMediaPromiseCache.get(cacheKey);
+  if (inFlight) return inFlight;
+  const loadPromise = (async () => {
+    let base64Data = "";
+    if (post.chunkCount) {
+      const chunkPromises = [];
+      for (let i = 0; i < post.chunkCount; i++) {
+        chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks", `${i}`)));
+      }
+      const chunkDocs = await Promise.all(chunkPromises);
+      const allFound = chunkDocs.every((d) => d.exists());
+      if (allFound) {
+        chunkDocs.forEach((d) => {
+          base64Data += d.data().data;
+        });
+      } else {
+        const snap = await getDocs(
+          query(
+            collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"),
+            orderBy("index", "asc")
+          )
+        );
+        snap.forEach((d) => base64Data += d.data().data);
+      }
+    } else {
+      const snap = await getDocs(
+        query(
+          collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"),
+          orderBy("index", "asc")
+        )
+      );
+      snap.forEach((d) => base64Data += d.data().data);
+    }
+    if (!base64Data) return null;
+    if (base64Data.startsWith("data:")) return base64Data;
+    const mimeType = post.mimeType || getDefaultMimeTypeByMessageType(post.mediaType === "video" ? "video" : "image");
+    try {
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+      const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+      const objectUrl = URL.createObjectURL(blob);
+      evictOldestPostMediaCache();
+      postMediaUrlCache.set(cacheKey, objectUrl);
+      postMediaUrlSet.add(objectUrl);
+      return objectUrl;
+    } catch (e) {
+      console.warn("Post media decode failed:", e);
+      return null;
+    }
+  })();
+  postMediaPromiseCache.set(cacheKey, loadPromise);
+  try {
+    return await loadPromise;
+  } finally {
+    postMediaPromiseCache.delete(cacheKey);
+  }
 };
 const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard, onLogout }) => {
   const [edit, setEdit] = useState(profile || {});
