@@ -1,7 +1,6 @@
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { initializeApp } from "firebase/app";
-import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import {
   getAuth,
   signInAnonymously,
@@ -183,7 +182,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const storage = getStorage(app);
 const appId = "messenger-app-v9-integrated";
 const CHUNK_SIZE = 716799;
 
@@ -2661,8 +2659,6 @@ if (parts.length) {
     if (!ok) return;
     try {
       const postRef = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id);
-      if (post.storagePath) {
-        try { await deleteObject(storageRef(storage, post.storagePath)); } catch (e) {}
       }
       const chunksSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"));
       const commentsSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "comments"));
@@ -4780,119 +4776,100 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
   }, [hasMorePosts, loadMorePosts]);
 
   
+
+
 const postMessage = async () => {
   if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
   if ((!content && !media) || isUploading) return;
   setIsUploading(true);
+  setUploadProgress(0);
+
+  let localPreviewUrl = null;
+
   try {
     const newPostRef = doc(collection(db2, "artifacts", appId2, "public", "data", "posts"));
 
-    let storedMedia = null;
-    let hasChunks = false;
-    let chunkCount = 0;
     let mimeType = null;
-    let storageUrl = null;
-    let storagePath = null;
 
+    // File selected: create local preview and upload bytes chunks to Firestore (no Firebase Storage required)
     if (media && typeof media !== "string") {
-      // File => upload to Firebase Storage (resumable). Avoids base64 memory pressure.
       mimeType = media.type || null;
-      const ext = media.name && media.name.includes(".") ? media.name.split(".").pop() : "";
-      const safeExt = ext ? `.${ext}` : "";
-      storagePath = `artifacts/${appId2}/voom/${user.uid}/${Date.now()}_${Math.random().toString(16).slice(2)}${safeExt}`;
-      const sRef = storageRef(storage, storagePath);
+      try {
+        localPreviewUrl = URL.createObjectURL(media);
+      } catch (e) {
+        localPreviewUrl = null;
+      }
 
-      await new Promise((resolve, reject) => {
-        const task = uploadBytesResumable(sRef, media, { contentType: media.type || undefined });
-        task.on(
-          "state_changed",
-          (snap) => {
-            const pct = snap.totalBytes ? Math.round((snap.bytesTransferred / snap.totalBytes) * 100) : 0;
-            setUploadProgress(pct);
-          },
-          (err) => reject(err),
-          async () => {
-            try {
-              storageUrl = await getDownloadURL(task.snapshot.ref);
-              setUploadProgress(100);
-              resolve();
-            } catch (e) {
-              reject(e);
-            }
-          }
-        );
+      // create post immediately (fast UI)
+      await setDoc(newPostRef, {
+        userId: user.uid,
+        content,
+        media: localPreviewUrl,
+        mediaType,
+        mimeType,
+        hasChunks: true,
+        chunkCount: 0,
+        isUploading: true,
+        likes: [],
+        comments: [],
+        createdAt: serverTimestamp()
       });
 
-      // Storage path doesn't need chunks fields
-      hasChunks = false;
-      chunkCount = 0;
-      storedMedia = null;
-    } else if (media && typeof media === "string") {
-      // Backward compatible: existing dataURL string path
-      storedMedia = media;
-      if (media.length > CHUNK_SIZE) {
-        hasChunks = true;
-        chunkCount = Math.ceil(media.length / CHUNK_SIZE);
-        storedMedia = null;
-      }
-      if (hasChunks) {
-        const CONCURRENCY = Math.min(250, Math.max(10, chunkCount));
-        const executing = new Set();
-        let done = 0;
-        setUploadProgress(0);
-        for (let i = 0; i < chunkCount; i++) {
-          const start = i * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, media.length);
-          const chunkData = media.slice(start, end);
-          const p = setDoc(
-            doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`),
-            { data: chunkData, index: i }
-          );
-          const pWrapper = p.then(() => {
-            executing.delete(pWrapper);
-            done++;
-            setUploadProgress(Math.min(100, Math.floor((done / chunkCount) * 100)));
-          }).catch(() => {
-            executing.delete(pWrapper);
-            done++;
-            setUploadProgress(Math.min(100, Math.floor((done / chunkCount) * 100)));
-          });
-          executing.add(pWrapper);
-          if (executing.size >= CONCURRENCY) await Promise.race(executing);
-        }
-        await Promise.all(executing);
-        setUploadProgress(100);
-      }
-      if (media.startsWith("data:")) {
-        mimeType = media.split(";")[0].split(":")[1];
-      }
+      // upload chunks
+      const postId = newPostRef.id;
+      await uploadFileToFirestoreChunks({
+        db2,
+        appId2,
+        parentPathParts: ["posts", postId],
+        file: media,
+        onProgress: (p) => setUploadProgress(p)
+      });
+
+      // after upload, keep preview in mediaSrc via chunks; set media null to enforce chunk-based playback on reopen
+      await updateDoc(newPostRef, { media: null, isUploading: false }).catch(() => {});
+
+      setContent("");
+      try {
+        if (localPreviewUrl && localPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(localPreviewUrl);
+      } catch {}
+      setMediaPreviewUrl(null);
+      setMedia(null);
+      showNotification("投稿しました");
+      return;
     }
 
+    // Backward compatible: existing string path
     await setDoc(newPostRef, {
       userId: user.uid,
       content,
-      media: storedMedia,
+      media: typeof media === "string" ? media : null,
       mediaType,
       mimeType,
-      hasChunks,
-      chunkCount,
-      storageUrl,
-      storagePath,
+      hasChunks: false,
+      chunkCount: 0,
+      isUploading: false,
       likes: [],
       comments: [],
       createdAt: serverTimestamp()
     });
 
     setContent("");
-    try { if (mediaPreviewUrl && mediaPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(mediaPreviewUrl); } catch {}
     setMediaPreviewUrl(null);
     setMedia(null);
     showNotification("投稿しました");
+  } catch (e) {
+    console.error(e);
+    showNotification("投稿に失敗しました");
   } finally {
     setIsUploading(false);
     setUploadProgress(0);
+    try {
+      if (localPreviewUrl && localPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(localPreviewUrl);
+    } catch {}
   }
 };
+
+
   
 const handleVoomFileUpload = (e) => {
   const file = e.target.files[0];
@@ -6061,4 +6038,82 @@ const handleLogout = async () => {
 var App_13_default = App;
 export {
   App_13_default as default
-};
+};async function uploadFileToFirestoreChunks({ db2, appId2, parentPathParts, file, onProgress }) {
+  // parentPathParts: ["posts", postId] or ["chats", chatId, "messages", msgId]
+  const total = file.size || 0;
+  const chunkCount = Math.max(1, Math.ceil(total / CHUNK_SIZE_BYTES));
+  const executing = new Set();
+  let done = 0;
+
+  const baseRef = doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts);
+  // mark meta
+  await updateDoc(baseRef, {
+    hasChunks: true,
+    chunkCount,
+    isUploading: true
+  }).catch(() => {});
+
+  const readChunk = (blob) =>
+    new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(fr.error || new Error("read error"));
+      fr.readAsArrayBuffer(blob);
+    });
+
+  for (let i = 0; i < chunkCount; i++) {
+    const start = i * CHUNK_SIZE_BYTES;
+    const end = Math.min(start + CHUNK_SIZE_BYTES, total);
+    const blob = file.slice(start, end);
+    const p = (async () => {
+      const buf = await readChunk(blob);
+      const bytes = Bytes.fromUint8Array(new Uint8Array(buf));
+      await setDoc(
+        doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts, "chunks", `${i}`),
+        { b: bytes, index: i }
+      );
+    })();
+
+    const wrapped = p.then(() => {
+      executing.delete(wrapped);
+      done++;
+      if (onProgress) onProgress(Math.min(100, Math.floor((done / chunkCount) * 100)));
+    }).catch(() => {
+      executing.delete(wrapped);
+      done++;
+      if (onProgress) onProgress(Math.min(100, Math.floor((done / chunkCount) * 100)));
+    });
+
+    executing.add(wrapped);
+    if (executing.size >= MAX_PARALLEL_CHUNKS) {
+      await Promise.race(executing);
+    }
+  }
+  await Promise.all(executing);
+  if (onProgress) onProgress(100);
+
+  // finalize
+  await updateDoc(baseRef, { isUploading: false }).catch(() => {});
+  return { chunkCount };
+}
+
+async function downloadChunksToBlobUrl({ db2, appId2, parentPathParts, mimeType }) {
+  const chunksSnap = await getDocs(
+    query(
+      collection(db2, "artifacts", appId2, "public", "data", ...parentPathParts, "chunks"),
+      orderBy("index", "asc")
+    )
+  );
+  const parts = [];
+  for (const d of chunksSnap.docs) {
+    const data = d.data();
+    if (data?.b) {
+      const u8 = data.b.toUint8Array();
+      parts.push(u8);
+    }
+  }
+  const blob = new Blob(parts, { type: mimeType || "application/octet-stream" });
+  return URL.createObjectURL(blob);
+}
+
+
