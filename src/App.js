@@ -33,13 +33,13 @@ import {
   limit,
   limitToLast,
   writeBatch,
-  Bytes,
   getDocs,
   getDocsFromCache,
   getDocsFromServer,
   deleteField,
   increment,
-  runTransaction
+  runTransaction,
+  Bytes
 } from "firebase/firestore";
 import jsQR from "jsqr";
 import {
@@ -2654,24 +2654,25 @@ if (parts.length) {
   }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, mediaSrc]);
   const toggleLike = async () => await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { likes: isLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
 
-  
-const deletePost = async () => {
-  if (!isMe) return;
-  const ok = window.confirm("この投稿を削除しますか？");
-  if (!ok) return;
-  try {
-    const postRef = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id);
-    const chunksSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"));
-    const commentsSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "comments"));
-    const batch = writeBatch(db2);
-    chunksSnap.forEach((d) => batch.delete(d.ref));
-    commentsSnap.forEach((d) => batch.delete(d.ref));
-    batch.delete(postRef);
-    await batch.commit();
-  } catch (e) {
-    console.error("Delete post failed:", e);
-  }
-};
+  const deletePost = async () => {
+    if (!isMe) return;
+    const ok = window.confirm("この投稿を削除しますか？");
+    if (!ok) return;
+    try {
+      const postRef = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id);
+      if (post.storagePath) {
+}
+      const chunksSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"));
+      const commentsSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "comments"));
+      const batch = writeBatch(db2);
+      chunksSnap.forEach((d) => batch.delete(d.ref));
+      commentsSnap.forEach((d) => batch.delete(d.ref));
+      batch.delete(postRef);
+      await batch.commit();
+    } catch (e) {
+      console.error("Delete post failed:", e);
+    }
+  };
   const submitComment = async () => {
     if (!commentText.trim()) return;
     await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { comments: arrayUnion({ userId: user.uid, userName: profile.name, text: commentText, createdAt: (/* @__PURE__ */ new Date()).toISOString() }) });
@@ -4237,6 +4238,8 @@ if (["image", "video"].includes(type)) {
       setTimeout(() => {
         scrollRef.current?.scrollIntoView({ behavior: "auto" });
       }, 100);
+
+      
 // Upload bytes chunks to Firestore (no Firebase Storage required), then switch to chunk-based playback on reopen.
 try {
   await uploadFileToFirestoreChunks({
@@ -4248,20 +4251,14 @@ try {
   });
   await updateDoc(newMsgRef, {
     content: null,
-    storageUrl: null,
-    storagePath: null,
     hasChunks: true,
     isUploading: false,
     mimeType: file.type || null
   }).catch(() => {});
 } catch (e) {
-  try {
-    await updateDoc(newMsgRef, { isUploading: false }).catch(() => {});
-  } catch {}
+  try { await updateDoc(newMsgRef, { isUploading: false }).catch(() => {}); } catch {}
 } finally {
-  try {
-    if (localBlobUrl && localBlobUrl.startsWith("blob:")) URL.revokeObjectURL(localBlobUrl);
-  } catch {}
+  try { if (localBlobUrl && localBlobUrl.startsWith("blob:")) URL.revokeObjectURL(localBlobUrl); } catch {}
 }
 
       return;
@@ -4324,8 +4321,16 @@ const handleDeleteMessage = useCallback(
   async (msgId) => {
     try {
       const msgRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId);
-// No Firebase Storage: just delete the message doc and any chunk docs.
-// (Fetch is optional; kept minimal to avoid extra network cost.)
+      try {
+        const snap = await getDoc(msgRef);
+        const data = snap.exists() ? snap.data() : null;
+        if (data?.storagePath) {
+          try {
+          } catch (e) {
+          }
+        }
+      } catch (e) {
+      }
 
       await deleteDoc(msgRef);
       const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId, "chunks"));
@@ -4747,8 +4752,6 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
   }, [hasMorePosts, loadMorePosts]);
 
   
-
-
 const postMessage = async () => {
   if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
   if ((!content && !media) || isUploading) return;
@@ -4765,11 +4768,7 @@ const postMessage = async () => {
     // File selected: create local preview and upload bytes chunks to Firestore (no Firebase Storage required)
     if (media && typeof media !== "string") {
       mimeType = media.type || null;
-      try {
-        localPreviewUrl = URL.createObjectURL(media);
-      } catch (e) {
-        localPreviewUrl = null;
-      }
+      try { localPreviewUrl = URL.createObjectURL(media); } catch { localPreviewUrl = null; }
 
       // create post immediately (fast UI)
       await setDoc(newPostRef, {
@@ -4786,8 +4785,8 @@ const postMessage = async () => {
         createdAt: serverTimestamp()
       });
 
-      // upload chunks
       const postId = newPostRef.id;
+
       await uploadFileToFirestoreChunks({
         db2,
         appId2,
@@ -4796,20 +4795,18 @@ const postMessage = async () => {
         onProgress: (p) => setUploadProgress(p)
       });
 
-      // after upload, keep preview in mediaSrc via chunks; set media null to enforce chunk-based playback on reopen
+      // enforce chunk-based playback on reopen
       await updateDoc(newPostRef, { media: null, isUploading: false }).catch(() => {});
 
       setContent("");
-      try {
-        if (localPreviewUrl && localPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(localPreviewUrl);
-      } catch {}
+      try { if (localPreviewUrl && localPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(localPreviewUrl); } catch {}
       setMediaPreviewUrl(null);
       setMedia(null);
       showNotification("投稿しました");
       return;
     }
 
-    // Backward compatible: existing string path
+    // Backward compatible: string media (dataURL/url)
     await setDoc(newPostRef, {
       userId: user.uid,
       content,
@@ -4834,12 +4831,9 @@ const postMessage = async () => {
   } finally {
     setIsUploading(false);
     setUploadProgress(0);
-    try {
-      if (localPreviewUrl && localPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(localPreviewUrl);
-    } catch {}
+    try { if (localPreviewUrl && localPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(localPreviewUrl); } catch {}
   }
 };
-
 
   
 const handleVoomFileUpload = (e) => {
@@ -5408,6 +5402,67 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     }
   );
 };
+
+async function uploadFileToFirestoreChunks({ db2, appId2, parentPathParts, file, onProgress }) {
+  const total = file.size || 0;
+  const chunkCount = Math.max(1, Math.ceil(total / CHUNK_SIZE_BYTES));
+  const baseRef = doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts);
+
+  await updateDoc(baseRef, { hasChunks: true, chunkCount, isUploading: true }).catch(() => {});
+
+  const readChunk = (blob) =>
+    new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(fr.error || new Error("read error"));
+      fr.readAsArrayBuffer(blob);
+    });
+
+  let done = 0;
+  if (onProgress) onProgress(0);
+
+  for (let i = 0; i < chunkCount; i += CHUNK_BATCH_SIZE) {
+    const batch = writeBatch(db2);
+    const endI = Math.min(i + CHUNK_BATCH_SIZE, chunkCount);
+
+    for (let j = i; j < endI; j++) {
+      const start = j * CHUNK_SIZE_BYTES;
+      const end = Math.min(start + CHUNK_SIZE_BYTES, total);
+      const blob = file.slice(start, end);
+      const buf = await readChunk(blob);
+      const bytes = Bytes.fromUint8Array(new Uint8Array(buf));
+      batch.set(
+        doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts, "chunks", `${j}`),
+        { b: bytes, index: j }
+      );
+    }
+
+    await batch.commit();
+    done = endI;
+    if (onProgress) onProgress(Math.min(100, Math.floor((done / chunkCount) * 100)));
+  }
+
+  if (onProgress) onProgress(100);
+  await updateDoc(baseRef, { isUploading: false }).catch(() => {});
+  return { chunkCount };
+}
+
+async function downloadChunksToBlobUrl({ db2, appId2, parentPathParts, mimeType }) {
+  const chunksSnap = await getDocs(
+    query(
+      collection(db2, "artifacts", appId2, "public", "data", ...parentPathParts, "chunks"),
+      orderBy("index", "asc")
+    )
+  );
+  const parts = [];
+  for (const d of chunksSnap.docs) {
+    const data = d.data();
+    if (data?.b) parts.push(data.b.toUint8Array());
+  }
+  const blob = new Blob(parts, { type: mimeType || "application/octet-stream" });
+  return URL.createObjectURL(blob);
+}
+
 function App() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -6009,67 +6064,4 @@ const handleLogout = async () => {
 var App_13_default = App;
 export {
   App_13_default as default
-};async function uploadFileToFirestoreChunks({ db2, appId2, parentPathParts, file, onProgress }) {
-  // Upload file into Firestore "chunks" as Bytes. Uses batched writes to reduce network round trips.
-  const total = file.size || 0;
-  const chunkCount = Math.max(1, Math.ceil(total / CHUNK_SIZE_BYTES));
-  const baseRef = doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts);
-
-  await updateDoc(baseRef, { hasChunks: true, chunkCount, isUploading: true }).catch(() => {});
-
-  const readChunk = (blob) =>
-    new Promise((resolve, reject) => {
-      const fr = new FileReader();
-      fr.onload = () => resolve(fr.result);
-      fr.onerror = () => reject(fr.error || new Error("read error"));
-      fr.readAsArrayBuffer(blob);
-    });
-
-  const BATCH_SIZE = 20; // 1 commit = 1 request (much faster than per-chunk setDoc)
-  let done = 0;
-  if (onProgress) onProgress(0);
-
-  for (let i = 0; i < chunkCount; i += BATCH_SIZE) {
-    const batch = writeBatch(db2);
-    const endI = Math.min(i + BATCH_SIZE, chunkCount);
-
-    for (let j = i; j < endI; j++) {
-      const start = j * CHUNK_SIZE_BYTES;
-      const end = Math.min(start + CHUNK_SIZE_BYTES, total);
-      const blob = file.slice(start, end);
-      const buf = await readChunk(blob);
-      const bytes = Bytes.fromUint8Array(new Uint8Array(buf));
-      batch.set(
-        doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts, "chunks", `${j}`),
-        { b: bytes, index: j }
-      );
-    }
-
-    await batch.commit();
-    done = endI;
-    if (onProgress) onProgress(Math.min(100, Math.floor((done / chunkCount) * 100)));
-  }
-
-  if (onProgress) onProgress(100);
-  await updateDoc(baseRef, { isUploading: false }).catch(() => {});
-  return { chunkCount };
-}
-
-async function downloadChunksToBlobUrl({ db2, appId2, parentPathParts, mimeType }) {
-  const chunksSnap = await getDocs(
-    query(
-      collection(db2, "artifacts", appId2, "public", "data", ...parentPathParts, "chunks"),
-      orderBy("index", "asc")
-    )
-  );
-  const parts = [];
-  for (const d of chunksSnap.docs) {
-    const data = d.data();
-    if (data?.b) {
-      const u8 = data.b.toUint8Array();
-      parts.push(u8);
-    }
-  }
-  const blob = new Blob(parts, { type: mimeType || "application/octet-stream" });
-  return URL.createObjectURL(blob);
-}
+};
