@@ -143,6 +143,28 @@ const getMimeTypeFromDataUrl = (dataUrl) => {
   const m = s.match(/^data:([^;,]+)[;,]/i);
   return m?.[1] || "";
 };
+const detectMimeTypeFromBase64Signature = (base64Data, fallbackType = "") => {
+  const raw = String(base64Data || "").trim();
+  if (!raw) return fallbackType || "";
+  let binary = "";
+  try {
+    const normalized = raw.replace(/[^A-Za-z0-9+/=]/g, "");
+    const head = normalized.slice(0, 128);
+    const padded = head + "=".repeat((4 - head.length % 4) % 4);
+    binary = atob(padded);
+  } catch {
+    return fallbackType || "";
+  }
+  const bytes = Array.from(binary, (ch) => ch.charCodeAt(0));
+  if (bytes.length >= 4 && bytes[0] === 26 && bytes[1] === 69 && bytes[2] === 223 && bytes[3] === 163) return "video/webm";
+  if (bytes.length >= 12 && String.fromCharCode(...bytes.slice(4, 8)) === "ftyp") return "video/mp4";
+  if (bytes.length >= 4 && String.fromCharCode(...bytes.slice(0, 4)) === "OggS") return "audio/ogg";
+  if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return "image/jpeg";
+  if (bytes.length >= 8 && bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71) return "image/png";
+  if (bytes.length >= 6 && String.fromCharCode(...bytes.slice(0, 6)) === "GIF89a") return "image/gif";
+  if (bytes.length >= 12 && String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP") return "image/webp";
+  return fallbackType || "";
+};
 const MAX_MEDIA_CACHE_SIZE = 180;
 const messageMediaUrlCache = /* @__PURE__ */ new Map();
 const messageMediaPromiseCache = /* @__PURE__ */ new Map();
@@ -214,7 +236,8 @@ const loadChunkedMessageMedia = async ({ db: db2, appId: appId2, chatId, message
     }
     if (!base64Data) return null;
     if (base64Data.startsWith("data:")) return base64Data;
-    const mimeType = message.mimeType || getDefaultMimeTypeByMessageType(message.type);
+    const fallbackMimeType = message.mimeType || getDefaultMimeTypeByMessageType(message.type);
+    const mimeType = detectMimeTypeFromBase64Signature(base64Data, fallbackMimeType);
     try {
       const byteCharacters = atob(base64Data);
       const byteNumbers = new Array(byteCharacters.length);
@@ -5902,7 +5925,8 @@ const loadChunkedPostMedia = async ({ db: db2, appId: appId2, post }) => {
     }
     if (!base64Data) return null;
     if (base64Data.startsWith("data:")) return base64Data;
-    const mimeType = post.mimeType || getDefaultMimeTypeByMessageType(post.mediaType === "video" ? "video" : "image");
+    const fallbackMimeType = post.mimeType || getDefaultMimeTypeByMessageType(post.mediaType === "video" ? "video" : "image");
+    const mimeType = detectMimeTypeFromBase64Signature(base64Data, fallbackMimeType);
     try {
       const byteCharacters = atob(base64Data);
       const byteNumbers = new Array(byteCharacters.length);
