@@ -3495,6 +3495,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
   const [postPreview, setPostPreview] = useState(null);
   const [localPost, setLocalPost] = useState(post);
   const [isVideoActivated, setIsVideoActivated] = useState(post.mediaType !== "video");
+  const [isVideoPlaybackError, setIsVideoPlaybackError] = useState(false);
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = localPost.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
   const isVideoPost = localPost.mediaType === "video";
@@ -3503,6 +3504,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
   const postDateTime = formatDateTimeWithSeconds(localPost.createdAt);
   useEffect(() => {
     setLocalPost(post);
+    setIsVideoPlaybackError(false);
     if (post.mediaType === "video") {
       setIsVideoActivated(false);
       setMediaSrc(null);
@@ -3595,7 +3597,8 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
       isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : isVideoPost && !isVideoActivated ? /* @__PURE__ */ jsxs("button", { onClick: () => setIsVideoActivated(true), className: "w-full min-h-[180px] bg-black text-white flex flex-col items-center justify-center gap-2", children: [
         /* @__PURE__ */ jsx(Play, { className: "w-8 h-8" }),
         /* @__PURE__ */ jsx("span", { className: "text-xs font-bold opacity-90", children: "\u30BF\u30C3\u30D7\u3067\u52D5\u753B\u3092\u8AAD\u307F\u8FBC\u307F" })
-      ] }) : isVideoPost ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, muted: false, preload: "metadata", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
+      ] }) : isVideoPost ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, muted: false, preload: "metadata", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }), onLoadedData: () => setIsVideoPlaybackError(false), onError: () => setIsVideoPlaybackError(true) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
+      isVideoPost && isVideoPlaybackError && /* @__PURE__ */ jsx("div", { className: "absolute inset-x-2 bottom-2 bg-red-600/90 text-white text-[11px] font-bold px-3 py-2 rounded-xl", children: "\u3053\u306E\u7AEF\u672B\u3067\u306F\u52D5\u753B\u3092\u518D\u751F\u3067\u304D\u306A\u3044\u53EF\u80FD\u6027\u304C\u3042\u308A\u307E\u3059\u3002\u5225\u306E\u7AEF\u672B\u3067\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002" }),
       !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: localPost.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
         /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
         "\u62E1\u5927"
@@ -3621,7 +3624,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
     ] }),
     postPreview && /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1200] bg-black/95 flex items-center justify-center p-4", onClick: () => setPostPreview(null), children: [
       /* @__PURE__ */ jsx("button", { className: "absolute top-5 right-5 text-white p-2 rounded-full bg-white/20", onClick: () => setPostPreview(null), children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) }),
-      postPreview.type === "video" ? /* @__PURE__ */ jsx("video", { src: postPreview.src, controls: true, autoPlay: true, playsInline: true, preload: "metadata", className: "max-w-full max-h-[88vh] rounded-xl bg-black", onClick: (e) => e.stopPropagation() }) : /* @__PURE__ */ jsx("img", { src: postPreview.src, className: "max-w-full max-h-[88vh] object-contain rounded-xl", onClick: (e) => e.stopPropagation() })
+      postPreview.type === "video" ? /* @__PURE__ */ jsx("video", { src: postPreview.src, controls: true, autoPlay: true, playsInline: true, preload: "metadata", className: "max-w-full max-h-[88vh] rounded-xl bg-black", onClick: (e) => e.stopPropagation(), onError: () => setIsVideoPlaybackError(true) }) : /* @__PURE__ */ jsx("img", { src: postPreview.src, className: "max-w-full max-h-[88vh] object-contain rounded-xl", onClick: (e) => e.stopPropagation() })
     ] })
   ] });
 };
