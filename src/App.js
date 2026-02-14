@@ -2583,7 +2583,7 @@ useEffect(() => {
   ] });
 });
 const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => {
-  const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
+  const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.storageUrl || post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [postPreview, setPostPreview] = useState(null);
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
@@ -2688,7 +2688,10 @@ if (parts.length) {
       ,
         isMe && /* @__PURE__ */ jsx("button", { onClick: deletePost, className: "ml-auto p-2 rounded-full hover:bg-red-50 text-red-500", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) }),
 ] }),
-      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
+      /* @__PURE__ */ jsxs("div", { className: "flex flex-col", children: [
+        /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name }),
+        /* @__PURE__ */ jsx("div", { className: "text-[10px] text-gray-400 font-bold", children: formatDateTime(post.createdAt) })
+      ] })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
     (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
