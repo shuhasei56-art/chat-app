@@ -5465,6 +5465,135 @@ async function downloadChunksToBlobUrl({ db2, appId2, parentPathParts, mimeType 
   const blob = new Blob(parts, { type: mimeType || "application/octet-stream" });
   return URL.createObjectURL(blob);
 }
+// ===== Media cache (memory + IndexedDB) for faster receive (VOOM + Chat) =====
+const __mediaMemCache = new Map(); // key -> { url, ts }
+const __MEDIA_MEM_LIMIT = 80;
+
+function __mediaCacheGet(key) {
+  const v = __mediaMemCache.get(key);
+  if (!v) return null;
+  v.ts = Date.now();
+  return v.url;
+}
+function __mediaCacheSet(key, url) {
+  __mediaMemCache.set(key, { url, ts: Date.now() });
+  if (__mediaMemCache.size > __MEDIA_MEM_LIMIT) {
+    // simple LRU eviction
+    let oldestKey = null;
+    let oldestTs = Infinity;
+    for (const [k, v] of __mediaMemCache.entries()) {
+      if (v.ts < oldestTs) { oldestTs = v.ts; oldestKey = k; }
+    }
+    if (oldestKey) {
+      const old = __mediaMemCache.get(oldestKey);
+      try { if (old?.url && String(old.url).startsWith("blob:")) URL.revokeObjectURL(old.url); } catch {}
+      __mediaMemCache.delete(oldestKey);
+    }
+  }
+}
+
+function __openMediaDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("mediaCacheDB", 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains("media")) db.createObjectStore("media");
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function __idbGet(key) {
+  try {
+    const db = await __openMediaDB();
+    return await new Promise((resolve) => {
+      const tx = db.transaction("media", "readonly");
+      const store = tx.objectStore("media");
+      const r = store.get(key);
+      r.onsuccess = () => resolve(r.result || null);
+      r.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+async function __idbSet(key, blob, mimeType) {
+  try {
+    const db = await __openMediaDB();
+    await new Promise((resolve) => {
+      const tx = db.transaction("media", "readwrite");
+      const store = tx.objectStore("media");
+      store.put({ blob, mimeType, at: Date.now() }, key);
+      tx.oncomplete = () => resolve(null);
+      tx.onerror = () => resolve(null);
+    });
+  } catch {}
+}
+
+async function downloadChunksToBlobUrlFast({ db2, appId2, parentPathParts, mimeType, cacheKey }) {
+  // 1) memory cache
+  if (cacheKey) {
+    const mem = __mediaCacheGet(cacheKey);
+    if (mem) return mem;
+  }
+
+  // 2) IndexedDB cache (Blob)
+  if (cacheKey) {
+    const cached = await __idbGet(cacheKey);
+    if (cached?.blob) {
+      const url = URL.createObjectURL(cached.blob);
+      __mediaCacheSet(cacheKey, url);
+      return url;
+    }
+  }
+
+  // 3) fetch meta to know chunkCount
+  let chunkCount = null;
+  try {
+    const metaSnap = await getDoc(doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts));
+    const meta = metaSnap.exists() ? metaSnap.data() : null;
+    chunkCount = meta?.chunkCount ?? null;
+    mimeType = mimeType || meta?.mimeType || null;
+  } catch {}
+
+  // If chunkCount missing, fall back to query+orderBy (slower but safe)
+  if (!chunkCount || typeof chunkCount !== "number" || chunkCount < 1) {
+    const url = await downloadChunksToBlobUrl({ db2, appId2, parentPathParts, mimeType });
+    if (cacheKey) __mediaCacheSet(cacheKey, url);
+    return url;
+  }
+
+  // 4) parallel getDoc for each chunk id ("0".."n-1") with concurrency limit
+  const CONCURRENCY = 10;
+  const parts = new Array(chunkCount);
+  let idx = 0;
+
+  const worker = async () => {
+    while (idx < chunkCount) {
+      const my = idx++;
+      try {
+        const snap = await getDoc(doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts, "chunks", String(my)));
+        const data = snap.exists() ? snap.data() : null;
+        if (data?.b) parts[my] = data.b.toUint8Array();
+      } catch {}
+    }
+  };
+  const workers = [];
+  for (let i = 0; i < CONCURRENCY; i++) workers.push(worker());
+  await Promise.all(workers);
+
+  const blob = new Blob(parts.filter(Boolean), { type: mimeType || "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+
+  if (cacheKey) {
+    __mediaCacheSet(cacheKey, url);
+    // fire-and-forget persist
+    __idbSet(cacheKey, blob, mimeType || null);
+  }
+  return url;
+}
+// ===== end cache helpers =====
+
 
 function App() {
   const [user, setUser] = useState(null);
