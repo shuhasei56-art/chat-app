@@ -4324,12 +4324,8 @@ const handleDeleteMessage = useCallback(
   async (msgId) => {
     try {
       const msgRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId);
-      try {
-        const snap = await getDoc(msgRef);
-        const data = snap.exists() ? snap.data() : null;
-        }
-      } catch (e) {
-      }
+// No Firebase Storage: just delete the message doc and any chunk docs.
+// (Fetch is optional; kept minimal to avoid extra network cost.)
 
       await deleteDoc(msgRef);
       const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId, "chunks"));
@@ -6077,4 +6073,3 @@ async function downloadChunksToBlobUrl({ db2, appId2, parentPathParts, mimeType 
   const blob = new Blob(parts, { type: mimeType || "application/octet-stream" });
   return URL.createObjectURL(blob);
 }
-
