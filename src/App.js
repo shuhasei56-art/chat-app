@@ -195,6 +195,13 @@ const evictOldestMessageMediaCache = () => {
 };
 const isCachedMessageMediaUrl = (url) => !!url && messageMediaUrlSet.has(url);
 const isCachedPostMediaUrl = (url) => !!url && postMediaUrlSet.has(url);
+const normalizeBase64Chunk = (value) => String(value || "").replace(/\s+/g, "");
+const decodeBase64ToBytes = (base64Text) => {
+  const binary = atob(base64Text);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+};
 const loadChunkedMessageMedia = async ({ db: db2, appId: appId2, chatId, message }) => {
   const cacheKey = buildMessageMediaCacheKey(chatId, message.id, message.chunkCount, message.mimeType, message.type);
   const cached = messageMediaUrlCache.get(cacheKey);
@@ -202,28 +209,26 @@ const loadChunkedMessageMedia = async ({ db: db2, appId: appId2, chatId, message
   const inFlight = messageMediaPromiseCache.get(cacheKey);
   if (inFlight) return inFlight;
   const loadPromise = (async () => {
-    let base64Data = "";
+    const chunkDocsData = [];
     if (message.chunkCount) {
-      const chunkPromises = [];
+      let allFound = true;
       for (let i = 0; i < message.chunkCount; i++) {
-        chunkPromises.push(
-          getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", message.id, "chunks", `${i}`))
-        );
+        const chunkSnap = await getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", message.id, "chunks", `${i}`));
+        if (!chunkSnap.exists()) {
+          allFound = false;
+          break;
+        }
+        chunkDocsData.push(chunkSnap.data());
       }
-      const chunkDocs = await Promise.all(chunkPromises);
-      const allFound = chunkDocs.every((d) => d.exists());
-      if (allFound) {
-        chunkDocs.forEach((d) => {
-          base64Data += d.data().data;
-        });
-      } else {
+      if (!allFound) {
+        chunkDocsData.length = 0;
         const snap = await getDocs(
           query(
             collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", message.id, "chunks"),
             orderBy("index", "asc")
           )
         );
-        snap.forEach((d) => base64Data += d.data().data);
+        snap.forEach((d) => chunkDocsData.push(d.data()));
       }
     } else {
       const snap = await getDocs(
@@ -232,17 +237,42 @@ const loadChunkedMessageMedia = async ({ db: db2, appId: appId2, chatId, message
           orderBy("index", "asc")
         )
       );
-      snap.forEach((d) => base64Data += d.data().data);
+      snap.forEach((d) => chunkDocsData.push(d.data()));
     }
-    if (!base64Data) return null;
-    if (base64Data.startsWith("data:")) return base64Data;
+    if (chunkDocsData.length === 0) return null;
     const fallbackMimeType = message.mimeType || getDefaultMimeTypeByMessageType(message.type);
-    const mimeType = detectMimeTypeFromBase64Signature(base64Data, fallbackMimeType);
+    const decodeMode = chunkDocsData[0]?.enc === "slice" ? "slice" : "stream";
+    const byteParts = [];
+    let sniffSample = "";
+    let streamCarry = "";
+    for (const chunkData of chunkDocsData) {
+      const raw = chunkData?.data;
+      if (!raw) continue;
+      if (typeof raw === "string" && raw.startsWith("data:")) return raw;
+      const normalized = normalizeBase64Chunk(raw);
+      if (!normalized) continue;
+      if (sniffSample.length < 1024) sniffSample += normalized.slice(0, 1024 - sniffSample.length);
+      if (decodeMode === "slice") {
+        const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+        byteParts.push(decodeBase64ToBytes(padded));
+      } else {
+        streamCarry += normalized;
+        const safeLen = streamCarry.length - streamCarry.length % 4;
+        if (safeLen > 0) {
+          const piece = streamCarry.slice(0, safeLen);
+          streamCarry = streamCarry.slice(safeLen);
+          byteParts.push(decodeBase64ToBytes(piece));
+        }
+      }
+    }
+    if (decodeMode === "stream" && streamCarry.length > 0) {
+      const padded = streamCarry + "=".repeat((4 - streamCarry.length % 4) % 4);
+      byteParts.push(decodeBase64ToBytes(padded));
+    }
+    if (byteParts.length === 0) return null;
+    const mimeType = detectMimeTypeFromBase64Signature(sniffSample, fallbackMimeType);
     try {
-      const byteCharacters = atob(base64Data);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
-      const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+      const blob = new Blob(byteParts, { type: mimeType });
       const objectUrl = URL.createObjectURL(blob);
       evictOldestMessageMediaCache();
       messageMediaUrlCache.set(cacheKey, objectUrl);
@@ -5030,23 +5060,21 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       const shouldChunkMedia = !!file && (file.size > CHUNK_SIZE || type === "video");
       if (shouldChunkMedia) {
         hasChunks = true;
-        const fileDataUrl = await readFileAsDataUrl(file);
-        if (!fileData.mimeType) {
-          const sniffedMime = getMimeTypeFromDataUrl(fileDataUrl);
-          if (sniffedMime) fileData.mimeType = sniffedMime;
-        }
-        const base64Payload = String(fileDataUrl || "").split(",")[1] || "";
-        if (!base64Payload) throw new Error("EMPTY_FILE_BASE64");
-        chunkCount = Math.ceil(base64Payload.length / CHUNK_SIZE);
+        if (!fileData.mimeType) fileData.mimeType = file.type || getDefaultMimeTypeByMessageType(type);
+        chunkCount = Math.ceil(file.size / CHUNK_SIZE);
         const CONCURRENCY = getUploadConcurrency();
         const executing = /* @__PURE__ */ new Set();
         let completed = 0;
         let lastProgressAt = 0;
         for (let i = 0; i < chunkCount; i++) {
           const start = i * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, base64Payload.length);
-          const base64Data = base64Payload.slice(start, end);
-          const p = setDoc(doc(msgCol, newMsgRef.id, "chunks", `${i}`), { data: base64Data, index: i }).then(() => {
+          const end = Math.min(start + CHUNK_SIZE, file.size);
+          const blobSlice = file.slice(start, end);
+          const p = readFileAsDataUrl(blobSlice).then((sliceDataUrl) => {
+            const base64Data = String(sliceDataUrl || "").split(",")[1] || "";
+            if (!base64Data) throw new Error("EMPTY_SLICE_BASE64");
+            return setDoc(doc(msgCol, newMsgRef.id, "chunks", `${i}`), { data: base64Data, index: i, enc: "slice" });
+          }).then(() => {
             completed++;
             const now = Date.now();
             if (completed === chunkCount || now - lastProgressAt >= 120) {
@@ -5827,34 +5855,32 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
       const newPostRef = doc(collection(db2, "artifacts", appId2, "public", "data", "posts"));
       if (mediaFile) {
         mimeType = mediaFile.type || null;
-        const fileDataUrl = await readFileAsDataUrl(mediaFile);
-        if (!mimeType) {
-          const sniffedMime = getMimeTypeFromDataUrl(fileDataUrl);
-          if (sniffedMime) mimeType = sniffedMime;
-        }
         if (!mimeType) {
           mimeType = getDefaultMimeTypeByMessageType(mediaType === "video" ? "video" : "image");
         }
-        const base64Payload = String(fileDataUrl || "").split(",")[1] || "";
-        if (!base64Payload) throw new Error("EMPTY_POST_BASE64");
         // Fast path: small media is stored directly to avoid chunk write overhead.
-        if (base64Payload.length <= CHUNK_SIZE) {
+        if (mediaFile.size <= CHUNK_SIZE) {
+          const fileDataUrl = await readFileAsDataUrl(mediaFile);
           hasChunks = false;
           chunkCount = 0;
           storedMedia = fileDataUrl;
           setVoomUploadProgress(100);
         } else {
           hasChunks = true;
-          chunkCount = Math.ceil(base64Payload.length / CHUNK_SIZE);
+          chunkCount = Math.ceil(mediaFile.size / CHUNK_SIZE);
           const CONCURRENCY = getUploadConcurrency();
           const executing = /* @__PURE__ */ new Set();
           let completed = 0;
           let lastProgressAt = 0;
           for (let i = 0; i < chunkCount; i++) {
             const start = i * CHUNK_SIZE;
-            const end = Math.min(start + CHUNK_SIZE, base64Payload.length);
-            const base64Data = base64Payload.slice(start, end);
-            const p = setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: base64Data, index: i }).then(() => {
+            const end = Math.min(start + CHUNK_SIZE, mediaFile.size);
+            const blobSlice = mediaFile.slice(start, end);
+            const p = readFileAsDataUrl(blobSlice).then((sliceDataUrl) => {
+              const base64Data = String(sliceDataUrl || "").split(",")[1] || "";
+              if (!base64Data) throw new Error("EMPTY_POST_SLICE_BASE64");
+              return setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: base64Data, index: i, enc: "slice" });
+            }).then(() => {
               completed++;
               const now = Date.now();
               if (completed === chunkCount || now - lastProgressAt >= 120) {
@@ -5979,26 +6005,26 @@ const loadChunkedPostMedia = async ({ db: db2, appId: appId2, post }) => {
   const inFlight = postMediaPromiseCache.get(cacheKey);
   if (inFlight) return inFlight;
   const loadPromise = (async () => {
-    let base64Data = "";
+    const chunkDocsData = [];
     if (post.chunkCount) {
-      const chunkPromises = [];
+      let allFound = true;
       for (let i = 0; i < post.chunkCount; i++) {
-        chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks", `${i}`)));
+        const chunkSnap = await getDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks", `${i}`));
+        if (!chunkSnap.exists()) {
+          allFound = false;
+          break;
+        }
+        chunkDocsData.push(chunkSnap.data());
       }
-      const chunkDocs = await Promise.all(chunkPromises);
-      const allFound = chunkDocs.every((d) => d.exists());
-      if (allFound) {
-        chunkDocs.forEach((d) => {
-          base64Data += d.data().data;
-        });
-      } else {
+      if (!allFound) {
+        chunkDocsData.length = 0;
         const snap = await getDocs(
           query(
             collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"),
             orderBy("index", "asc")
           )
         );
-        snap.forEach((d) => base64Data += d.data().data);
+        snap.forEach((d) => chunkDocsData.push(d.data()));
       }
     } else {
       const snap = await getDocs(
@@ -6007,17 +6033,42 @@ const loadChunkedPostMedia = async ({ db: db2, appId: appId2, post }) => {
           orderBy("index", "asc")
         )
       );
-      snap.forEach((d) => base64Data += d.data().data);
+      snap.forEach((d) => chunkDocsData.push(d.data()));
     }
-    if (!base64Data) return null;
-    if (base64Data.startsWith("data:")) return base64Data;
+    if (chunkDocsData.length === 0) return null;
     const fallbackMimeType = post.mimeType || getDefaultMimeTypeByMessageType(post.mediaType === "video" ? "video" : "image");
-    const mimeType = detectMimeTypeFromBase64Signature(base64Data, fallbackMimeType);
+    const decodeMode = chunkDocsData[0]?.enc === "slice" ? "slice" : "stream";
+    const byteParts = [];
+    let sniffSample = "";
+    let streamCarry = "";
+    for (const chunkData of chunkDocsData) {
+      const raw = chunkData?.data;
+      if (!raw) continue;
+      if (typeof raw === "string" && raw.startsWith("data:")) return raw;
+      const normalized = normalizeBase64Chunk(raw);
+      if (!normalized) continue;
+      if (sniffSample.length < 1024) sniffSample += normalized.slice(0, 1024 - sniffSample.length);
+      if (decodeMode === "slice") {
+        const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+        byteParts.push(decodeBase64ToBytes(padded));
+      } else {
+        streamCarry += normalized;
+        const safeLen = streamCarry.length - streamCarry.length % 4;
+        if (safeLen > 0) {
+          const piece = streamCarry.slice(0, safeLen);
+          streamCarry = streamCarry.slice(safeLen);
+          byteParts.push(decodeBase64ToBytes(piece));
+        }
+      }
+    }
+    if (decodeMode === "stream" && streamCarry.length > 0) {
+      const padded = streamCarry + "=".repeat((4 - streamCarry.length % 4) % 4);
+      byteParts.push(decodeBase64ToBytes(padded));
+    }
+    if (byteParts.length === 0) return null;
+    const mimeType = detectMimeTypeFromBase64Signature(sniffSample, fallbackMimeType);
     try {
-      const byteCharacters = atob(base64Data);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
-      const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+      const blob = new Blob(byteParts, { type: mimeType });
       const objectUrl = URL.createObjectURL(blob);
       evictOldestPostMediaCache();
       postMediaUrlCache.set(cacheKey, objectUrl);
