@@ -33,6 +33,7 @@ import {
   limit,
   limitToLast,
   writeBatch,
+  Bytes,
   getDocs,
   getDocsFromCache,
   getDocsFromServer,
@@ -4236,53 +4237,32 @@ if (["image", "video"].includes(type)) {
       setTimeout(() => {
         scrollRef.current?.scrollIntoView({ behavior: "auto" });
       }, 100);
-
-      // Upload to Firebase Storage (VOOM same system)
-      try {
-        const ext = file.name && file.name.includes(".") ? file.name.split(".").pop() : "";
-        const safeExt = ext ? `.${ext}` : "";
-        const storagePath = `artifacts/${appId2}/chats/${activeChatId}/${user.uid}/${Date.now()}_${Math.random()
-          .toString(16)
-          .slice(2)}${safeExt}`;
-        const sRef = storageRef(storage, storagePath);
-
-        await new Promise((resolve, reject) => {
-          const task = uploadBytesResumable(sRef, file, { contentType: file.type || undefined });
-          task.on(
-            "state_changed",
-            (snap) => {
-              const pct = snap.totalBytes ? Math.round((snap.bytesTransferred / snap.totalBytes) * 100) : 0;
-              setUploadProgress(pct);
-            },
-            (err) => reject(err),
-            async () => {
-              try {
-                const url = await getDownloadURL(task.snapshot.ref);
-                await updateDoc(newMsgRef, {
-                  content: url,
-                  storageUrl: url,
-                  storagePath,
-                  mimeType: file.type || null,
-                  hasChunks: false,
-                  chunkCount: 0,
-                  isUploading: false
-                });
-                resolve(null);
-              } catch (e) {
-                reject(e);
-              }
-            }
-          );
-        });
-      } catch (e) {
-        try {
-          await updateDoc(newMsgRef, { isUploading: false });
-        } catch {}
-      } finally {
-        try {
-          if (localBlobUrl && localBlobUrl.startsWith("blob:")) URL.revokeObjectURL(localBlobUrl);
-        } catch {}
-      }
+// Upload bytes chunks to Firestore (no Firebase Storage required), then switch to chunk-based playback on reopen.
+try {
+  await uploadFileToFirestoreChunks({
+    db2,
+    appId2,
+    parentPathParts: ["chats", activeChatId, "messages", newMsgRef.id],
+    file,
+    onProgress: (p) => setUploadProgress(p)
+  });
+  await updateDoc(newMsgRef, {
+    content: null,
+    storageUrl: null,
+    storagePath: null,
+    hasChunks: true,
+    isUploading: false,
+    mimeType: file.type || null
+  }).catch(() => {});
+} catch (e) {
+  try {
+    await updateDoc(newMsgRef, { isUploading: false }).catch(() => {});
+  } catch {}
+} finally {
+  try {
+    if (localBlobUrl && localBlobUrl.startsWith("blob:")) URL.revokeObjectURL(localBlobUrl);
+  } catch {}
+}
 
       return;
     }
@@ -4347,11 +4327,6 @@ const handleDeleteMessage = useCallback(
       try {
         const snap = await getDoc(msgRef);
         const data = snap.exists() ? snap.data() : null;
-        if (data?.storagePath) {
-          try {
-            await deleteObject(storageRef(storage, data.storagePath));
-          } catch (e) {
-          }
         }
       } catch (e) {
       }
@@ -6102,5 +6077,4 @@ async function downloadChunksToBlobUrl({ db2, appId2, parentPathParts, mimeType 
   const blob = new Blob(parts, { type: mimeType || "application/octet-stream" });
   return URL.createObjectURL(blob);
 }
-
 
