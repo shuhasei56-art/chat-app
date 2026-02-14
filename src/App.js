@@ -327,7 +327,7 @@ const formatDateTimeWithSeconds = (timestamp) => {
   const hh = String(date.getHours()).padStart(2, "0");
   const min = String(date.getMinutes()).padStart(2, "0");
   const ss = String(date.getSeconds()).padStart(2, "0");
-  return `${yyyy}/${mm}/${dd} ${hh}:${min}:${ss}`;
+  return `${yyyy}年${mm}月${dd}日 ${hh}時${min}分${ss}秒`;
 };
 const getProfileCacheKey = (uid) => `profileCache:${uid}`;
 const normalizeProfileForCache = (uid, profile) => {
@@ -3370,14 +3370,29 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
   const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [postPreview, setPostPreview] = useState(null);
   const [localPost, setLocalPost] = useState(post);
+  const [isVideoActivated, setIsVideoActivated] = useState(post.mediaType !== "video");
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = localPost.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
+  const isVideoPost = localPost.mediaType === "video";
+  const shouldLoadPostMedia = !isVideoPost || isVideoActivated;
+  const shouldShowMediaBlock = !!mediaSrc || isLoadingMedia || isVideoPost && (localPost.hasChunks || !!localPost.media);
   const postDateTime = formatDateTimeWithSeconds(localPost.createdAt);
   useEffect(() => {
     setLocalPost(post);
+    if (post.mediaType === "video") {
+      setIsVideoActivated(false);
+      setMediaSrc(null);
+      setIsLoadingMedia(false);
+    } else {
+      setIsVideoActivated(true);
+    }
   }, [post]);
   useEffect(() => {
     let cancelled = false;
+    if (!shouldLoadPostMedia) {
+      setIsLoadingMedia(false);
+      return;
+    }
     if (!post.hasChunks) {
       setMediaSrc(post.media || null);
       return;
@@ -3404,7 +3419,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
     return () => {
       cancelled = true;
     };
-  }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, post.media, mediaSrc, db2, appId2]);
+  }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, post.media, mediaSrc, db2, appId2, shouldLoadPostMedia]);
   useEffect(() => {
     return () => {
       if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe && !isCachedPostMediaUrl(mediaSrc)) URL.revokeObjectURL(mediaSrc);
@@ -3444,7 +3459,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "flex-1", children: [
         /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name }),
-        postDateTime && /* @__PURE__ */ jsx("div", { className: "text-[10px] text-gray-400 leading-none mt-0.5", children: postDateTime })
+        postDateTime && /* @__PURE__ */ jsx("div", { className: "text-[9px] text-gray-400 leading-none mt-0.5", children: postDateTime })
       ] }),
       isMe && /* @__PURE__ */ jsxs("button", { onClick: () => onDelete?.(post), className: "text-[11px] font-bold text-red-500 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50", children: [
         /* @__PURE__ */ jsx(Trash2, { className: "w-3.5 h-3.5 inline mr-1" }),
@@ -3452,8 +3467,11 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
       ] })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: localPost.content }),
-    (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
-      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : localPost.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
+    shouldShowMediaBlock && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
+      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : isVideoPost && !isVideoActivated ? /* @__PURE__ */ jsxs("button", { onClick: () => setIsVideoActivated(true), className: "w-full min-h-[180px] bg-black text-white flex flex-col items-center justify-center gap-2", children: [
+        /* @__PURE__ */ jsx(Play, { className: "w-8 h-8" }),
+        /* @__PURE__ */ jsx("span", { className: "text-xs font-bold opacity-90", children: "\u30BF\u30C3\u30D7\u3067\u52D5\u753B\u3092\u8AAD\u307F\u8FBC\u307F" })
+      ] }) : isVideoPost ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, preload: "metadata", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
       !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: localPost.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
         /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
         "\u62E1\u5927"
@@ -3479,7 +3497,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
     ] }),
     postPreview && /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1200] bg-black/95 flex items-center justify-center p-4", onClick: () => setPostPreview(null), children: [
       /* @__PURE__ */ jsx("button", { className: "absolute top-5 right-5 text-white p-2 rounded-full bg-white/20", onClick: () => setPostPreview(null), children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) }),
-      postPreview.type === "video" ? /* @__PURE__ */ jsx("video", { src: postPreview.src, controls: true, autoPlay: true, className: "max-w-full max-h-[88vh] rounded-xl bg-black", onClick: (e) => e.stopPropagation() }) : /* @__PURE__ */ jsx("img", { src: postPreview.src, className: "max-w-full max-h-[88vh] object-contain rounded-xl", onClick: (e) => e.stopPropagation() })
+      postPreview.type === "video" ? /* @__PURE__ */ jsx("video", { src: postPreview.src, controls: true, autoPlay: true, playsInline: true, preload: "metadata", className: "max-w-full max-h-[88vh] rounded-xl bg-black", onClick: (e) => e.stopPropagation() }) : /* @__PURE__ */ jsx("img", { src: postPreview.src, className: "max-w-full max-h-[88vh] object-contain rounded-xl", onClick: (e) => e.stopPropagation() })
     ] })
   ] });
 };
