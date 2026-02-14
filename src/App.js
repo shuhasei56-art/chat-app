@@ -4201,13 +4201,19 @@ const sendMessage = async (content, type = "text", additionalData = {}, file = n
       }
       storedContent = localBlobUrl || content;
 
-      if (["image", "video"].includes(type)) {
-        try {
-          previewData = await generateThumbnail(file);
-        } catch (e) {
-          previewData = null;
-        }
+if (["image", "video"].includes(type)) {
+  // Generate preview asynchronously to avoid blocking send/upload speed.
+  try {
+    generateThumbnail(file).then((p) => {
+      try {
+        updateDoc(newMsgRef, { preview: p || null });
+      } catch (e) {
       }
+    }).catch(() => {
+    });
+  } catch (e) {
+  }
+}
 
       await setDoc(newMsgRef, {
         senderId: user.uid,
@@ -4909,7 +4915,7 @@ const handleVoomFileUpload = (e) => {
       /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2", children: [
         /* @__PURE__ */ jsx("textarea", { className: "w-full text-sm outline-none resize-none min-h-[60px]", placeholder: "\u4F55\u3092\u3057\u3066\u3044\u307E\u3059\u304B\uFF1F", value: content, onChange: (e) => setContent(e.target.value) }),
         media && /* @__PURE__ */ jsxs("div", { className: "relative mt-2", children: [
-          mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaPreviewUrl || media, className: "w-full rounded-xl bg-black", controls: true }) : /* @__PURE__ */ jsx("img", { src: mediaPreviewUrl || media, className: "max-h-60 rounded-xl" }),
+          mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaPreviewUrl || media, preload: "metadata", playsInline: true, className: "w-full rounded-xl bg-black", controls: true }) : /* @__PURE__ */ jsx("img", { src: mediaPreviewUrl || media, loading: "lazy", decoding: "async", className: "max-h-60 rounded-xl" }),
           /* @__PURE__ */ jsx("button", { onClick: () => setMedia(null), className: "absolute top-1 right-1 bg-black/50 text-white rounded-full p-1", children: /* @__PURE__ */ jsx(X, { className: "w-3 h-3" }) })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "flex justify-between items-center pt-2 border-t mt-2", children: [
