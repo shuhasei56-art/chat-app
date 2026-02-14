@@ -318,6 +318,17 @@ const formatDateTime = (timestamp) => {
   const min = String(date.getMinutes()).padStart(2, "0");
   return `${yyyy}/${mm}/${dd} ${hh}:${min}`;
 };
+const formatDateTimeWithSeconds = (timestamp) => {
+  if (!timestamp) return "";
+  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  const ss = String(date.getSeconds()).padStart(2, "0");
+  return `${yyyy}/${mm}/${dd} ${hh}:${min}:${ss}`;
+};
 const getProfileCacheKey = (uid) => `profileCache:${uid}`;
 const normalizeProfileForCache = (uid, profile) => {
   if (!uid || !profile) return null;
@@ -3361,6 +3372,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
   const [localPost, setLocalPost] = useState(post);
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = localPost.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
+  const postDateTime = formatDateTimeWithSeconds(localPost.createdAt);
   useEffect(() => {
     setLocalPost(post);
   }, [post]);
@@ -3430,7 +3442,10 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
         /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
         isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
       ] }),
-      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm flex-1", children: u?.name }),
+      /* @__PURE__ */ jsxs("div", { className: "flex-1", children: [
+        /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name }),
+        postDateTime && /* @__PURE__ */ jsx("div", { className: "text-[10px] text-gray-400 leading-none mt-0.5", children: postDateTime })
+      ] }),
       isMe && /* @__PURE__ */ jsxs("button", { onClick: () => onDelete?.(post), className: "text-[11px] font-bold text-red-500 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50", children: [
         /* @__PURE__ */ jsx(Trash2, { className: "w-3.5 h-3.5 inline mr-1" }),
         "\u524A\u9664"
