@@ -5634,53 +5634,6 @@ async function downloadChunksToBlobUrlFast({ db2, appId2, parentPathParts, mimeT
   }
   return url;
 }
-  }
-
-  // 3) fetch meta to know chunkCount
-  let chunkCount = null;
-  try {
-    const metaSnap = await getDoc(doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts));
-    const meta = metaSnap.exists() ? metaSnap.data() : null;
-    chunkCount = meta?.chunkCount ?? null;
-    mimeType = mimeType || meta?.mimeType || null;
-  } catch {}
-
-  // If chunkCount missing, fall back to query+orderBy (slower but safe)
-  if (!chunkCount || typeof chunkCount !== "number" || chunkCount < 1) {
-    const url = await downloadChunksToBlobUrl({ db2, appId2, parentPathParts, mimeType });
-    if (cacheKey) __mediaCacheSet(cacheKey, url);
-    return url;
-  }
-
-  // 4) parallel getDoc for each chunk id ("0".."n-1") with concurrency limit
-  const CONCURRENCY = 10;
-  const parts = new Array(chunkCount);
-  let idx = 0;
-
-  const worker = async () => {
-    while (idx < chunkCount) {
-      const my = idx++;
-      try {
-        const snap = await getDoc(doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts, "chunks", String(my)));
-        const data = snap.exists() ? snap.data() : null;
-        if (data?.b) parts[my] = data.b.toUint8Array();
-      } catch {}
-    }
-  };
-  const workers = [];
-  for (let i = 0; i < CONCURRENCY; i++) workers.push(worker());
-  await Promise.all(workers);
-
-  const blob = new Blob(parts.filter(Boolean), { type: mimeType || "application/octet-stream" });
-  const url = URL.createObjectURL(blob);
-
-  if (cacheKey) {
-    __mediaCacheSet(cacheKey, url);
-    // fire-and-forget persist
-    __idbSet(cacheKey, blob, mimeType || null);
-  }
-  return url;
-}
 // ===== end cache helpers =====
 
 
