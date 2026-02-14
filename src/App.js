@@ -5558,6 +5558,7 @@ async function waitForMediaMetaComplete({ db2, appId2, parentPathParts, timeoutM
 
 
 async function downloadChunksToBlobUrlFast({ db2, appId2, parentPathParts, mimeType, cacheKey }) {
+  let chunkCount = null;
   // 1) memory cache
   if (cacheKey) {
     const mem = __mediaCacheGet(cacheKey);
