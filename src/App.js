@@ -203,41 +203,16 @@ const __cacheSet = (map, key, val, max = 60) => {
   }
 };
 const REACTION_EMOJIS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F525}"];
-const __turnUrlsRaw = (process.env.REACT_APP_TURN_URLS || "").trim();
-const __turnUser = (process.env.REACT_APP_TURN_USERNAME || "").trim();
-const __turnCred = (process.env.REACT_APP_TURN_CREDENTIAL || "").trim();
-const __turnUrls = __turnUrlsRaw ? __turnUrlsRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
-
 const rtcConfig = {
-  // ICE server list tuned for cross-network / symmetric NAT cases.
   iceServers: [
-    // Multiple STUN providers for resilience
-    { urls: [
-      "stun:stun.l.google.com:19302",
-      "stun:stun1.l.google.com:19302",
-      "stun:stun2.l.google.com:19302",
-      "stun:stun3.l.google.com:19302",
-      "stun:stun4.l.google.com:19302",
-      "stun:global.stun.twilio.com:3478",
-      "stun:stun.cloudflare.com:3478"
-    ] },
-    // TURN (required for many NAT/CGNAT / different Wi‑Fi environments).
-    // If you have your own TURN, set:
-    //   REACT_APP_TURN_URLS="turn:your.turn:3478?transport=udp,turn:your.turn:3478?transport=tcp"
-    //   REACT_APP_TURN_USERNAME="user"
-    //   REACT_APP_TURN_CREDENTIAL="pass"
-    ...(__turnUrls.length && __turnUser && __turnCred
-      ? [{ urls: __turnUrls, username: __turnUser, credential: __turnCred }]
-      : [
-          // Public relay (may have limits). Works out-of-the-box in many cases.
-          { urls: ["turn:openrelay.metered.ca:80"], username: "openrelayproject", credential: "openrelayproject" },
-          { urls: ["turn:openrelay.metered.ca:443"], username: "openrelayproject", credential: "openrelayproject" },
-          { urls: ["turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" }
-        ])
+    { urls: ["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302","stun:stun2.l.google.com:19302","stun:stun3.l.google.com:19302","stun:stun4.l.google.com:19302"] },
+    // TURN (NAT越え安定化). 公開リレーを使用（無料枠/制限がある場合あり）
+    { urls: ["turn:openrelay.metered.ca:80"], username: "openrelayproject", credential: "openrelayproject" },
+    { urls: ["turn:openrelay.metered.ca:443"], username: "openrelayproject", credential: "openrelayproject" },
+    { urls: ["turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" }
   ],
   iceCandidatePoolSize: 10,
-  bundlePolicy: "max-bundle",
-  rtcpMuxPolicy: "require"
+  bundlePolicy: "max-bundle"
 };
 
 // Optional custom TURN (より安定させたい場合): .env に以下を設定すると優先利用します。
@@ -896,32 +871,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       };
       pc.oniceconnectionstatechange = async () => {
         try {
-          
-const iceState = pc.iceConnectionState;
-          if (iceState === "disconnected") {
-            // Often happens on Wi‑Fi change / NAT rebinding. Try ICE restart quickly.
-            try { pc.restartIce?.(); } catch {}
-            if (isCaller) {
-              try {
-                const offer = await pc.createOffer({ iceRestart: true, offerToReceiveAudio: true, offerToReceiveVideo: !!isVideoEnabled });
-                await pc.setLocalDescription(offer);
-                await setDoc(
-                  signalingRef,
-                  {
-                    sessionId,
-                    callerId: callData?.callerId || user.uid,
-                    offerSdp: offer.sdp,
-                    offererId: user.uid,
-                    iceRestart: true,
-                    updatedAt: serverTimestamp()
-                  },
-                  { merge: true }
-                );
-              } catch (e) {
-                console.warn("ICE restart (disconnected) offer failed:", e);
-              }
-            }
-          }
+          const iceState = pc.iceConnectionState;
           if (iceState === "failed") {
             // Try ICE restart (helps on NAT changes / Wi-Fi switch)
             try {
@@ -6089,19 +6039,12 @@ var App_13_default = App;
 export {
   App_13_default as default
 };async function uploadFileToFirestoreChunks({ db2, appId2, parentPathParts, file, onProgress }) {
-  // parentPathParts: ["posts", postId] or ["chats", chatId, "messages", msgId]
+  // Upload file into Firestore "chunks" as Bytes. Uses batched writes to reduce network round trips.
   const total = file.size || 0;
   const chunkCount = Math.max(1, Math.ceil(total / CHUNK_SIZE_BYTES));
-  const executing = new Set();
-  let done = 0;
-
   const baseRef = doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts);
-  // mark meta
-  await updateDoc(baseRef, {
-    hasChunks: true,
-    chunkCount,
-    isUploading: true
-  }).catch(() => {});
+
+  await updateDoc(baseRef, { hasChunks: true, chunkCount, isUploading: true }).catch(() => {});
 
   const readChunk = (blob) =>
     new Promise((resolve, reject) => {
@@ -6111,38 +6054,32 @@ export {
       fr.readAsArrayBuffer(blob);
     });
 
-  for (let i = 0; i < chunkCount; i++) {
-    const start = i * CHUNK_SIZE_BYTES;
-    const end = Math.min(start + CHUNK_SIZE_BYTES, total);
-    const blob = file.slice(start, end);
-    const p = (async () => {
+  const BATCH_SIZE = 20; // 1 commit = 1 request (much faster than per-chunk setDoc)
+  let done = 0;
+  if (onProgress) onProgress(0);
+
+  for (let i = 0; i < chunkCount; i += BATCH_SIZE) {
+    const batch = writeBatch(db2);
+    const endI = Math.min(i + BATCH_SIZE, chunkCount);
+
+    for (let j = i; j < endI; j++) {
+      const start = j * CHUNK_SIZE_BYTES;
+      const end = Math.min(start + CHUNK_SIZE_BYTES, total);
+      const blob = file.slice(start, end);
       const buf = await readChunk(blob);
       const bytes = Bytes.fromUint8Array(new Uint8Array(buf));
-      await setDoc(
-        doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts, "chunks", `${i}`),
-        { b: bytes, index: i }
+      batch.set(
+        doc(db2, "artifacts", appId2, "public", "data", ...parentPathParts, "chunks", `${j}`),
+        { b: bytes, index: j }
       );
-    })();
-
-    const wrapped = p.then(() => {
-      executing.delete(wrapped);
-      done++;
-      if (onProgress) onProgress(Math.min(100, Math.floor((done / chunkCount) * 100)));
-    }).catch(() => {
-      executing.delete(wrapped);
-      done++;
-      if (onProgress) onProgress(Math.min(100, Math.floor((done / chunkCount) * 100)));
-    });
-
-    executing.add(wrapped);
-    if (executing.size >= MAX_PARALLEL_CHUNKS) {
-      await Promise.race(executing);
     }
-  }
-  await Promise.all(executing);
-  if (onProgress) onProgress(100);
 
-  // finalize
+    await batch.commit();
+    done = endI;
+    if (onProgress) onProgress(Math.min(100, Math.floor((done / chunkCount) * 100)));
+  }
+
+  if (onProgress) onProgress(100);
   await updateDoc(baseRef, { isUploading: false }).catch(() => {});
   return { chunkCount };
 }
