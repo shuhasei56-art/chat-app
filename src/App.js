@@ -129,6 +129,26 @@ const rtcConfig = {
   iceCandidatePoolSize: 10,
   bundlePolicy: "max-bundle"
 };
+
+// Optional TURN support:
+// If you provide TURN servers, set localStorage key "turnServers" to a JSON array of RTCIceServer objects.
+// Example:
+// localStorage.setItem("turnServers", JSON.stringify([{ urls: ["turn:turn.example.com:3478"], username:"u", credential:"p" }]));
+const getRtcConfig = () => {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const raw = window.localStorage.getItem("turnServers");
+      if (raw) {
+        const extra = JSON.parse(raw);
+        if (Array.isArray(extra) && extra.length) {
+          return { ...rtcConfig, iceServers: [...rtcConfig.iceServers, ...extra] };
+        }
+      }
+    }
+  } catch {
+  }
+  return rtcConfig;
+};
 const formatTime = (timestamp) => {
   if (!timestamp) return "";
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -587,13 +607,102 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const localStreamRef = useRef(null);
   const remoteStreamRef = useRef(new MediaStream());
   const unsubscribersRef = useRef([]);
+  const signalingRefRef = useRef(null);
   const pendingCandidatesRef = useRef([]);
   const disconnectTimerRef = useRef(null);
   const isMountedRef = useRef(true);
   const startedRef = useRef(false);
+  // Reconnect / renegotiation state (for long calls & Wi‑Fi changes)
+  const offerRevRef = useRef(0);
+  const lastOfferRevSeenRef = useRef(0);
+  const lastAnswerRevSeenRef = useRef(0);
+  const lastRestartRequestSeenRef = useRef(0);
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectDeadlineRef = useRef(0);
+  const reconnectInFlightRef = useRef(false);
   const hasRemoteVideoTrackRef = useRef(false);
   const sessionId = callData?.sessionId || "";
-  const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData?.callerId === user.uid;
+  const isCaller = typeof isCallerProp === "boolean" ? isCaller
+  const tryStartReconnect = useCallback(
+    async (reason) => {
+      const pc = pcRef.current;
+      const signalingRef = signalingRefRef.current;
+      if (!pc || !signalingRef || !user?.uid || !sessionId) return;
+      // avoid spamming renegotiation
+      if (reconnectInFlightRef.current) return;
+      const now = Date.now();
+      if (!reconnectDeadlineRef.current) {
+        reconnectDeadlineRef.current = now + 6e4; // 60s recovery window
+        reconnectAttemptsRef.current = 0;
+      }
+      if (now > reconnectDeadlineRef.current) return;
+
+      reconnectInFlightRef.current = true;
+      reconnectAttemptsRef.current += 1;
+      try {
+        if (isCaller) {
+          // Caller performs ICE restart offer
+          if (typeof pc.restartIce === "function") {
+            try {
+              pc.restartIce();
+            } catch {
+            }
+          }
+          const nextOfferRev = (offerRevRef.current || 0) + 1;
+          offerRevRef.current = nextOfferRev;
+          const offer = await pc.createOffer({
+            iceRestart: true,
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: !!isVideoEnabled
+          });
+          await pc.setLocalDescription(offer);
+          offerRevRef.current = 1;
+          await setDoc(
+            signalingRef,
+            {
+              sessionId,
+              offerSdp: offer.sdp,
+              offerRev: nextOfferRev,
+              offererId: user.uid,
+              // clear restart request once handled
+              restartRequestedAt: deleteField(),
+              restartRequestedBy: deleteField(),
+              updatedAt: serverTimestamp()
+            },
+            { merge: true }
+          );
+        } else {
+          // Callee asks caller to restart ICE (prevents glare)
+          await setDoc(
+            signalingRef,
+            {
+              sessionId,
+              restartRequestedAt: serverTimestamp(),
+              restartRequestedBy: user.uid,
+              updatedAt: serverTimestamp()
+            },
+            { merge: true }
+          );
+        }
+      } catch (e) {
+        console.warn("Reconnect attempt failed:", reason, e);
+      } finally {
+        // allow another attempt after a short delay (if still not connected)
+        setTimeout(() => {
+          reconnectInFlightRef.current = false;
+          const pc2 = pcRef.current;
+          if (!pc2) return;
+          if (pc2.connectionState !== "connected" && Date.now() < reconnectDeadlineRef.current) {
+            if (reconnectAttemptsRef.current < 6) {
+              tryStartReconnect("retry");
+            }
+          }
+        }, 2500);
+      }
+    },
+    [user?.uid, sessionId, isCaller, isVideoEnabled]
+  );
+Prop : callData?.callerId === user.uid;
   const getFilterStyle = (effectName) => {
     if (!effectName || effectName === "Normal") return "none";
     const sanitizeFilter = (filterValue) => {
@@ -751,6 +860,16 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   }, []);
   useEffect(() => {
     let cancelled = false;
+    const handleOnline = () => {
+      // Network came back (or changed). Try to recover the call.
+      tryStartReconnect("online");
+    };
+    const handleOffline = () => {
+      // Don't end immediately; user may be switching Wi‑Fi.
+      setCallError("ネットワークがオフラインです。復帰を待っています…");
+    };
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
     const run = async () => {
       if (!chatId || !user?.uid) return;
       if (startedRef.current) return;
@@ -766,31 +885,57 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         return;
       }
       const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
+      signalingRefRef.current = signalingRef;
       const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
-      const pc = new RTCPeerConnection(rtcConfig);
+      const pc = new RTCPeerConnection(getRtcConfig());
       pcRef.current = pc;
       pc.onconnectionstatechange = () => {
         const state = pc.connectionState;
         if (state === "connected") {
+          reconnectAttemptsRef.current = 0;
+          reconnectInFlightRef.current = false;
+          reconnectDeadlineRef.current = 0;
           if (disconnectTimerRef.current) {
             clearTimeout(disconnectTimerRef.current);
             disconnectTimerRef.current = null;
           }
           return;
         }
-        if (state === "disconnected") {
+        // "disconnected" can happen during Wi‑Fi switching; try to recover before ending the call.
+        if (state === "disconnected" || state === "connecting") {
           if (disconnectTimerRef.current) return;
+          // allow up to 60s for network to come back / ICE restart to succeed
           disconnectTimerRef.current = setTimeout(() => {
             disconnectTimerRef.current = null;
-            if (!pcRef.current || pcRef.current.connectionState === "connected") return;
-            setCallError("\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
-            safeEndCall(1200);
-          }, 5e3);
+            if (!pcRef.current) return;
+            const s = pcRef.current.connectionState;
+            if (s === "connected") return;
+            setCallError("接続が不安定です。通信環境を確認してください。");
+            safeEndCall(1500);
+          }, 6e4);
+          // kick a reconnect attempt quickly (caller renegotiates / callee requests restart)
+          tryStartReconnect("connectionstate:" + state);
           return;
         }
-        if (state === "failed" || state === "closed") {
-          setCallError("\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
+        if (state === "failed") {
+          tryStartReconnect("connectionstate:failed");
+          // if it still doesn't recover within the 60s timer, it will end
+          return;
+        }
+        if (state === "closed") {
+          setCallError("接続が切断されました。");
           safeEndCall(1200);
+        }
+      };
+      pc.oniceconnectionstatechange = () => {
+        const ice = pc.iceConnectionState;
+        if (ice === "connected" || ice === "completed") {
+          reconnectAttemptsRef.current = 0;
+          reconnectInFlightRef.current = false;
+          return;
+        }
+        if (ice === "disconnected" || ice === "failed") {
+          tryStartReconnect("ice:" + ice);
         }
       };
       pc.ontrack = async (event) => {
@@ -892,30 +1037,51 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       }
       const unsubSignal = onSnapshot(signalingRef, async (snap) => {
         if (!pcRef.current) return;
+        const pc = pcRef.current;
         const data = snap.data();
         if (!data || data.sessionId !== sessionId) return;
+
+        // If callee requested an ICE restart, caller should renegotiate.
+        if (isCaller && data.restartRequestedAt) {
+          const ts = typeof data.restartRequestedAt?.toMillis === "function" ? data.restartRequestedAt.toMillis() : 0;
+          if (ts && ts > (lastRestartRequestSeenRef.current || 0)) {
+            lastRestartRequestSeenRef.current = ts;
+            tryStartReconnect("restart-request");
+          }
+        }
+
         try {
           if (isCaller) {
-            if (!pc.currentRemoteDescription && data.answerSdp) {
-              await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: data.answerSdp }));
-              await flushPendingCandidates(pc);
+            if (data.answerSdp) {
+              const ansRev = data.answerRev || data.offerRev || 1;
+              if (ansRev > (lastAnswerRevSeenRef.current || 0) && pc.signalingState === "have-local-offer") {
+                lastAnswerRevSeenRef.current = ansRev;
+                await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: data.answerSdp }));
+                await flushPendingCandidates(pc);
+              }
             }
           } else {
-            if (!pc.currentRemoteDescription && data.offerSdp) {
-              await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: data.offerSdp }));
-              await flushPendingCandidates(pc);
-              const answer = await pc.createAnswer();
-              await pc.setLocalDescription(answer);
-              await setDoc(
-                signalingRef,
-                {
-                  sessionId,
-                  answerSdp: answer.sdp,
-                  answererId: user.uid,
-                  updatedAt: serverTimestamp()
-                },
-                { merge: true }
-              );
+            if (data.offerSdp) {
+              const offerRev = data.offerRev || 1;
+              // Apply newer offers (supports ICE restart / renegotiation)
+              if (offerRev > (lastOfferRevSeenRef.current || 0) && (pc.signalingState === "stable" || pc.signalingState === "have-remote-offer")) {
+                lastOfferRevSeenRef.current = offerRev;
+                await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: data.offerSdp }));
+                await flushPendingCandidates(pc);
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                await setDoc(
+                  signalingRef,
+                  {
+                    sessionId,
+                    answerSdp: answer.sdp,
+                    answerRev: offerRev,
+                    answererId: user.uid,
+                    updatedAt: serverTimestamp()
+                  },
+                  { merge: true }
+                );
+              }
             }
           }
         } catch (e) {
@@ -969,6 +1135,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     run();
     return () => {
       cancelled = true;
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
       cleanup();
       startedRef.current = false;
     };
@@ -1150,16 +1318,14 @@ const toggleScreenShare = async () => {
         /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
         "\u97F3\u58F0\u3092\u518D\u751F"
             ] }),
-
+      /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: !isVideoEnabled || isVideoOff || isScreenSharing, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff || isScreenSharing ? "bg-gray-700/50 text-white/50" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
+      /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: !isVideoEnabled || isVideoOff, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff ? "bg-gray-700/50 text-white/50" : isScreenSharing ? "bg-green-500 text-white hover:bg-green-600" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: isScreenSharing ? /* @__PURE__ */ jsx(ScreenShareOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(ScreenShare, { className: "w-6 h-6" }) }),
       isVideoEnabled && /* @__PURE__ */ jsxs("div", { className: "absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg transition-all", children: [
         /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover transform scale-x-[-1]", style: { filter: getFilterStyle(activeEffect) } }),
         activeEffect && activeEffect !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/50 text-white text-[8px] px-1 rounded", children: activeEffect })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-6 pb-6 backdrop-blur-lg", children: [
-
-      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: !isVideoEnabled || isVideoOff, className: `p-4 rounded-full transition-all ${!isVideoEnabled || isVideoOff ? "bg-gray-700/50 text-white/50" : isScreenSharing ? "bg-green-500 text-white hover:bg-green-600" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isScreenSharing ? /* @__PURE__ */ jsx(ScreenShareOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(ScreenShare, { className: "w-6 h-6" }) }),
-      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: !isVideoEnabled || isVideoOff || isScreenSharing, className: `p-4 rounded-full transition-all ${!isVideoEnabled || isVideoOff || isScreenSharing ? "bg-gray-700/50 text-white/50" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
+    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-8 pb-6 backdrop-blur-lg", children: [
       /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `p-4 rounded-full transition-all ${isMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
       /* @__PURE__ */ jsxs("button", { onClick: onEndCall, className: "p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
         /* @__PURE__ */ jsx(PhoneOff, { className: "w-8 h-8" }),
@@ -1296,7 +1462,7 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   const ensurePeer = useCallback((remoteUid) => {
     if (!remoteUid || remoteUid === user.uid) return;
     if (pcsRef.current.has(remoteUid)) return;
-    const pc = new RTCPeerConnection(rtcConfig);
+    const pc = new RTCPeerConnection(getRtcConfig());
     pcsRef.current.set(remoteUid, pc);
 
     const remoteStream = new MediaStream();
@@ -3939,7 +4105,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       const fileData = file ? { fileName: file.name, fileSize: file.size, mimeType: file.type } : {};
       const currentChat = chats.find((c) => c.id === activeChatId);
       const updateData = {
-        lastMessage: { messageId: newMsgRef.id, type, content: type === "text" ? content : `[${type}]`, senderId: user.uid, readBy: [user.uid] },
+        lastMessage: { content: type === "text" ? content : `[${type}]`, senderId: user.uid, readBy: [user.uid] },
         updatedAt: serverTimestamp()
       };
       if (currentChat) {
@@ -4036,74 +4202,14 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   };
   const handleDeleteMessage = useCallback(async (msgId) => {
     try {
-      const msgRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId);
-      const msgSnap = await getDoc(msgRef);
-      const msgData = msgSnap.exists() ? msgSnap.data() : null;
-      const readBy = Array.isArray(msgData?.readBy) ? msgData.readBy : [];
-      const senderId = msgData?.senderId || null;
-
-      // Delete message document + any chunk subdocs
-      await deleteDoc(msgRef);
-      const chunksSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId, "chunks"));
-      for (const d of chunksSnap.docs) await deleteDoc(d.ref);
-
-      // If the deleted message was unread for some participants, decrement their unreadCounts
-      const chatRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId);
-      await runTransaction(db2, async (tx) => {
-        const chatSnap = await tx.get(chatRef);
-        if (!chatSnap.exists()) return;
-        const chat = chatSnap.data();
-        const participants = Array.isArray(chat?.participants) ? chat.participants : [];
-        const unreadCounts = chat?.unreadCounts || {};
-        const patch = {};
-
-        if (senderId) {
-          participants.forEach((uid) => {
-            if (!uid) return;
-            if (uid === senderId) return;
-            if (readBy.includes(uid)) return;
-            const cur = typeof unreadCounts?.[uid] === "number" ? unreadCounts[uid] : 0;
-            patch[`unreadCounts.${uid}`] = Math.max(0, cur - 1);
-          });
-        }
-
-        if (Object.keys(patch).length > 0) tx.update(chatRef, patch);
-      });
-
-      // If the deleted message was the lastMessage, refresh lastMessage to the newest remaining message.
-      try {
-        const chatSnapNow = await getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId));
-        const lastMessageId = chatSnapNow.exists() ? chatSnapNow.data()?.lastMessage?.messageId : null;
-        if (lastMessageId === msgId) {
-          const msgCol = collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages");
-          const latest = await getDocs(query(msgCol, orderBy("createdAt", "desc"), limit(1)));
-          if (!latest.empty) {
-            const d = latest.docs[0];
-            const lm = d.data();
-            await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), {
-              lastMessage: {
-                messageId: d.id,
-                type: lm?.type || "text",
-                content: lm?.type === "text" ? (lm?.content || "") : `[${lm?.type || "text"}]`,
-                senderId: lm?.senderId || "",
-                readBy: Array.isArray(lm?.readBy) ? lm.readBy : []
-              }
-            });
-          } else {
-            await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), {
-              lastMessage: { messageId: "", type: "text", content: "", senderId: "", readBy: [user.uid] }
-            });
-          }
-        }
-      } catch (e2) {
-        console.warn("Failed to refresh lastMessage after delete:", e2);
-      }
-
-      showNotification("メッセージの送信を取り消しました");
+      await deleteDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId));
+      const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId, "chunks"));
+      for (const d of c.docs) await deleteDoc(d.ref);
+      showNotification("\u30E1\u30C3\u30BB\u30FC\u30B8\u306E\u9001\u4FE1\u3092\u53D6\u308A\u6D88\u3057\u307E\u3057\u305F");
     } catch (e) {
-      showNotification("送信取消に失敗しました");
+      showNotification("\u9001\u4FE1\u53D6\u6D88\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
     }
-  }, [db2, appId2, activeChatId, showNotification, user.uid]);
+  }, [db2, appId2, activeChatId, showNotification]);
   const handleEditMessage = useCallback((id, content) => {
     setEditingMsgId(id);
     setEditingText(content);
@@ -4658,7 +4764,7 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
   }, [profile]);
   const handleSave = () => {
     updateDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), edit);
-    try { if (user?.isAnonymous) { localStorage.setItem("guestProfile", JSON.stringify(edit)); localStorage.setItem("lastGuestUid", user.uid); } } catch { }
+    try { if (user?.isAnonymous) localStorage.setItem("guestProfile", JSON.stringify(edit)); } catch { }
     showNotification("\u4FDD\u5B58\u3057\u307E\u3057\u305F \u2705");
   };
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-white", children: [
@@ -4703,7 +4809,7 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
             /* @__PURE__ */ jsx("input", { className: "w-full border-b py-2 outline-none", value: edit.status || "", onChange: (e) => setEdit({ ...edit, status: e.target.value }) })
           ] }),
           /* @__PURE__ */ jsx("button", { onClick: handleSave, className: "w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg", children: "\u4FDD\u5B58" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => { try { if (user?.isAnonymous) { localStorage.setItem("guestProfile", JSON.stringify(edit)); localStorage.setItem("lastGuestUid", user.uid); } } catch { } signOut(auth); }, className: "w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4", children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })
+          /* @__PURE__ */ jsx("button", { onClick: () => { try { if (user?.isAnonymous) localStorage.setItem("guestProfile", JSON.stringify(edit)); } catch { } signOut(auth); }, className: "w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4", children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })
         ] })
       ] })
     ] })
@@ -5191,8 +5297,6 @@ function App() {
   const postsCursorRef = useRef(null);
   const POSTS_PAGE_SIZE = 5;
 
-  const [voomHasUnread, setVoomHasUnread] = useState(false);
-
   const [notification, setNotification] = useState(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -5236,52 +5340,31 @@ function App() {
         const docSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid));
         if (docSnap.exists()) {
           setProfile(docSnap.data());
-          if (u.isAnonymous) {
-            try { localStorage.setItem("lastGuestUid", u.uid); } catch { }
-          }
         } else {
-
-          let savedGuest = null;
-          let savedGuestFromFirestore = null;
+                    let savedGuest = null;
           if (u.isAnonymous) {
-            // Recover the previous guest profile from Firestore (more reliable than localStorage when images are large).
-            let lastGuestUid = null;
-            try { lastGuestUid = localStorage.getItem("lastGuestUid"); } catch { lastGuestUid = null; }
-            if (lastGuestUid && lastGuestUid !== u.uid) {
-              try {
-                const prevSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "users", lastGuestUid));
-                if (prevSnap.exists()) savedGuestFromFirestore = prevSnap.data();
-              } catch {
-                savedGuestFromFirestore = null;
-              }
-            }
-            // Fallback: localStorage snapshot
             try {
               savedGuest = JSON.parse(localStorage.getItem("guestProfile") || "null");
             } catch {
               savedGuest = null;
             }
           }
-          const baseGuest = savedGuestFromFirestore || savedGuest;
           const initialProfile = {
             uid: u.uid,
-            name: baseGuest?.name || u.displayName || `User_${u.uid.slice(0, 4)}`,
-            id: baseGuest?.id || `user_${u.uid.slice(0, 6)}`,
-            status: baseGuest?.status || "よろしくお願いします！",
-            birthday: baseGuest?.birthday || "",
-            avatar: baseGuest?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
-            cover: baseGuest?.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
-            friends: Array.isArray(baseGuest?.friends) ? baseGuest.friends : [],
-            hiddenFriends: Array.isArray(baseGuest?.hiddenFriends) ? baseGuest.hiddenFriends : [],
-            hiddenChats: Array.isArray(baseGuest?.hiddenChats) ? baseGuest.hiddenChats : [],
-            wallet: typeof baseGuest?.wallet === "number" ? baseGuest.wallet : 1e3,
+            name: savedGuest?.name || u.displayName || `User_${u.uid.slice(0, 4)}`,
+            id: savedGuest?.id || `user_${u.uid.slice(0, 6)}`,
+            status: savedGuest?.status || "よろしくお願いします！",
+            birthday: savedGuest?.birthday || "",
+            avatar: savedGuest?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
+            cover: savedGuest?.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
+            friends: Array.isArray(savedGuest?.friends) ? savedGuest.friends : [],
+            hiddenFriends: Array.isArray(savedGuest?.hiddenFriends) ? savedGuest.hiddenFriends : [],
+            hiddenChats: Array.isArray(savedGuest?.hiddenChats) ? savedGuest.hiddenChats : [],
+            wallet: typeof savedGuest?.wallet === "number" ? savedGuest.wallet : 1e3,
             isBanned: false
           };
           await setDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid), initialProfile);
           setProfile(initialProfile);
-          if (u.isAnonymous) {
-            try { localStorage.setItem("lastGuestUid", u.uid); } catch { }
-          }
         }
         setView("home");
       } else {
@@ -5302,49 +5385,8 @@ function App() {
   };
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
-    showNotification("IDをコピーしました");
+    showNotification("ID\u3092\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F");
   };
-
-  // VOOM: 未閲覧の新規投稿があればタブに「1」を表示
-  useEffect(() => {
-    if (!user?.uid) {
-      setVoomHasUnread(false);
-      return;
-    }
-    const key = `voomLastSeen_${user.uid}`;
-    const safeGetLastSeen = () => {
-      try {
-        const v = parseInt(localStorage.getItem(key) || "0", 10);
-        return Number.isFinite(v) ? v : 0;
-      } catch {
-        return 0;
-      }
-    };
-    const safeSetLastSeenNow = () => {
-      try {
-        localStorage.setItem(key, String(Date.now()));
-      } catch {
-      }
-    };
-
-    if (view === "voom") {
-      safeSetLastSeenNow();
-      setVoomHasUnread(false);
-      return;
-    }
-
-    const latest = (posts || []).find((p) => !p?.isDeleted);
-    if (!latest) {
-      setVoomHasUnread(false);
-      return;
-    }
-    const latestMs = latest.createdAt?.toMillis ? latest.createdAt.toMillis() : latest.createdAt?.seconds ? latest.createdAt.seconds * 1e3 : 0;
-    const lastSeenMs = safeGetLastSeen();
-
-    // 自分の投稿は未閲覧バッジ対象外（必要ならこの条件を外してください）
-    const hasUnread = latestMs > lastSeenMs && latest.userId !== user.uid;
-    setVoomHasUnread(hasUnread);
-  }, [user?.uid, view, posts]);
 
 const loadMorePosts = async () => {
   if (!user) return;
@@ -5877,7 +5919,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
         ] }),
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "voom" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("voom"), children: [
           /* @__PURE__ */ jsx(LayoutGrid, { className: "w-6 h-6" }),
-          /* @__PURE__ */ jsxs("span", { className: "text-[10px] font-bold", children: ["VOOM", voomHasUnread && view !== "voom" ? /* @__PURE__ */ jsx("span", { className: "ml-1 inline-flex items-center justify-center bg-red-500 text-white text-[10px] font-black w-4 h-4 rounded-full", children: "1" }) : null] })
+          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "VOOM" })
         ] })
       ] })
     ] }),
