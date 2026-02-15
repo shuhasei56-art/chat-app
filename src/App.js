@@ -2458,17 +2458,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const localPreviewClass = "absolute top-5 right-5 w-[128px] sm:w-[152px] h-[214px] sm:h-[256px] rounded-[18px] overflow-hidden border-[3px] border-white/90 shadow-[0_0_0_1px_rgba(255,255,255,0.2)] bg-black";
   const effectChipNames = ["Normal", ...((effects || []).map((ef) => ef?.name).filter(Boolean))].slice(0, 5);
   const callUiScale = 0.6;
-  const effectLabelMap = {
-    Normal: "\u901A\u5E38",
-    Invert: "\u53CD\u8EE2",
-    Contrast: "\u30B3\u30F3\u30C8\u30E9\u30B9\u30C8",
-    Grayscale: "\u30B0\u30EC\u30FC\u30B9\u30B1\u30FC\u30EB",
-    Sepia: "\u30BB\u30D4\u30A2",
-    Bright: "\u660E\u308B\u3044",
-    Blur: "\u307C\u304B\u3057",
-    Hue: "\u8272\u76F8"
-  };
-  const toJapaneseEffectLabel = (name) => effectLabelMap[name] || name;
   if (callError) {
     return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center text-white flex-col gap-4", children: [
       /* @__PURE__ */ jsx(AlertCircle, { className: "w-16 h-16 text-red-500" }),
@@ -2503,10 +2492,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         (!isVideoEnabled || isVideoOff) && /* @__PURE__ */ jsx("div", { className: "absolute inset-0 w-full h-full text-white flex items-center justify-center bg-black/60 backdrop-blur-sm", children: /* @__PURE__ */ jsx(VideoOff, { className: "w-7 h-7 opacity-80" }) })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 sm:gap-2 max-w-[80vw] overflow-x-auto px-1", style: { transform: `scale(${callUiScale})`, transformOrigin: "top center" }, children: [
-        effectChipNames.map((name) => {
-          const label = toJapaneseEffectLabel(name);
-          return /* @__PURE__ */ jsx("button", { className: `whitespace-nowrap px-3 sm:px-4 py-1.5 rounded-[16px] text-xs sm:text-base font-black transition-colors ${name === activeEffect ? "bg-white text-black" : "bg-transparent text-white/95 hover:text-white"}`, children: name === activeEffect ? label : `* ${label}` }, name);
-        }),
+        effectChipNames.map((name) => /* @__PURE__ */ jsx("button", { className: `whitespace-nowrap px-3 sm:px-4 py-1.5 rounded-[16px] text-xs sm:text-base font-black transition-colors ${name === activeEffect ? "bg-white text-black" : "bg-transparent text-white/95 hover:text-white"}`, children: name === activeEffect ? name : `* ${name}` }, name)),
         /* @__PURE__ */ jsx("div", { className: "whitespace-nowrap bg-black/55 text-white text-xs font-black px-3 py-1.5 rounded-full backdrop-blur-md", children: formatCallDuration(callDurationSec) }),
         isRecordingCall && /* @__PURE__ */ jsxs("div", { className: "whitespace-nowrap bg-red-600/90 text-white text-xs font-black px-3 py-1.5 rounded-full backdrop-blur-md flex items-center gap-1", children: [
           /* @__PURE__ */ jsx(Disc, { className: "w-3 h-3 animate-pulse" }),
