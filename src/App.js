@@ -4658,7 +4658,7 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
   }, [profile]);
   const handleSave = () => {
     updateDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), edit);
-    try { if (user?.isAnonymous) localStorage.setItem("guestProfile", JSON.stringify(edit)); } catch { }
+    try { if (user?.isAnonymous) { localStorage.setItem("guestProfile", JSON.stringify(edit)); localStorage.setItem("lastGuestUid", user.uid); } } catch { }
     showNotification("\u4FDD\u5B58\u3057\u307E\u3057\u305F \u2705");
   };
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-white", children: [
@@ -4703,7 +4703,7 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
             /* @__PURE__ */ jsx("input", { className: "w-full border-b py-2 outline-none", value: edit.status || "", onChange: (e) => setEdit({ ...edit, status: e.target.value }) })
           ] }),
           /* @__PURE__ */ jsx("button", { onClick: handleSave, className: "w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg", children: "\u4FDD\u5B58" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => { try { if (user?.isAnonymous) localStorage.setItem("guestProfile", JSON.stringify(edit)); } catch { } signOut(auth); }, className: "w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4", children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })
+          /* @__PURE__ */ jsx("button", { onClick: () => { try { if (user?.isAnonymous) { localStorage.setItem("guestProfile", JSON.stringify(edit)); localStorage.setItem("lastGuestUid", user.uid); } } catch { } signOut(auth); }, className: "w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4", children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })
         ] })
       ] })
     ] })
@@ -5236,31 +5236,52 @@ function App() {
         const docSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid));
         if (docSnap.exists()) {
           setProfile(docSnap.data());
-        } else {
-                    let savedGuest = null;
           if (u.isAnonymous) {
+            try { localStorage.setItem("lastGuestUid", u.uid); } catch { }
+          }
+        } else {
+
+          let savedGuest = null;
+          let savedGuestFromFirestore = null;
+          if (u.isAnonymous) {
+            // Recover the previous guest profile from Firestore (more reliable than localStorage when images are large).
+            let lastGuestUid = null;
+            try { lastGuestUid = localStorage.getItem("lastGuestUid"); } catch { lastGuestUid = null; }
+            if (lastGuestUid && lastGuestUid !== u.uid) {
+              try {
+                const prevSnap = await getDoc(doc(db, "artifacts", appId, "public", "data", "users", lastGuestUid));
+                if (prevSnap.exists()) savedGuestFromFirestore = prevSnap.data();
+              } catch {
+                savedGuestFromFirestore = null;
+              }
+            }
+            // Fallback: localStorage snapshot
             try {
               savedGuest = JSON.parse(localStorage.getItem("guestProfile") || "null");
             } catch {
               savedGuest = null;
             }
           }
+          const baseGuest = savedGuestFromFirestore || savedGuest;
           const initialProfile = {
             uid: u.uid,
-            name: savedGuest?.name || u.displayName || `User_${u.uid.slice(0, 4)}`,
-            id: savedGuest?.id || `user_${u.uid.slice(0, 6)}`,
-            status: savedGuest?.status || "よろしくお願いします！",
-            birthday: savedGuest?.birthday || "",
-            avatar: savedGuest?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
-            cover: savedGuest?.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
-            friends: Array.isArray(savedGuest?.friends) ? savedGuest.friends : [],
-            hiddenFriends: Array.isArray(savedGuest?.hiddenFriends) ? savedGuest.hiddenFriends : [],
-            hiddenChats: Array.isArray(savedGuest?.hiddenChats) ? savedGuest.hiddenChats : [],
-            wallet: typeof savedGuest?.wallet === "number" ? savedGuest.wallet : 1e3,
+            name: baseGuest?.name || u.displayName || `User_${u.uid.slice(0, 4)}`,
+            id: baseGuest?.id || `user_${u.uid.slice(0, 6)}`,
+            status: baseGuest?.status || "よろしくお願いします！",
+            birthday: baseGuest?.birthday || "",
+            avatar: baseGuest?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
+            cover: baseGuest?.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
+            friends: Array.isArray(baseGuest?.friends) ? baseGuest.friends : [],
+            hiddenFriends: Array.isArray(baseGuest?.hiddenFriends) ? baseGuest.hiddenFriends : [],
+            hiddenChats: Array.isArray(baseGuest?.hiddenChats) ? baseGuest.hiddenChats : [],
+            wallet: typeof baseGuest?.wallet === "number" ? baseGuest.wallet : 1e3,
             isBanned: false
           };
           await setDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid), initialProfile);
           setProfile(initialProfile);
+          if (u.isAnonymous) {
+            try { localStorage.setItem("lastGuestUid", u.uid); } catch { }
+          }
         }
         setView("home");
       } else {
