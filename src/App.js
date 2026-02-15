@@ -129,26 +129,6 @@ const rtcConfig = {
   iceCandidatePoolSize: 10,
   bundlePolicy: "max-bundle"
 };
-
-// Optional TURN support:
-// If you provide TURN servers, set localStorage key "turnServers" to a JSON array of RTCIceServer objects.
-// Example:
-// localStorage.setItem("turnServers", JSON.stringify([{ urls: ["turn:turn.example.com:3478"], username:"u", credential:"p" }]));
-const getRtcConfig = () => {
-  try {
-    if (typeof window !== "undefined" && window.localStorage) {
-      const raw = window.localStorage.getItem("turnServers");
-      if (raw) {
-        const extra = JSON.parse(raw);
-        if (Array.isArray(extra) && extra.length) {
-          return { ...rtcConfig, iceServers: [...rtcConfig.iceServers, ...extra] };
-        }
-      }
-    }
-  } catch {
-  }
-  return rtcConfig;
-};
 const formatTime = (timestamp) => {
   if (!timestamp) return "";
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -607,101 +587,13 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const localStreamRef = useRef(null);
   const remoteStreamRef = useRef(new MediaStream());
   const unsubscribersRef = useRef([]);
-  const signalingRefRef = useRef(null);
   const pendingCandidatesRef = useRef([]);
   const disconnectTimerRef = useRef(null);
   const isMountedRef = useRef(true);
   const startedRef = useRef(false);
-  // Reconnect / renegotiation state (for long calls & Wi‑Fi changes)
-  const offerRevRef = useRef(0);
-  const lastOfferRevSeenRef = useRef(0);
-  const lastAnswerRevSeenRef = useRef(0);
-  const lastRestartRequestSeenRef = useRef(0);
-  const reconnectAttemptsRef = useRef(0);
-  const reconnectDeadlineRef = useRef(0);
-  const reconnectInFlightRef = useRef(false);
   const hasRemoteVideoTrackRef = useRef(false);
   const sessionId = callData?.sessionId || "";
   const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData?.callerId === user.uid;
-  const tryStartReconnect = useCallback(
-    async (reason) => {
-      const pc = pcRef.current;
-      const signalingRef = signalingRefRef.current;
-      if (!pc || !signalingRef || !user?.uid || !sessionId) return;
-      // avoid spamming renegotiation
-      if (reconnectInFlightRef.current) return;
-      const now = Date.now();
-      if (!reconnectDeadlineRef.current) {
-        reconnectDeadlineRef.current = now + 6e4; // 60s recovery window
-        reconnectAttemptsRef.current = 0;
-      }
-      if (now > reconnectDeadlineRef.current) return;
-
-      reconnectInFlightRef.current = true;
-      reconnectAttemptsRef.current += 1;
-      try {
-        if (isCaller) {
-          // Caller performs ICE restart offer
-          if (typeof pc.restartIce === "function") {
-            try {
-              pc.restartIce();
-            } catch {
-            }
-          }
-          const nextOfferRev = (offerRevRef.current || 0) + 1;
-          offerRevRef.current = nextOfferRev;
-          const offer = await pc.createOffer({
-            iceRestart: true,
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: !!isVideoEnabled
-          });
-          await pc.setLocalDescription(offer);
-          offerRevRef.current = 1;
-          await setDoc(
-            signalingRef,
-            {
-              sessionId,
-              offerSdp: offer.sdp,
-              offerRev: nextOfferRev,
-              offererId: user.uid,
-              // clear restart request once handled
-              restartRequestedAt: deleteField(),
-              restartRequestedBy: deleteField(),
-              updatedAt: serverTimestamp()
-            },
-            { merge: true }
-          );
-        } else {
-          // Callee asks caller to restart ICE (prevents glare)
-          await setDoc(
-            signalingRef,
-            {
-              sessionId,
-              restartRequestedAt: serverTimestamp(),
-              restartRequestedBy: user.uid,
-              updatedAt: serverTimestamp()
-            },
-            { merge: true }
-          );
-        }
-      } catch (e) {
-        console.warn("Reconnect attempt failed:", reason, e);
-      } finally {
-        // allow another attempt after a short delay (if still not connected)
-        setTimeout(() => {
-          reconnectInFlightRef.current = false;
-          const pc2 = pcRef.current;
-          if (!pc2) return;
-          if (pc2.connectionState !== "connected" && Date.now() < reconnectDeadlineRef.current) {
-            if (reconnectAttemptsRef.current < 6) {
-              tryStartReconnect("retry");
-            }
-          }
-        }, 2500);
-      }
-    },
-    [user?.uid, sessionId, isCaller, isVideoEnabled]
-  );
   const getFilterStyle = (effectName) => {
     if (!effectName || effectName === "Normal") return "none";
     const sanitizeFilter = (filterValue) => {
@@ -859,16 +751,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   }, []);
   useEffect(() => {
     let cancelled = false;
-    const handleOnline = () => {
-      // Network came back (or changed). Try to recover the call.
-      tryStartReconnect("online");
-    };
-    const handleOffline = () => {
-      // Don't end immediately; user may be switching Wi‑Fi.
-      setCallError("ネットワークがオフラインです。復帰を待っています…");
-    };
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
     const run = async () => {
       if (!chatId || !user?.uid) return;
       if (startedRef.current) return;
@@ -884,57 +766,31 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         return;
       }
       const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "session");
-      signalingRefRef.current = signalingRef;
       const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_signaling", "candidates", "list");
-      const pc = new RTCPeerConnection(getRtcConfig());
+      const pc = new RTCPeerConnection(rtcConfig);
       pcRef.current = pc;
       pc.onconnectionstatechange = () => {
         const state = pc.connectionState;
         if (state === "connected") {
-          reconnectAttemptsRef.current = 0;
-          reconnectInFlightRef.current = false;
-          reconnectDeadlineRef.current = 0;
           if (disconnectTimerRef.current) {
             clearTimeout(disconnectTimerRef.current);
             disconnectTimerRef.current = null;
           }
           return;
         }
-        // "disconnected" can happen during Wi‑Fi switching; try to recover before ending the call.
-        if (state === "disconnected" || state === "connecting") {
+        if (state === "disconnected") {
           if (disconnectTimerRef.current) return;
-          // allow up to 60s for network to come back / ICE restart to succeed
           disconnectTimerRef.current = setTimeout(() => {
             disconnectTimerRef.current = null;
-            if (!pcRef.current) return;
-            const s = pcRef.current.connectionState;
-            if (s === "connected") return;
-            setCallError("接続が不安定です。通信環境を確認してください。");
-            safeEndCall(1500);
-          }, 6e4);
-          // kick a reconnect attempt quickly (caller renegotiates / callee requests restart)
-          tryStartReconnect("connectionstate:" + state);
+            if (!pcRef.current || pcRef.current.connectionState === "connected") return;
+            setCallError("\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
+            safeEndCall(1200);
+          }, 5e3);
           return;
         }
-        if (state === "failed") {
-          tryStartReconnect("connectionstate:failed");
-          // if it still doesn't recover within the 60s timer, it will end
-          return;
-        }
-        if (state === "closed") {
-          setCallError("接続が切断されました。");
+        if (state === "failed" || state === "closed") {
+          setCallError("\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
           safeEndCall(1200);
-        }
-      };
-      pc.oniceconnectionstatechange = () => {
-        const ice = pc.iceConnectionState;
-        if (ice === "connected" || ice === "completed") {
-          reconnectAttemptsRef.current = 0;
-          reconnectInFlightRef.current = false;
-          return;
-        }
-        if (ice === "disconnected" || ice === "failed") {
-          tryStartReconnect("ice:" + ice);
         }
       };
       pc.ontrack = async (event) => {
@@ -1036,51 +892,30 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       }
       const unsubSignal = onSnapshot(signalingRef, async (snap) => {
         if (!pcRef.current) return;
-        const pc = pcRef.current;
         const data = snap.data();
         if (!data || data.sessionId !== sessionId) return;
-
-        // If callee requested an ICE restart, caller should renegotiate.
-        if (isCaller && data.restartRequestedAt) {
-          const ts = typeof data.restartRequestedAt?.toMillis === "function" ? data.restartRequestedAt.toMillis() : 0;
-          if (ts && ts > (lastRestartRequestSeenRef.current || 0)) {
-            lastRestartRequestSeenRef.current = ts;
-            tryStartReconnect("restart-request");
-          }
-        }
-
         try {
           if (isCaller) {
-            if (data.answerSdp) {
-              const ansRev = data.answerRev || data.offerRev || 1;
-              if (ansRev > (lastAnswerRevSeenRef.current || 0) && pc.signalingState === "have-local-offer") {
-                lastAnswerRevSeenRef.current = ansRev;
-                await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: data.answerSdp }));
-                await flushPendingCandidates(pc);
-              }
+            if (!pc.currentRemoteDescription && data.answerSdp) {
+              await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: data.answerSdp }));
+              await flushPendingCandidates(pc);
             }
           } else {
-            if (data.offerSdp) {
-              const offerRev = data.offerRev || 1;
-              // Apply newer offers (supports ICE restart / renegotiation)
-              if (offerRev > (lastOfferRevSeenRef.current || 0) && (pc.signalingState === "stable" || pc.signalingState === "have-remote-offer")) {
-                lastOfferRevSeenRef.current = offerRev;
-                await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: data.offerSdp }));
-                await flushPendingCandidates(pc);
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                await setDoc(
-                  signalingRef,
-                  {
-                    sessionId,
-                    answerSdp: answer.sdp,
-                    answerRev: offerRev,
-                    answererId: user.uid,
-                    updatedAt: serverTimestamp()
-                  },
-                  { merge: true }
-                );
-              }
+            if (!pc.currentRemoteDescription && data.offerSdp) {
+              await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: data.offerSdp }));
+              await flushPendingCandidates(pc);
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              await setDoc(
+                signalingRef,
+                {
+                  sessionId,
+                  answerSdp: answer.sdp,
+                  answererId: user.uid,
+                  updatedAt: serverTimestamp()
+                },
+                { merge: true }
+              );
             }
           }
         } catch (e) {
@@ -1134,8 +969,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     run();
     return () => {
       cancelled = true;
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
       cleanup();
       startedRef.current = false;
     };
@@ -1158,10 +991,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const resumeRemotePlayback = async () => {
     await tryPlayRemoteMedia();
   };
-  useEffect(() => {
-    // Prevent media from pausing when UI effects are changed (mobile browsers may pause playback on reflow)
-    tryPlayRemoteMedia();
-  }, [activeEffect, tryPlayRemoteMedia]);
   const toggleMute = () => {
     const stream = localStreamRef.current;
     if (!stream) return;
@@ -1321,20 +1150,20 @@ const toggleScreenShare = async () => {
         /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
         "\u97F3\u58F0\u3092\u518D\u751F"
             ] }),
+      /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: !isVideoEnabled || isVideoOff || isScreenSharing, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff || isScreenSharing ? "bg-gray-700/50 text-white/50" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
+      /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: !isVideoEnabled || isVideoOff, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff ? "bg-gray-700/50 text-white/50" : isScreenSharing ? "bg-green-500 text-white hover:bg-green-600" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: isScreenSharing ? /* @__PURE__ */ jsx(ScreenShareOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(ScreenShare, { className: "w-6 h-6" }) }),
       isVideoEnabled && /* @__PURE__ */ jsxs("div", { className: "absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg transition-all", children: [
         /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover transform scale-x-[-1]", style: { filter: getFilterStyle(activeEffect) } }),
         activeEffect && activeEffect !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/50 text-white text-[8px] px-1 rounded", children: activeEffect })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-5 pb-6 backdrop-blur-lg", children: [
+    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-8 pb-6 backdrop-blur-lg", children: [
       /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `p-4 rounded-full transition-all ${isMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
-      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `p-4 rounded-full transition-all ${isVideoOff ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }) }),
-      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: isVideoOff, className: `p-4 rounded-full transition-all ${isVideoOff ? "bg-gray-700/50 text-white/50" : isScreenSharing ? "bg-green-500 text-white hover:bg-green-600" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isScreenSharing ? /* @__PURE__ */ jsx(ScreenShareOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(ScreenShare, { className: "w-6 h-6" }) }),
-      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: isVideoOff || isScreenSharing, className: `p-4 rounded-full transition-all ${isVideoOff || isScreenSharing ? "bg-gray-700/50 text-white/50" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
       /* @__PURE__ */ jsxs("button", { onClick: onEndCall, className: "p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
         /* @__PURE__ */ jsx(PhoneOff, { className: "w-8 h-8" }),
         /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u7D42\u4E86" })
-      ] })
+      ] }),
+      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `p-4 rounded-full transition-all ${isVideoOff ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }) })
     ] })
   ] });
 };
@@ -1465,7 +1294,7 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   const ensurePeer = useCallback((remoteUid) => {
     if (!remoteUid || remoteUid === user.uid) return;
     if (pcsRef.current.has(remoteUid)) return;
-    const pc = new RTCPeerConnection(getRtcConfig());
+    const pc = new RTCPeerConnection(rtcConfig);
     pcsRef.current.set(remoteUid, pc);
 
     const remoteStream = new MediaStream();
@@ -2455,7 +2284,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
             ["image", "video"].includes(m.replyTo.type) ? m.replyTo.type === "image" ? "[\u753B\u50CF]" : "[\u52D5\u753B]" : m.replyTo.content || "[\u30E1\u30C3\u30BB\u30FC\u30B8]"
           ] })
         ] }),
-        m.type === "text" && /* @__PURE__ */ jsxs("div", { className: "whitespace-pre-wrap", children: [
+        m.type === "text" && /* @__PURE__ */ jsxs("div", { className: "whitespace-pre-wrap break-words", style: { overflowWrap: "anywhere" }, children: [
           renderContent(m.content),
           m.isEdited && /* @__PURE__ */ jsx("div", { className: "text-[9px] text-black/40 text-right mt-1 font-bold", children: "(\u7DE8\u96C6\u6E08)" })
         ] }),
@@ -2627,13 +2456,32 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
     await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { comments: arrayUnion({ userId: user.uid, userName: profile.name, text: commentText, createdAt: (/* @__PURE__ */ new Date()).toISOString() }) });
     setCommentText("");
   };
+  const deletePost = async () => {
+    if (!isMe) return;
+    const ok = window.confirm("この投稿を削除しますか？");
+    if (!ok) return;
+    try {
+      // delete chunk docs first (if any)
+      if (post.hasChunks) {
+        const chunksCol = collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks");
+        const snap = await getDocs(chunksCol);
+        await Promise.all(snap.docs.map((d) => deleteDoc(d.ref).catch(() => null)));
+      }
+      await deleteDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id));
+    } catch (e) {
+      console.error("Delete post failed", e);
+    }
+  };
   return /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2 border-b", children: [
-    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
-      /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-        /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
-        isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between gap-3 mb-3", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+        /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+          /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
+          isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
+        ] }),
+        /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
       ] }),
-      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
+      isMe && /* @__PURE__ */ jsx("button", { onClick: deletePost, className: "text-gray-400", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
     (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
@@ -4095,6 +3943,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     if (!content && !file && type === "text" || isUploading) return;
     setIsUploading(true);
     setUploadProgress(0);
+    setUploadProgress(0);
     const currentReply = replyTo;
     setReplyTo(null);
     setStickerMenuOpen(false);
@@ -4631,15 +4480,24 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
     };
   }, [mediaPreview]);
 
-  const readAsDataURL = (file) => new Promise((resolve, reject) => {
+  const readAsDataURL = (file, onProgress) => new Promise((resolve, reject) => {
     const reader = new FileReader();
+    if (typeof onProgress === "function") {
+      reader.onprogress = (ev) => {
+        try {
+          if (ev.lengthComputable) onProgress(ev.loaded / ev.total);
+        } catch {
+        }
+      };
+    }
     reader.onload = (ev) => resolve(ev.target.result);
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
 
-  const uploadChunksBase64 = async (postId, file) => {
+  const uploadChunksBase64 = async (postId, file, onProgress) => {
     const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
+    let completed = 0;
     const CONCURRENCY = 5;
     const executing = new Set();
     for (let i = 0; i < chunkCount; i++) {
@@ -4652,6 +4510,11 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
           try {
             const base64Data = e.target.result.split(",")[1];
             await setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", postId, "chunks", `${i}`), { data: base64Data, index: i });
+            try {
+              completed += 1;
+              if (typeof onProgress === "function") onProgress(completed / chunkCount);
+            } catch {
+            }
             resolve(null);
           } catch (err) {
             reject(err);
@@ -4687,14 +4550,21 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
         if (mediaFile.size > CHUNK_SIZE) {
           hasChunks = true;
           storedMedia = null;
-          chunkCount = await uploadChunksBase64(newPostRef.id, mediaFile);
+          chunkCount = await uploadChunksBase64(newPostRef.id, mediaFile, (ratio) => {
+            const pct = Math.max(1, Math.min(99, Math.floor(ratio * 100)));
+            setUploadProgress(pct);
+          });
         } else {
-          storedMedia = await readAsDataURL(mediaFile);
+          storedMedia = await readAsDataURL(mediaFile, (ratio) => {
+            const pct = Math.max(1, Math.min(80, Math.floor(ratio * 80)));
+            setUploadProgress(pct);
+          });
           hasChunks = false;
           chunkCount = 0;
         }
       }
 
+      setUploadProgress((p) => Math.max(p, 90));
       await setDoc(newPostRef, {
         userId: user.uid,
         content,
@@ -4708,6 +4578,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
         createdAt: serverTimestamp()
       });
 
+      setUploadProgress(100);
       setContent("");
       setMediaFile(null);
       if (mediaPreview && mediaPreview.startsWith("blob:")) URL.revokeObjectURL(mediaPreview);
@@ -4718,6 +4589,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
       showNotification("投稿に失敗しました");
     } finally {
       setIsUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -4752,7 +4624,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
             /* @__PURE__ */ jsx(ImageIcon, { className: "w-5 h-5 text-gray-400" }),
             /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*,video/*", onChange: handleVoomFileUpload })
           ] }),
-          /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || mediaFile ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: "投稿" })
+          /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || mediaFile ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: isUploading ? `投稿中 ${uploadProgress}%` : "投稿" })
         ] })
       ] }),
       posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id)),
@@ -5297,8 +5169,18 @@ function App() {
   const [posts, setPosts] = useState([]);
   const [postsHasMore, setPostsHasMore] = useState(true);
   const [postsLoadingMore, setPostsLoadingMore] = useState(false);
+  const [voomUnreadCount, setVoomUnreadCount] = useState(0);
+  const voomLastSeenRef = useRef(0);
   const postsCursorRef = useRef(null);
   const POSTS_PAGE_SIZE = 5;
+
+  const tsToMillis = useCallback((t) => {
+    if (!t) return 0;
+    if (typeof t === "number") return t;
+    if (typeof t.toMillis === "function") return t.toMillis();
+    if (typeof t.seconds === "number") return t.seconds * 1000;
+    return 0;
+  }, []);
 
   const [notification, setNotification] = useState(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
@@ -5843,7 +5725,52 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
     }
     return activeCall.phase || null;
   }, [activeCall, syncedCallData, user?.uid]);
-  return /* @__PURE__ */ jsx("div", { className: "w-full h-[100dvh] bg-[#d7dbe1] flex justify-center overflow-hidden", children: /* @__PURE__ */ jsxs("div", { className: "w-[430px] max-w-full h-[100dvh] bg-[#f3f4f6] border-x border-gray-300 flex flex-col relative overflow-hidden", children: [
+  
+  // VOOM: 未閲覧投稿数（進行度）を数値で表示
+  useEffect(() => {
+    if (!user?.uid) {
+      voomLastSeenRef.current = 0;
+      setVoomUnreadCount(0);
+      return;
+    }
+    const key = `voomLastSeen_${user.uid}`;
+    const saved = Number(localStorage.getItem(key) || 0);
+    voomLastSeenRef.current = Number.isFinite(saved) ? saved : 0;
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    if (view === "voom") {
+      setVoomUnreadCount(0);
+      return;
+    }
+    const lastSeen = voomLastSeenRef.current || 0;
+    const cnt = posts.reduce((acc, p) => {
+      const t = tsToMillis(p?.createdAt);
+      // 削除/取り消し扱いの投稿（存在する場合）はカウントしない
+      if (p?.isDeleted || p?.deleted) return acc;
+      return t > lastSeen ? acc + 1 : acc;
+    }, 0);
+    setVoomUnreadCount(cnt);
+  }, [posts, user?.uid, view, tsToMillis]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    if (view !== "voom") return;
+    const key = `voomLastSeen_${user.uid}`;
+    const latest = posts.reduce((mx, p) => {
+      const t = tsToMillis(p?.createdAt);
+      if (p?.isDeleted || p?.deleted) return mx;
+      return t > mx ? t : mx;
+    }, 0);
+    if (latest > 0) {
+      voomLastSeenRef.current = latest;
+      localStorage.setItem(key, String(latest));
+    }
+    setVoomUnreadCount(0);
+  }, [view, posts, user?.uid, tsToMillis]);
+
+return /* @__PURE__ */ jsx("div", { className: "w-full h-[100dvh] bg-[#d7dbe1] flex justify-center overflow-hidden", children: /* @__PURE__ */ jsxs("div", { className: "w-[430px] max-w-full h-[100dvh] bg-[#f3f4f6] border-x border-gray-300 flex flex-col relative overflow-hidden", children: [
     notification && /* @__PURE__ */ jsx("div", { className: "fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce", children: notification }),
     !user ? /* @__PURE__ */ jsx(AuthView, { onLogin: setUser, showNotification }) : /* @__PURE__ */ jsxs(Fragment, { children: [
       activeCall ? effectiveCallPhase === "incoming" ? /* @__PURE__ */ jsx(
@@ -5922,7 +5849,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
         ] }),
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "voom" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("voom"), children: [
           /* @__PURE__ */ jsx(LayoutGrid, { className: "w-6 h-6" }),
-          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "VOOM" })
+          /* @__PURE__ */ jsxs("span", { className: "text-[10px] font-bold relative", children: ["VOOM", voomUnreadCount > 0 && /* @__PURE__ */ jsx("span", { className: "ml-1 inline-flex items-center justify-center min-w-[14px] h-[14px] px-1 rounded-full bg-red-500 text-white text-[9px] leading-none", children: voomUnreadCount > 99 ? "99+" : voomUnreadCount })] })
         ] })
       ] })
     ] }),
