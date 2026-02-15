@@ -2456,7 +2456,30 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     }
   };
   const localPreviewClass = "absolute top-5 right-5 w-[128px] sm:w-[152px] h-[214px] sm:h-[256px] rounded-[18px] overflow-hidden border-[3px] border-white/90 shadow-[0_0_0_1px_rgba(255,255,255,0.2)] bg-black";
-  const effectChipNames = Array.from(new Set(["Normal", ...((effects || []).map((ef) => ef?.name).filter(Boolean))])).slice(0, 5);
+  const effectNameAliases = {
+    Normal: "Normal",
+    "\u901A\u5E38": "Normal",
+    Invert: "Invert",
+    "\u53CD\u8EE2": "Invert",
+    Contrast: "Contrast",
+    "\u30B3\u30F3\u30C8\u30E9\u30B9\u30C8": "Contrast",
+    Grayscale: "Grayscale",
+    "\u30B0\u30EC\u30FC\u30B9\u30B1\u30FC\u30EB": "Grayscale",
+    Sepia: "Sepia",
+    "\u30BB\u30D4\u30A2": "Sepia",
+    Bright: "Bright",
+    "\u660E\u308B\u3044": "Bright",
+    Blur: "Blur",
+    "\u307C\u304B\u3057": "Blur",
+    Hue: "Hue",
+    "\u8272\u76F8": "Hue"
+  };
+  const normalizeEffectName = (name) => effectNameAliases[String(name || "").trim()] || String(name || "").trim();
+  const effectChipNames = Array.from(
+    new Set(
+      ["Normal", ...((effects || []).map((ef) => normalizeEffectName(ef?.name)).filter(Boolean))]
+    )
+  ).slice(0, 5);
   const effectLabelMap = {
     Normal: "\u901A\u5E38",
     Invert: "\u53CD\u8EE2",
@@ -7250,6 +7273,7 @@ var App_13_default = App;
 export {
   App_13_default as default
 };
+
 
 
 
