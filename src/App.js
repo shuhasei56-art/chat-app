@@ -623,10 +623,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       if (!v || v.length > 120 || /blur\s*\(|drop-shadow\s*\(|url\s*\(/i.test(v)) return "none";
       return v;
     };
-    const match = (effects || []).find(
-      (e) => e?.name === effectName && typeof e?.filter === "string" && e.filter.trim() !== ""
-    );
-    if (match?.filter) return sanitizeFilter(match.filter);
+    // Note: GroupCallView does not define custom effects list; use built-in presets only.
     switch (effectName) {
       case "Sepia":
         return "sepia(100%)";
@@ -1243,10 +1240,7 @@ const GroupCallView = ({ user, profile, allUsers, chatId, callData, onEndCall, i
       if (!v || v.length > 120 || /blur\s*\(|drop-shadow\s*\(|url\s*\(/i.test(v)) return "none";
       return v;
     };
-    const match = (effects || []).find(
-      (e) => e?.name === effectName && typeof e?.filter === "string" && e.filter.trim() !== ""
-    );
-    if (match?.filter) return sanitizeFilter(match.filter);
+    // Note: GroupCallView does not define custom effects list; use built-in presets only.
     switch (effectName) {
       case "Sepia":
         return "sepia(100%)";
