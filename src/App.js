@@ -2406,7 +2406,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
     ] })
   ] });
 });
-const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => {
+const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, showNotification, onDeleted }) => {
   const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [postPreview, setPostPreview] = useState(null);
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
@@ -2459,12 +2459,31 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
     setCommentText("");
   };
   return /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2 border-b", children: [
-    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
-      /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-        /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
-        isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-3", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+        /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+          /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
+          isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
+        ] }),
+        /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
       ] }),
-      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
+      isMe && /* @__PURE__ */ jsxs("button", { onClick: async () => {
+        try {
+          if (!window.confirm("\u3053\u306e\u6295\u7a3f\u3092\u524a\u9664\u3057\u307e\u3059\u304b\uff1f")) return;
+          // delete chunks (if any) then delete post
+          const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"));
+          for (const d of c.docs) await deleteDoc(d.ref);
+          await deleteDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id));
+          onDeleted && onDeleted(post.id);
+          showNotification && showNotification("\u524a\u9664\u3057\u307e\u3057\u305f");
+        } catch (e2) {
+          console.error(e2);
+          showNotification && showNotification("\u524a\u9664\u306b\u5931\u6557\u3057\u307e\u3057\u305f");
+        }
+      }, className: "text-red-500 text-xs font-bold flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-red-50", children: [
+        /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }),
+        "\u524a\u9664"
+      ] })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
     (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
@@ -3955,7 +3974,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         if (["image", "video"].includes(type)) {
           previewData = await generateThumbnail(file);
         }
-        await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, preview: previewData, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, isUploading: true, createdAt: serverTimestamp(), readBy: [user.uid] });
+        await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, preview: previewData, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, isUploading: true, uploadProgress: 0, createdAt: serverTimestamp(), readBy: [user.uid] });
         await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
         setText("");
         setPlusMenuOpen(false);
@@ -3968,7 +3987,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       if (file && file.size > CHUNK_SIZE) {
         hasChunks = true;
         chunkCount = Math.ceil(file.size / CHUNK_SIZE);
-        const CONCURRENCY = 5;
+        const CONCURRENCY = 200;
         const executing = /* @__PURE__ */ new Set();
         let completed = 0;
         for (let i = 0; i < chunkCount; i++) {
@@ -3982,7 +4001,22 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
                 const base64Data = e.target.result.split(",")[1];
                 await setDoc(doc(msgCol, newMsgRef.id, "chunks", `${i}`), { data: base64Data, index: i });
                 completed++;
-                setUploadProgress(Math.round(completed / chunkCount * 100));
+        const pct = Math.round(completed / chunkCount * 100);
+        // Persist progress to Firestore so it survives room navigation
+        try {
+          // throttle updates (avoid too many writes)
+          const now = Date.now();
+          if (!window.__lastUploadProgress) window.__lastUploadProgress = {};
+          const key = `${activeChatId}:${newMsgRef.id}`;
+          const last = window.__lastUploadProgress[key] || { pct: -1, t: 0 };
+          if (pct === 100 || pct >= last.pct + 1 && now - last.t >= 500) {
+            window.__lastUploadProgress[key] = { pct, t: now };
+            await updateDoc(newMsgRef, { uploadProgress: pct });
+          }
+        } catch (e3) {
+          // ignore progress write errors
+        }
+        setUploadProgress(pct);
                 resolve(null);
               } catch (err) {
                 reject(err);
@@ -4471,7 +4505,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
 
   const uploadChunksBase64 = async (postId, file) => {
     const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
-    const CONCURRENCY = 5;
+    const CONCURRENCY = 200;
     const executing = new Set();
     for (let i = 0; i < chunkCount; i++) {
       const start = i * CHUNK_SIZE;
@@ -4586,7 +4620,12 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
           /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || mediaFile ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: "投稿" })
         ] })
       ] }),
-      posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id)),
+      posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile, showNotification, onDeleted: (postId) => {
+        // optimistic remove for instant UI
+        if (typeof window !== "undefined" && window.__voomPostsSetter) {
+          window.__voomPostsSetter((prev) => prev.filter((x) => x.id !== postId));
+        }
+      } }, p.id)),
       /* @__PURE__ */ jsx("div", { ref: sentinelRef, className: "h-8" })
     ] })
   ] });
@@ -5126,6 +5165,10 @@ function App() {
   const [allUsers, setAllUsers] = useState([]);
   const [chats, setChats] = useState([]);
   const [posts, setPosts] = useState([]);
+  useEffect(() => {
+    if (typeof window !== "undefined") window.__voomPostsSetter = setPosts;
+    return () => { if (typeof window !== "undefined" && window.__voomPostsSetter === setPosts) delete window.__voomPostsSetter; };
+  }, []);
   const [postsHasMore, setPostsHasMore] = useState(true);
   const [postsLoadingMore, setPostsLoadingMore] = useState(false);
   const postsCursorRef = useRef(null);
