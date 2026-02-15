@@ -1150,14 +1150,16 @@ const toggleScreenShare = async () => {
         /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
         "\u97F3\u58F0\u3092\u518D\u751F"
             ] }),
-      /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: !isVideoEnabled || isVideoOff || isScreenSharing, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff || isScreenSharing ? "bg-gray-700/50 text-white/50" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
-      /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: !isVideoEnabled || isVideoOff, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff ? "bg-gray-700/50 text-white/50" : isScreenSharing ? "bg-green-500 text-white hover:bg-green-600" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: isScreenSharing ? /* @__PURE__ */ jsx(ScreenShareOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(ScreenShare, { className: "w-6 h-6" }) }),
+
       isVideoEnabled && /* @__PURE__ */ jsxs("div", { className: "absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg transition-all", children: [
         /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover transform scale-x-[-1]", style: { filter: getFilterStyle(activeEffect) } }),
         activeEffect && activeEffect !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/50 text-white text-[8px] px-1 rounded", children: activeEffect })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-8 pb-6 backdrop-blur-lg", children: [
+    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-6 pb-6 backdrop-blur-lg", children: [
+
+      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: !isVideoEnabled || isVideoOff, className: `p-4 rounded-full transition-all ${!isVideoEnabled || isVideoOff ? "bg-gray-700/50 text-white/50" : isScreenSharing ? "bg-green-500 text-white hover:bg-green-600" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isScreenSharing ? /* @__PURE__ */ jsx(ScreenShareOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(ScreenShare, { className: "w-6 h-6" }) }),
+      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: !isVideoEnabled || isVideoOff || isScreenSharing, className: `p-4 rounded-full transition-all ${!isVideoEnabled || isVideoOff || isScreenSharing ? "bg-gray-700/50 text-white/50" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
       /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `p-4 rounded-full transition-all ${isMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
       /* @__PURE__ */ jsxs("button", { onClick: onEndCall, className: "p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
         /* @__PURE__ */ jsx(PhoneOff, { className: "w-8 h-8" }),
@@ -3937,7 +3939,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       const fileData = file ? { fileName: file.name, fileSize: file.size, mimeType: file.type } : {};
       const currentChat = chats.find((c) => c.id === activeChatId);
       const updateData = {
-        lastMessage: { content: type === "text" ? content : `[${type}]`, senderId: user.uid, readBy: [user.uid] },
+        lastMessage: { messageId: newMsgRef.id, type, content: type === "text" ? content : `[${type}]`, senderId: user.uid, readBy: [user.uid] },
         updatedAt: serverTimestamp()
       };
       if (currentChat) {
@@ -4034,14 +4036,74 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   };
   const handleDeleteMessage = useCallback(async (msgId) => {
     try {
-      await deleteDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId));
-      const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId, "chunks"));
-      for (const d of c.docs) await deleteDoc(d.ref);
-      showNotification("\u30E1\u30C3\u30BB\u30FC\u30B8\u306E\u9001\u4FE1\u3092\u53D6\u308A\u6D88\u3057\u307E\u3057\u305F");
+      const msgRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId);
+      const msgSnap = await getDoc(msgRef);
+      const msgData = msgSnap.exists() ? msgSnap.data() : null;
+      const readBy = Array.isArray(msgData?.readBy) ? msgData.readBy : [];
+      const senderId = msgData?.senderId || null;
+
+      // Delete message document + any chunk subdocs
+      await deleteDoc(msgRef);
+      const chunksSnap = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId, "chunks"));
+      for (const d of chunksSnap.docs) await deleteDoc(d.ref);
+
+      // If the deleted message was unread for some participants, decrement their unreadCounts
+      const chatRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId);
+      await runTransaction(db2, async (tx) => {
+        const chatSnap = await tx.get(chatRef);
+        if (!chatSnap.exists()) return;
+        const chat = chatSnap.data();
+        const participants = Array.isArray(chat?.participants) ? chat.participants : [];
+        const unreadCounts = chat?.unreadCounts || {};
+        const patch = {};
+
+        if (senderId) {
+          participants.forEach((uid) => {
+            if (!uid) return;
+            if (uid === senderId) return;
+            if (readBy.includes(uid)) return;
+            const cur = typeof unreadCounts?.[uid] === "number" ? unreadCounts[uid] : 0;
+            patch[`unreadCounts.${uid}`] = Math.max(0, cur - 1);
+          });
+        }
+
+        if (Object.keys(patch).length > 0) tx.update(chatRef, patch);
+      });
+
+      // If the deleted message was the lastMessage, refresh lastMessage to the newest remaining message.
+      try {
+        const chatSnapNow = await getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId));
+        const lastMessageId = chatSnapNow.exists() ? chatSnapNow.data()?.lastMessage?.messageId : null;
+        if (lastMessageId === msgId) {
+          const msgCol = collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages");
+          const latest = await getDocs(query(msgCol, orderBy("createdAt", "desc"), limit(1)));
+          if (!latest.empty) {
+            const d = latest.docs[0];
+            const lm = d.data();
+            await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), {
+              lastMessage: {
+                messageId: d.id,
+                type: lm?.type || "text",
+                content: lm?.type === "text" ? (lm?.content || "") : `[${lm?.type || "text"}]`,
+                senderId: lm?.senderId || "",
+                readBy: Array.isArray(lm?.readBy) ? lm.readBy : []
+              }
+            });
+          } else {
+            await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), {
+              lastMessage: { messageId: "", type: "text", content: "", senderId: "", readBy: [user.uid] }
+            });
+          }
+        }
+      } catch (e2) {
+        console.warn("Failed to refresh lastMessage after delete:", e2);
+      }
+
+      showNotification("メッセージの送信を取り消しました");
     } catch (e) {
-      showNotification("\u9001\u4FE1\u53D6\u6D88\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+      showNotification("送信取消に失敗しました");
     }
-  }, [db2, appId2, activeChatId, showNotification]);
+  }, [db2, appId2, activeChatId, showNotification, user.uid]);
   const handleEditMessage = useCallback((id, content) => {
     setEditingMsgId(id);
     setEditingText(content);
@@ -5129,6 +5191,8 @@ function App() {
   const postsCursorRef = useRef(null);
   const POSTS_PAGE_SIZE = 5;
 
+  const [voomHasUnread, setVoomHasUnread] = useState(false);
+
   const [notification, setNotification] = useState(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -5217,8 +5281,49 @@ function App() {
   };
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
-    showNotification("ID\u3092\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F");
+    showNotification("IDをコピーしました");
   };
+
+  // VOOM: 未閲覧の新規投稿があればタブに「1」を表示
+  useEffect(() => {
+    if (!user?.uid) {
+      setVoomHasUnread(false);
+      return;
+    }
+    const key = `voomLastSeen_${user.uid}`;
+    const safeGetLastSeen = () => {
+      try {
+        const v = parseInt(localStorage.getItem(key) || "0", 10);
+        return Number.isFinite(v) ? v : 0;
+      } catch {
+        return 0;
+      }
+    };
+    const safeSetLastSeenNow = () => {
+      try {
+        localStorage.setItem(key, String(Date.now()));
+      } catch {
+      }
+    };
+
+    if (view === "voom") {
+      safeSetLastSeenNow();
+      setVoomHasUnread(false);
+      return;
+    }
+
+    const latest = (posts || []).find((p) => !p?.isDeleted);
+    if (!latest) {
+      setVoomHasUnread(false);
+      return;
+    }
+    const latestMs = latest.createdAt?.toMillis ? latest.createdAt.toMillis() : latest.createdAt?.seconds ? latest.createdAt.seconds * 1e3 : 0;
+    const lastSeenMs = safeGetLastSeen();
+
+    // 自分の投稿は未閲覧バッジ対象外（必要ならこの条件を外してください）
+    const hasUnread = latestMs > lastSeenMs && latest.userId !== user.uid;
+    setVoomHasUnread(hasUnread);
+  }, [user?.uid, view, posts]);
 
 const loadMorePosts = async () => {
   if (!user) return;
@@ -5751,7 +5856,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
         ] }),
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "voom" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("voom"), children: [
           /* @__PURE__ */ jsx(LayoutGrid, { className: "w-6 h-6" }),
-          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "VOOM" })
+          /* @__PURE__ */ jsxs("span", { className: "text-[10px] font-bold", children: ["VOOM", voomHasUnread && view !== "voom" ? /* @__PURE__ */ jsx("span", { className: "ml-1 inline-flex items-center justify-center bg-red-500 text-white text-[10px] font-black w-4 h-4 rounded-full", children: "1" }) : null] })
         ] })
       ] })
     ] }),
