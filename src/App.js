@@ -23,7 +23,6 @@ import {
   updateDoc,
   onSnapshot,
   query,
-  startAfter,
   addDoc,
   deleteDoc,
   where,
@@ -32,6 +31,7 @@ import {
   serverTimestamp,
   orderBy,
   limit,
+  startAfter,
   limitToLast,
   writeBatch,
   getDocs,
@@ -103,8 +103,6 @@ import {
   MoreVertical,
   EyeOff,
   Eye,
-  ScreenShare,
-  ScreenShareOff,
   AlertCircle
 } from "lucide-react";
 const firebaseConfig = {
@@ -122,6 +120,50 @@ const db = getFirestore(app);
 const appId = "messenger-app-v9-integrated";
 const CHUNK_SIZE = 716799;
 const REACTION_EMOJIS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F525}"];
+
+// Keep profile values even if the user logs out (especially for guest/anonymously signed-in users)
+// without changing any UI.
+const PROFILE_CACHE_KEY = "chat_profile_cache_v1";
+const saveProfileCache = (p) => {
+  try {
+    if (!p || typeof p !== "object") return;
+    localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(p));
+  } catch {
+  }
+};
+const loadProfileCache = () => {
+  try {
+    const raw = localStorage.getItem(PROFILE_CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+// Fetch large media chunks more reliably by limiting concurrent reads.
+const CHUNK_FETCH_LIMIT = 5;
+const fetchChunkDataByCount = async (getChunkRef, chunkCount, concurrency = CHUNK_FETCH_LIMIT) => {
+  if (!chunkCount || chunkCount <= 0) return "";
+  const results = new Array(chunkCount);
+  let next = 0;
+  const workerCount = Math.min(concurrency, chunkCount);
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const i = next++;
+      if (i >= chunkCount) break;
+      try {
+        const snap = await getDoc(getChunkRef(i));
+        results[i] = snap.exists() ? snap.data().data || "" : "";
+      } catch {
+        results[i] = "";
+      }
+    }
+  });
+  await Promise.all(workers);
+  return results.join("");
+};
+
 const rtcConfig = {
   iceServers: [
     { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] }
@@ -418,19 +460,12 @@ const AuthView = ({ onLogin, showNotification }) => {
     return `Googleログインに失敗しました: ${error?.message || "不明なエラー"}`;
   };
   const handleGoogleLogin = async () => {
-  try {
-    const googleProvider = new GoogleAuthProvider();
-    googleProvider.setCustomParameters({ prompt: "select_account" });
-    const result = await signInWithPopup(auth, googleProvider);
-    const user = result.user;
-
-    // Do NOT overwrite existing profile fields (keeps user's edits across logout/login)
-    const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-    const snap = await getDoc(userRef).catch(() => null);
-    const existing = snap?.exists?.() ? snap.data() : null;
-
-    if (!existing) {
-      await setDoc(userRef, {
+    try {
+      const googleProvider = new GoogleAuthProvider();
+      googleProvider.setCustomParameters({ prompt: "select_account" });
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      await setDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), {
         uid: user.uid,
         name: user.displayName || "No Name",
         avatar: user.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + user.uid,
@@ -440,46 +475,29 @@ const AuthView = ({ onLogin, showNotification }) => {
         hiddenChats: [],
         wallet: 1e3,
         isBanned: false,
-        status: "よろしくお願いします！",
+        status: "\u3088\u308D\u3057\u304F\u304A\u9858\u3044\u3057\u307E\u3059\uFF01",
         cover: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80"
       }, { merge: true });
-    } else {
-      const patch = {};
-      if (!existing.uid) patch.uid = user.uid;
-      if (!existing.name) patch.name = user.displayName || "No Name";
-      if (!existing.avatar) patch.avatar = user.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + user.uid;
-      if (!existing.id) patch.id = user.uid;
-      if (!Array.isArray(existing.friends)) patch.friends = [];
-      if (!Array.isArray(existing.hiddenFriends)) patch.hiddenFriends = [];
-      if (!Array.isArray(existing.hiddenChats)) patch.hiddenChats = [];
-      if (typeof existing.wallet !== "number") patch.wallet = 1e3;
-      if (typeof existing.isBanned !== "boolean") patch.isBanned = false;
-      if (!existing.status) patch.status = "よろしくお願いします！";
-      if (!existing.cover) patch.cover = "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80";
-      if (Object.keys(patch).length) {
-        await setDoc(userRef, patch, { merge: true });
+    } catch (error) {
+      console.error("Login Error:", error);
+      const code = error?.code || "";
+      if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
+        try {
+          const googleProvider = new GoogleAuthProvider();
+          googleProvider.setCustomParameters({ prompt: "select_account" });
+          showNotification("ポップアップが使えないため、リダイレクトでログインします。");
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        } catch (redirectError) {
+          console.error("Redirect Login Error:", redirectError);
+          showNotification(getGoogleLoginErrorMessage(redirectError));
+          return;
+        }
       }
+      showNotification(getGoogleLoginErrorMessage(error));
     }
-  } catch (error) {
-    console.error("Login Error:", error);
-    const code = error?.code || "";
-    if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
-      try {
-        const googleProvider = new GoogleAuthProvider();
-        googleProvider.setCustomParameters({ prompt: "select_account" });
-        showNotification("ポップアップが使えないため、リダイレクトでログインします。");
-        await signInWithRedirect(auth, googleProvider);
-        return;
-      } catch (redirectError) {
-        console.error("Redirect Login Error:", redirectError);
-        showNotification(getGoogleLoginErrorMessage(redirectError));
-        return;
-      }
-    }
-    showNotification(getGoogleLoginErrorMessage(error));
-  }
-};
-const handleGuestLogin = async () => {
+  };
+  const handleGuestLogin = async () => {
     setLoading(true);
     try {
       await signInAnonymously(auth);
@@ -573,18 +591,20 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const [hasRemoteVideoTrack, setHasRemoteVideoTrack] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [videoDevices, setVideoDevices] = useState([]);
+  const [activeVideoDeviceId, setActiveVideoDeviceId] = useState(null);
+  const [videoTrackVersion, setVideoTrackVersion] = useState(0);
   const [callError, setCallError] = useState(null);
   const [needsRemotePlay, setNeedsRemotePlay] = useState(false);
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const screenStreamRef = useRef(null);
-  const cameraStreamRef = useRef(null);
-  const videoDevicesRef = useRef([]);
-  const activeVideoDeviceIdRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
   const pcRef = useRef(null);
   const localStreamRef = useRef(null);
+  const videoSenderRef = useRef(null);
+  const screenTrackRef = useRef(null);
+  const returnToCameraAfterShareRef = useRef(false);
   const remoteStreamRef = useRef(new MediaStream());
   const unsubscribersRef = useRef([]);
   const pendingCandidatesRef = useRef([]);
@@ -672,14 +692,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       }
     } catch {
     }
-    try {
-      if (screenStreamRef.current) {
-        screenStreamRef.current.getTracks().forEach((t) => t.stop());
-      }
-    } catch {
-    }
-    screenStreamRef.current = null;
-    setIsScreenSharing(false);
     localStreamRef.current = null;
     try {
       if (remoteStreamRef.current) {
@@ -827,7 +839,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       };
       try {
         const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
-        const hasVideoInput = devices.some((d) => d.kind === "videoinput");
+        const vids = devices.filter((d) => d.kind === "videoinput");
+        setVideoDevices(vids);
+        const hasVideoInput = vids.length > 0;
         const wantVideo = !!isVideoEnabled && hasVideoInput;
         let stream = null;
         try {
@@ -864,14 +878,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           return;
         }
         localStreamRef.current = stream;
-        cameraStreamRef.current = stream;
-        try {
-          videoDevicesRef.current = devices.filter((d) => d.kind === "videoinput");
-          const vt = stream.getVideoTracks?.()[0];
-          const settings = vt?.getSettings?.();
-          if (settings?.deviceId) activeVideoDeviceIdRef.current = settings.deviceId;
-        } catch {
-        }
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
           localVideoRef.current.muted = true;
@@ -880,10 +886,25 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           } catch {
           }
         }
-        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-        setTimeout(() => {
-          setSenderVideoParams();
-        }, 0);
+        const audioTracks = stream.getAudioTracks();
+        audioTracks.forEach((track) => pc.addTrack(track, stream));
+        const videoTrack = stream.getVideoTracks()[0] || null;
+        if (videoTrack) {
+          try {
+            setActiveVideoDeviceId(videoTrack.getSettings?.().deviceId || null);
+          } catch {
+          }
+          videoSenderRef.current = pc.addTrack(videoTrack, stream);
+        } else {
+          // Always create a video m-line so screen share / camera can be enabled later
+          // without changing the UI (audio calls can still share screen).
+          try {
+            const vt = pc.addTransceiver("video", { direction: "sendrecv" });
+            videoSenderRef.current = vt.sender;
+          } catch {
+            videoSenderRef.current = null;
+          }
+        }
       } catch (err) {
         console.error("Failed to start local media:", err);
         setCallError(getMediaErrorMessage(err));
@@ -945,7 +966,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         try {
           const offer = await pc.createOffer({
             offerToReceiveAudio: true,
-            offerToReceiveVideo: !!isVideoEnabled
+            offerToReceiveVideo: true
           });
           await pc.setLocalDescription(offer);
           await setDoc(
@@ -987,6 +1008,22 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       tryPlayRemoteMedia();
     }
   }, [remoteStream, tryPlayRemoteMedia]);
+
+  // Ensure the local preview element always binds to the current local stream.
+  // This matters when the user turns on the camera later during an audio call.
+  useEffect(() => {
+    const el = localVideoRef.current;
+    const stream = localStreamRef.current;
+    if (!el || !stream) return;
+    try {
+      el.srcObject = stream;
+      el.muted = true;
+      el.play().catch(() => {
+      });
+    } catch {
+    }
+  }, [isVideoOff, isScreenSharing, videoTrackVersion]);
+
   const hasRemoteVideo = hasRemoteVideoTrack || remoteStream?.getVideoTracks?.().some((track) => track.readyState === "live");
   const resumeRemotePlayback = async () => {
     await tryPlayRemoteMedia();
@@ -1000,138 +1037,142 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     });
     setIsMuted(shouldMute);
   };
-  const toggleVideo = () => {
+  const replaceOutgoingVideoTrack = async (newTrack) => {
     const stream = localStreamRef.current;
     if (!stream) return;
-    const shouldDisableVideo = !isVideoOff;
-    stream.getVideoTracks().forEach((track) => {
-      track.enabled = !shouldDisableVideo;
-    });
-    setIsVideoOff(shouldDisableVideo);
-  };
-
-const setSenderVideoParams = async () => {
-  try {
-    const pc = pcRef.current;
-    if (!pc) return;
-    const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
-    if (!sender) return;
-    const params = sender.getParameters();
-    if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
-    // A slightly higher ceiling improves perceived sending speed/quality when bandwidth allows.
-    params.encodings[0].maxBitrate = 2500000;
-    params.degradationPreference = "maintain-framerate";
-    await sender.setParameters(params);
-  } catch {
-  }
-};
-
-const replaceVideoTrack = async (newTrack) => {
-  const pc = pcRef.current;
-  const stream = localStreamRef.current;
-  if (!pc || !stream || !newTrack) return;
-  const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
-  if (!sender) return;
-
-  const oldTracks = stream.getVideoTracks();
-  try {
-    await sender.replaceTrack(newTrack);
-    await setSenderVideoParams();
-  } catch (e) {
-    console.warn("replaceTrack failed:", e);
-  }
-
-  try {
-    oldTracks.forEach((t) => {
-      if (t !== newTrack) {
-        stream.removeTrack(t);
-        try { t.stop(); } catch { }
+    try {
+      stream.getVideoTracks().forEach((t) => {
+        try {
+          stream.removeTrack(t);
+        } catch {
+        }
+        try {
+          t.stop();
+        } catch {
+        }
+      });
+    } catch {
+    }
+    if (newTrack) {
+      try {
+        stream.addTrack(newTrack);
+      } catch {
       }
-    });
-    if (!stream.getVideoTracks().includes(newTrack)) stream.addTrack(newTrack);
+    }
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = stream;
       localVideoRef.current.muted = true;
+      try {
+        await localVideoRef.current.play();
+      } catch {
+      }
     }
-  } catch {
-  }
-};
-
-const switchCamera = async () => {
-  if (!isVideoEnabled || isVideoOff || isScreenSharing) return;
-  try {
-    let devices = videoDevicesRef.current;
-    if (!devices || devices.length === 0) {
-      const all = await navigator.mediaDevices.enumerateDevices().catch(() => []);
-      devices = all.filter((d) => d.kind === "videoinput");
-      videoDevicesRef.current = devices;
+    try {
+      if (videoSenderRef.current) await videoSenderRef.current.replaceTrack(newTrack || null);
+    } catch {
     }
-    if (!devices || devices.length <= 1) return;
-
-    const currentId = activeVideoDeviceIdRef.current;
-    const idx = devices.findIndex((d) => d.deviceId === currentId);
-    const next = devices[(idx + 1) % devices.length];
-    const newStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        deviceId: next?.deviceId ? { exact: next.deviceId } : void 0,
-        width: { ideal: 640, max: 1280 },
-        height: { ideal: 360, max: 720 },
-        frameRate: { ideal: 24, max: 30 }
-      },
-      audio: false
-    });
-    const newTrack = newStream.getVideoTracks()[0];
-    if (!newTrack) return;
-    activeVideoDeviceIdRef.current = next?.deviceId || activeVideoDeviceIdRef.current;
-    await replaceVideoTrack(newTrack);
-  } catch (e) {
-    console.warn("switchCamera failed:", e);
-  }
-};
-
-const stopScreenShare = useCallback(async () => {
-  if (!isScreenSharing) return;
-  try {
-    const s = screenStreamRef.current;
-    screenStreamRef.current = null;
+    setVideoTrackVersion((v) => v + 1);
+  };
+  const enableCamera = async ({ deviceId } = {}) => {
+    try {
+      const constraints = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "user" };
+      const camStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: constraints });
+      const track = camStream.getVideoTracks()[0] || null;
+      if (!track) return;
+      try {
+        setActiveVideoDeviceId(track.getSettings?.().deviceId || deviceId || null);
+      } catch {
+      }
+      await replaceOutgoingVideoTrack(track);
+      setIsVideoOff(false);
+    } catch (e) {
+      console.warn("Failed to enable camera:", e);
+    }
+  };
+  const disableVideo = async () => {
+    try {
+      if (isScreenSharing) {
+        await stopScreenShare();
+        return;
+      }
+    } catch {
+    }
+    await replaceOutgoingVideoTrack(null);
+    setIsVideoOff(true);
+  };
+  const toggleVideo = async () => {
+    if (isVideoOff) {
+      await enableCamera({ deviceId: activeVideoDeviceId || void 0 });
+    } else {
+      await disableVideo();
+    }
+  };
+  const startScreenShare = async () => {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      console.warn("getDisplayMedia not supported");
+      return;
+    }
+    if (isScreenSharing) return;
+    returnToCameraAfterShareRef.current = !isVideoOff;
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+      const track = screenStream.getVideoTracks()[0] || null;
+      if (!track) return;
+      screenTrackRef.current = track;
+      track.onended = () => {
+        if (isMountedRef.current) stopScreenShare();
+      };
+      setIsScreenSharing(true);
+      setIsVideoOff(false);
+      await replaceOutgoingVideoTrack(track);
+    } catch (e) {
+      console.warn("Failed to start screen share:", e);
+    }
+  };
+  const stopScreenShare = async () => {
+    if (!isScreenSharing) return;
     setIsScreenSharing(false);
-    if (s) {
-      try { s.getTracks().forEach((t) => t.stop()); } catch { }
+    try {
+      if (screenTrackRef.current) screenTrackRef.current.stop();
+    } catch {
     }
-    if (!isVideoEnabled) return;
-    const deviceId = activeVideoDeviceIdRef.current;
-    const camStream = await navigator.mediaDevices.getUserMedia({
-      video: deviceId ? { deviceId: { exact: deviceId }, width: { ideal: 640, max: 1280 }, height: { ideal: 360, max: 720 }, frameRate: { ideal: 24, max: 30 } } : { facingMode: "user", width: { ideal: 640, max: 1280 }, height: { ideal: 360, max: 720 }, frameRate: { ideal: 24, max: 30 } },
-      audio: false
-    });
-    const camTrack = camStream.getVideoTracks()[0];
-    if (camTrack) await replaceVideoTrack(camTrack);
-  } catch (e) {
-    console.warn("stopScreenShare failed:", e);
-  }
-}, [isScreenSharing, isVideoEnabled]);
-
-const toggleScreenShare = async () => {
-  if (!isVideoEnabled || isVideoOff) return;
-  if (isScreenSharing) {
-    await stopScreenShare();
-    return;
-  }
-  try {
-    const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-    const track = displayStream.getVideoTracks()[0];
-    if (!track) return;
-    screenStreamRef.current = displayStream;
-    setIsScreenSharing(true);
-    track.onended = () => {
-      stopScreenShare();
-    };
-    await replaceVideoTrack(track);
-  } catch (e) {
-    console.warn("toggleScreenShare failed:", e);
-  }
-};
-
+    screenTrackRef.current = null;
+    if (returnToCameraAfterShareRef.current) {
+      await enableCamera({ deviceId: activeVideoDeviceId || void 0 });
+    } else {
+      await replaceOutgoingVideoTrack(null);
+      setIsVideoOff(true);
+    }
+  };
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) await stopScreenShare();
+    else await startScreenShare();
+  };
+  const facingModeRef = useRef("user");
+  const switchCamera = async () => {
+    if (isScreenSharing) return;
+    try {
+      if (videoDevices && videoDevices.length >= 2) {
+        const idx = videoDevices.findIndex((d) => d.deviceId === activeVideoDeviceId);
+        const next = videoDevices[(idx + 1) % videoDevices.length] || videoDevices[0];
+        await enableCamera({ deviceId: next?.deviceId });
+      } else {
+        const nextFacing = facingModeRef.current === "user" ? "environment" : "user";
+        facingModeRef.current = nextFacing;
+        const camStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: nextFacing } });
+        const track = camStream.getVideoTracks()[0] || null;
+        if (!track) return;
+        try {
+          setActiveVideoDeviceId(track.getSettings?.().deviceId || null);
+        } catch {
+        }
+        await replaceOutgoingVideoTrack(track);
+        setIsVideoOff(false);
+      }
+    } catch (e) {
+      console.warn("Failed to switch camera:", e);
+    }
+  };
   if (callError) {
     return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center text-white flex-col gap-4", children: [
       /* @__PURE__ */ jsx(AlertCircle, { className: "w-16 h-16 text-red-500" }),
@@ -1149,402 +1190,510 @@ const toggleScreenShare = async () => {
       needsRemotePlay && /* @__PURE__ */ jsxs("button", { onClick: resumeRemotePlayback, className: "absolute top-4 left-1/2 -translate-x-1/2 bg-white/90 text-gray-800 text-xs font-bold px-4 py-2 rounded-full shadow-lg", children: [
         /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
         "\u97F3\u58F0\u3092\u518D\u751F"
-            ] }),
-      /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: !isVideoEnabled || isVideoOff || isScreenSharing, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff || isScreenSharing ? "bg-gray-700/50 text-white/50" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
-      /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: !isVideoEnabled || isVideoOff, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff ? "bg-gray-700/50 text-white/50" : isScreenSharing ? "bg-green-500 text-white hover:bg-green-600" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: isScreenSharing ? /* @__PURE__ */ jsx(ScreenShareOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(ScreenShare, { className: "w-6 h-6" }) }),
-      isVideoEnabled && /* @__PURE__ */ jsxs("div", { className: "absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg transition-all", children: [
+      ] }),
+      !isVideoOff && /* @__PURE__ */ jsxs("div", { className: "absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg transition-all", children: [
         /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover transform scale-x-[-1]", style: { filter: getFilterStyle(activeEffect) } }),
         activeEffect && activeEffect !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/50 text-white text-[8px] px-1 rounded", children: activeEffect })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-8 pb-6 backdrop-blur-lg", children: [
+    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-6 pb-6 backdrop-blur-lg shrink-0", children: [
       /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `p-4 rounded-full transition-all ${isMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
+      /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, className: `p-4 rounded-full transition-all ${isScreenSharing ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: /* @__PURE__ */ jsx(Upload, { className: "w-6 h-6" }) }),
       /* @__PURE__ */ jsxs("button", { onClick: onEndCall, className: "p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
         /* @__PURE__ */ jsx(PhoneOff, { className: "w-8 h-8" }),
         /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u7D42\u4E86" })
       ] }),
-      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `p-4 rounded-full transition-all ${isVideoOff ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }) })
+      /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: isScreenSharing, className: `p-4 rounded-full transition-all ${isScreenSharing ? "bg-gray-600 text-gray-300 opacity-60" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
+      /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `p-4 rounded-full transition-all ${isVideoOff ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }) }),
     ] })
   ] });
 };
 
-const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = true, activeEffect, backgroundUrl, effects = [] }) => {
+// Group call (mesh) view: supports multi-user audio/video and splits the screen by participant count.
+const GroupCallView = ({ user, profile, allUsers, chatId, callData, onEndCall, isVideoEnabled = true, activeEffect, backgroundUrl }) => {
+  const sessionId = callData?.sessionId || "";
   const [participants, setParticipants] = useState([]);
-  const [remoteStreams, setRemoteStreams] = useState({});
+  const [remoteStreamsByUid, setRemoteStreamsByUid] = useState({});
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [callError, setCallError] = useState(null);
+  const [videoDevices, setVideoDevices] = useState([]);
+  const [activeVideoDeviceId, setActiveVideoDeviceId] = useState(null);
+  const [needsRemotePlay, setNeedsRemotePlay] = useState(false);
   const localVideoRef = useRef(null);
-  const pcsRef = useRef(new Map());
+  const remoteAudioRef = useRef(null);
   const localStreamRef = useRef(null);
-  const screenStreamRef = useRef(null);
-  const videoDevicesRef = useRef([]);
-  const activeVideoDeviceIdRef = useRef(null);
-  const seenCandidateIdsRef = useRef(new Map());
+  const pcsRef = useRef(/* @__PURE__ */ new Map());
+  const videoSendersRef = useRef(/* @__PURE__ */ new Map());
+  const pendingCandidatesRef = useRef(/* @__PURE__ */ new Map());
   const unsubscribersRef = useRef([]);
-  const sessionId = callData?.sessionId || "";
+  const isMountedRef = useRef(true);
+  const screenTrackRef = useRef(null);
+  const returnToCameraAfterShareRef = useRef(false);
+  const facingModeRef = useRef("user");
 
-  const getFilterStyle = (effectName) => {
-    if (!effectName || effectName === "Normal") return "none";
-    const sanitizeFilter = (filterValue) => {
-      if (typeof filterValue !== "string") return "none";
-      const v = filterValue.trim();
-      if (!v) return "none";
-      const lower = v.toLowerCase();
-      if (lower.includes("drop-shadow") || lower.includes("url(")) return "none";
-      if (v.length > 200) return "none";
-      return v;
-    };
-    const effect = (effects || []).find((e) => e.name === effectName);
-    if (effect && effect.filter) return sanitizeFilter(effect.filter);
-    if (effectName === "Kawaii") return "brightness(1.1) saturate(1.2)";
-    if (effectName === "Cool") return "contrast(1.2) saturate(0.9)";
-    if (effectName === "Retro") return "sepia(0.6) contrast(1.1)";
-    return "none";
+  const getUserMeta = (uid) => {
+    if (uid === user.uid) return { name: "\u3042\u306A\u305F", avatar: profile?.avatar };
+    const u = allUsers?.find?.((x) => x.uid === uid);
+    return { name: u?.name || uid.slice(0, 6), avatar: u?.avatar };
   };
 
-  const cleanup = useCallback(() => {
-    unsubscribersRef.current.forEach((u) => {
-      try { u(); } catch { }
+  const tryPlayRemoteAudio = useCallback(async () => {
+    try {
+      if (remoteAudioRef.current) {
+        await remoteAudioRef.current.play();
+        setNeedsRemotePlay(false);
+      }
+    } catch {
+      setNeedsRemotePlay(true);
+    }
+  }, []);
+
+  const replaceOutgoingVideoTrackAll = async (newTrack) => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    try {
+      stream.getVideoTracks().forEach((t) => {
+        try {
+          stream.removeTrack(t);
+        } catch {
+        }
+        try {
+          t.stop();
+        } catch {
+        }
+      });
+    } catch {
+    }
+    if (newTrack) {
+      try {
+        stream.addTrack(newTrack);
+      } catch {
+      }
+    }
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = stream;
+      localVideoRef.current.muted = true;
+      try {
+        await localVideoRef.current.play();
+      } catch {
+      }
+    }
+    const senders = Array.from(videoSendersRef.current.values());
+    await Promise.all(
+      senders.map(async (s) => {
+        try {
+          await s.replaceTrack(newTrack || null);
+        } catch {
+        }
+      })
+    );
+  };
+
+  const enableCamera = async ({ deviceId } = {}) => {
+    try {
+      const constraints = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "user" };
+      const camStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: constraints });
+      const track = camStream.getVideoTracks()[0] || null;
+      if (!track) return;
+      try {
+        setActiveVideoDeviceId(track.getSettings?.().deviceId || deviceId || null);
+      } catch {
+      }
+      await replaceOutgoingVideoTrackAll(track);
+      setIsVideoOff(false);
+    } catch (e) {
+      console.warn("Failed to enable camera:", e);
+    }
+  };
+
+  const startScreenShare = async () => {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      console.warn("getDisplayMedia not supported");
+      return;
+    }
+    if (isScreenSharing) return;
+    returnToCameraAfterShareRef.current = !isVideoOff;
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+      const track = screenStream.getVideoTracks()[0] || null;
+      if (!track) return;
+      screenTrackRef.current = track;
+      track.onended = () => {
+        if (isMountedRef.current) stopScreenShare();
+      };
+      setIsScreenSharing(true);
+      setIsVideoOff(false);
+      await replaceOutgoingVideoTrackAll(track);
+    } catch (e) {
+      console.warn("Failed to start screen share:", e);
+    }
+  };
+  const stopScreenShare = async () => {
+    if (!isScreenSharing) return;
+    setIsScreenSharing(false);
+    try {
+      if (screenTrackRef.current) screenTrackRef.current.stop();
+    } catch {
+    }
+    screenTrackRef.current = null;
+    if (returnToCameraAfterShareRef.current) {
+      await enableCamera({ deviceId: activeVideoDeviceId || void 0 });
+    } else {
+      await replaceOutgoingVideoTrackAll(null);
+      setIsVideoOff(true);
+    }
+  };
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) await stopScreenShare();
+    else await startScreenShare();
+  };
+
+  const toggleMute = () => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    const shouldMute = !isMuted;
+    stream.getAudioTracks().forEach((t) => {
+      t.enabled = !shouldMute;
     });
-    unsubscribersRef.current = [];
+    setIsMuted(shouldMute);
+  };
+
+  const toggleVideo = async () => {
+    if (isVideoOff) {
+      await enableCamera({ deviceId: activeVideoDeviceId || void 0 });
+    } else {
+      if (isScreenSharing) {
+        await stopScreenShare();
+        return;
+      }
+      await replaceOutgoingVideoTrackAll(null);
+      setIsVideoOff(true);
+    }
+  };
+
+  const switchCamera = async () => {
+    if (isScreenSharing) return;
+    try {
+      if (videoDevices && videoDevices.length >= 2) {
+        const idx = videoDevices.findIndex((d) => d.deviceId === activeVideoDeviceId);
+        const next = videoDevices[(idx + 1) % videoDevices.length] || videoDevices[0];
+        await enableCamera({ deviceId: next?.deviceId });
+      } else {
+        const nextFacing = facingModeRef.current === "user" ? "environment" : "user";
+        facingModeRef.current = nextFacing;
+        const camStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: nextFacing } });
+        const track = camStream.getVideoTracks()[0] || null;
+        if (!track) return;
+        try {
+          setActiveVideoDeviceId(track.getSettings?.().deviceId || null);
+        } catch {
+        }
+        await replaceOutgoingVideoTrackAll(track);
+        setIsVideoOff(false);
+      }
+    } catch (e) {
+      console.warn("Failed to switch camera:", e);
+    }
+  };
+
+  const cleanupAll = useCallback(() => {
+    try {
+      unsubscribersRef.current.forEach((u) => {
+        try {
+          u();
+        } catch {
+        }
+      });
+      unsubscribersRef.current = [];
+    } catch {
+    }
     try {
       pcsRef.current.forEach((pc) => {
         try {
           pc.onicecandidate = null;
           pc.ontrack = null;
-          pc.onconnectionstatechange = null;
           pc.close();
-        } catch { }
+        } catch {
+        }
       });
-    } catch { }
-    pcsRef.current = new Map();
+      pcsRef.current.clear();
+      videoSendersRef.current.clear();
+      pendingCandidatesRef.current.clear();
+    } catch {
+    }
     try {
-      if (localStreamRef.current) localStreamRef.current.getTracks().forEach((t) => t.stop());
-    } catch { }
-    localStreamRef.current = null;
-    try {
-      if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach((t) => t.stop());
-    } catch { }
-    screenStreamRef.current = null;
-    setIsScreenSharing(false);
-    setRemoteStreams({});
+      const ls = localStreamRef.current;
+      if (ls) ls.getTracks().forEach((t) => {
+        try {
+          t.stop();
+        } catch {
+        }
+      });
+      localStreamRef.current = null;
+    } catch {
+    }
   }, []);
 
   useEffect(() => {
-    return () => cleanup();
-  }, [cleanup]);
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      cleanupAll();
+    };
+  }, [cleanupAll]);
 
   useEffect(() => {
+    if (!sessionId) return;
     let cancelled = false;
     const run = async () => {
-      if (!sessionId || !chatId || !user?.uid) return;
       try {
         const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
-        videoDevicesRef.current = devices.filter((d) => d.kind === "videoinput");
-        const hasVideoInput = videoDevicesRef.current.length > 0;
-        const wantVideo = !!isVideoEnabled && hasVideoInput;
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-          video: wantVideo ? { facingMode: "user", width: { ideal: 640, max: 1280 }, height: { ideal: 360, max: 720 }, frameRate: { ideal: 24, max: 30 } } : false
-        });
+        const vids = devices.filter((d) => d.kind === "videoinput");
+        setVideoDevices(vids);
+        const wantVideo = !!isVideoEnabled && vids.length > 0;
+        let stream = null;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }, video: wantVideo ? { facingMode: "user", width: { ideal: 640, max: 1280 }, height: { ideal: 360, max: 720 }, frameRate: { ideal: 24, max: 30 } } : false });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          setIsVideoOff(true);
+        }
+        if (!stream) throw new Error("No local stream");
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
         localStreamRef.current = stream;
-        const vt = stream.getVideoTracks?.()[0];
-        const settings = vt?.getSettings?.();
-        if (settings?.deviceId) activeVideoDeviceIdRef.current = settings.deviceId;
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
           localVideoRef.current.muted = true;
-          try { await localVideoRef.current.play(); } catch { }
+          try {
+            await localVideoRef.current.play();
+          } catch {
+          }
         }
-
-        const sessionRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "group_calls", sessionId);
-        await setDoc(sessionRef, { sessionId, callType: isVideoEnabled ? "video" : "audio", updatedAt: serverTimestamp() }, { merge: true });
-        await setDoc(doc(sessionRef, "participants", user.uid), {
-          uid: user.uid,
-          name: user.displayName || "",
-          joinedAt: serverTimestamp(),
-          videoEnabled: !!isVideoEnabled,
-          screenSharing: false
-        }, { merge: true });
-
-        const unsubParts = onSnapshot(collection(sessionRef, "participants"), (snap) => {
-          const list = snap.docs.map((d) => d.data()).filter((p) => p && p.uid);
-          setParticipants(list);
+        // Register as participant (best-effort)
+        const participantRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_sessions", sessionId, "participants", user.uid);
+        await setDoc(participantRef, { uid: user.uid, name: profile?.name || "", avatar: profile?.avatar || "", joinedAt: serverTimestamp() }, { merge: true }).catch(() => {
         });
-        unsubscribersRef.current.push(unsubParts);
+
+        const participantsCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_sessions", sessionId, "participants");
+        const unsubParticipants = onSnapshot(participantsCol, (snap) => {
+          const uids = snap.docs.map((d) => d.id).filter(Boolean);
+          setParticipants(uids);
+        });
+        unsubscribersRef.current.push(unsubParticipants);
       } catch (e) {
-        console.error(e);
-        setCallError("通話を開始できませんでした（マイク/カメラの許可を確認してください）");
+        console.warn("Group call init failed:", e);
       }
     };
     run();
     return () => {
       cancelled = true;
     };
-  }, [chatId, sessionId, user?.uid, isVideoEnabled]);
+  }, [sessionId, chatId, user?.uid, isVideoEnabled]);
 
-  const getPairId = (a, b) => [a, b].sort().join("__");
-
-  const ensurePeer = useCallback((remoteUid) => {
+  const ensurePeerConnection = useCallback((remoteUid) => {
+    if (!sessionId) return;
     if (!remoteUid || remoteUid === user.uid) return;
     if (pcsRef.current.has(remoteUid)) return;
     const pc = new RTCPeerConnection(rtcConfig);
     pcsRef.current.set(remoteUid, pc);
-
-    const remoteStream = new MediaStream();
-    setRemoteStreams((prev) => ({ ...prev, [remoteUid]: remoteStream }));
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((t) => {
-        try { pc.addTrack(t, localStreamRef.current); } catch { }
-      });
-      try {
-        const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
-        if (sender) {
-          const params = sender.getParameters();
-          if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
-          params.encodings[0].maxBitrate = 2500000;
-          params.degradationPreference = "maintain-framerate";
-          sender.setParameters(params).catch(() => {});
-        }
-      } catch { }
-    }
-
+    pendingCandidatesRef.current.set(remoteUid, []);
     pc.ontrack = (event) => {
-      event.streams?.[0]?.getTracks?.().forEach((t) => {
-        try { remoteStream.addTrack(t); } catch { }
-      });
+      const directStream = event.streams?.[0];
+      const stream = directStream || (() => {
+        const s = new MediaStream();
+        if (event.track) s.addTrack(event.track);
+        return s;
+      })();
+      setRemoteStreamsByUid((prev) => ({ ...prev, [remoteUid]: stream }));
     };
-
-    const sessionRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "group_calls", sessionId);
-    const pairId = getPairId(user.uid, remoteUid);
-    const pairRef = doc(sessionRef, "pairs", pairId);
-    const candidatesCol = collection(pairRef, "candidates");
-
-    pc.onicecandidate = (event) => {
+    pc.onicecandidate = async (event) => {
       if (!event.candidate) return;
-      addDoc(candidatesCol, { from: user.uid, candidate: event.candidate.toJSON ? event.candidate.toJSON() : event.candidate, createdAt: Date.now() }).catch(() => {});
+      try {
+        const pairId = user.uid < remoteUid ? `${user.uid}_${remoteUid}` : `${remoteUid}_${user.uid}`;
+        const candCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_sessions", sessionId, "pairs", pairId, "candidates");
+        await addDoc(candCol, { senderId: user.uid, candidate: event.candidate.toJSON(), createdAt: serverTimestamp() });
+      } catch {
+      }
+    };
+    const localStream = localStreamRef.current;
+    if (localStream) {
+      localStream.getAudioTracks().forEach((t) => pc.addTrack(t, localStream));
+      const vTrack = localStream.getVideoTracks()[0] || null;
+      let sender = null;
+      if (vTrack && !isVideoOff) {
+        sender = pc.addTrack(vTrack, localStream);
+      } else {
+        try {
+          sender = pc.addTransceiver("video", { direction: "sendrecv" }).sender;
+        } catch {
+          sender = null;
+        }
+      }
+      if (sender) videoSendersRef.current.set(remoteUid, sender);
+    }
+    const pairId = user.uid < remoteUid ? `${user.uid}_${remoteUid}` : `${remoteUid}_${user.uid}`;
+    const signalingRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_sessions", sessionId, "pairs", pairId);
+    const candidatesCol = collection(db, "artifacts", appId, "public", "data", "chats", chatId, "call_sessions", sessionId, "pairs", pairId, "candidates");
+
+    const flushPending = async () => {
+      try {
+        const pending = pendingCandidatesRef.current.get(remoteUid) || [];
+        if (!pending.length) return;
+        for (const c of pending) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(c));
+          } catch {
+          }
+        }
+        pendingCandidatesRef.current.set(remoteUid, []);
+      } catch {
+      }
     };
 
-    const iAmOfferer = user.uid < remoteUid;
-
-    const unsubPair = onSnapshot(pairRef, async (snap) => {
-      const data = snap.data() || {};
+    const unsubSignal = onSnapshot(signalingRef, async (snap) => {
+      const data = snap.data();
+      if (!data) return;
+      const isOfferer = user.uid < remoteUid;
       try {
-        if (!data.offerSdp && iAmOfferer && pc.signalingState === "stable") {
-          const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-          await pc.setLocalDescription(offer);
-          await setDoc(pairRef, { offerSdp: offer.sdp, offerType: offer.type, offererId: user.uid, sessionId }, { merge: true });
+        if (!pc) return;
+        if (isOfferer) {
+          if (!pc.currentRemoteDescription && data.answerSdp) {
+            await pc.setRemoteDescription({ type: "answer", sdp: data.answerSdp });
+            await flushPending();
+          }
+        } else {
+          if (!pc.currentRemoteDescription && data.offerSdp) {
+            await pc.setRemoteDescription({ type: "offer", sdp: data.offerSdp });
+            await flushPending();
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await setDoc(signalingRef, { answerSdp: answer.sdp, answererId: user.uid, updatedAt: serverTimestamp() }, { merge: true });
+          }
         }
-        if (data.offerSdp && !iAmOfferer && !pc.currentRemoteDescription) {
-          await pc.setRemoteDescription(new RTCSessionDescription({ type: data.offerType || "offer", sdp: data.offerSdp }));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          await setDoc(pairRef, { answerSdp: answer.sdp, answerType: answer.type, answererId: user.uid }, { merge: true });
-        }
-        if (data.answerSdp && iAmOfferer && !pc.currentRemoteDescription) {
-          await pc.setRemoteDescription(new RTCSessionDescription({ type: data.answerType || "answer", sdp: data.answerSdp }));
-        }
-      } catch (e) {
-        console.warn("pair signaling failed:", e);
+      } catch {
       }
     });
-    unsubscribersRef.current.push(unsubPair);
+    unsubscribersRef.current.push(unsubSignal);
 
     const unsubCandidates = onSnapshot(candidatesCol, (snap) => {
-      let seen = seenCandidateIdsRef.current.get(remoteUid);
-      if (!seen) {
-        seen = new Set();
-        seenCandidateIdsRef.current.set(remoteUid, seen);
-      }
-      snap.docChanges().forEach((ch) => {
-        if (ch.type !== "added") return;
-        if (seen.has(ch.doc.id)) return;
-        seen.add(ch.doc.id);
-        const d = ch.doc.data();
-        if (!d || d.from === user.uid) return;
+      snap.docChanges().forEach(async (change) => {
+        if (change.type !== "added") return;
+        const data = change.doc.data();
+        if (!data || data.senderId === user.uid || !data.candidate) return;
         try {
-          pc.addIceCandidate(new RTCIceCandidate(d.candidate));
+          if (pc.remoteDescription) {
+            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+          } else {
+            const pending = pendingCandidatesRef.current.get(remoteUid) || [];
+            pending.push(data.candidate);
+            pendingCandidatesRef.current.set(remoteUid, pending);
+          }
         } catch {
         }
       });
     });
     unsubscribersRef.current.push(unsubCandidates);
-  }, [chatId, sessionId, user.uid]);
+
+    const isOfferer = user.uid < remoteUid;
+    if (isOfferer) {
+      (async () => {
+        try {
+          const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+          await pc.setLocalDescription(offer);
+          await setDoc(signalingRef, { offerSdp: offer.sdp, offererId: user.uid, updatedAt: serverTimestamp() }, { merge: true });
+        } catch {
+        }
+      })();
+    }
+  }, [sessionId, chatId, user?.uid, isVideoOff]);
 
   useEffect(() => {
     if (!sessionId) return;
-    participants.forEach((p) => {
-      if (p?.uid && p.uid !== user.uid) ensurePeer(p.uid);
-    });
-  }, [participants, ensurePeer, sessionId, user.uid]);
-
-  const toggleMute = () => {
-    const stream = localStreamRef.current;
-    if (!stream) return;
-    const shouldMute = !isMuted;
-    stream.getAudioTracks().forEach((t) => t.enabled = !shouldMute);
-    setIsMuted(shouldMute);
-  };
-
-  const toggleVideo = () => {
-    const stream = localStreamRef.current;
-    if (!stream) return;
-    const shouldDisable = !isVideoOff;
-    stream.getVideoTracks().forEach((t) => t.enabled = !shouldDisable);
-    setIsVideoOff(shouldDisable);
-  };
-
-  const replaceOutgoingVideoTrackAll = async (newTrack) => {
-    const stream = localStreamRef.current;
-    if (!stream || !newTrack) return;
-    const oldTracks = stream.getVideoTracks();
-    oldTracks.forEach((t) => {
-      if (t !== newTrack) {
-        stream.removeTrack(t);
-        try { t.stop(); } catch { }
+    const others = participants.filter((uid) => uid && uid !== user.uid);
+    others.forEach((uid) => ensurePeerConnection(uid));
+    // Close removed peers
+    pcsRef.current.forEach((pc, uid) => {
+      if (!others.includes(uid)) {
+        try {
+          pc.close();
+        } catch {
+        }
+        pcsRef.current.delete(uid);
+        videoSendersRef.current.delete(uid);
+        pendingCandidatesRef.current.delete(uid);
+        setRemoteStreamsByUid((prev) => {
+          const next = { ...prev };
+          delete next[uid];
+          return next;
+        });
       }
     });
-    if (!stream.getVideoTracks().includes(newTrack)) stream.addTrack(newTrack);
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream;
-      localVideoRef.current.muted = true;
-      try { await localVideoRef.current.play(); } catch { }
-    }
-    pcsRef.current.forEach((pc) => {
-      const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
-      if (sender) sender.replaceTrack(newTrack).catch(() => {});
+  }, [participants, ensurePeerConnection, sessionId]);
+
+  useEffect(() => {
+    const combined = new MediaStream();
+    Object.values(remoteStreamsByUid).forEach((s) => {
+      try {
+        s.getAudioTracks().forEach((t) => combined.addTrack(t));
+      } catch {
+      }
     });
-  };
-
-  const switchCamera = async () => {
-    if (!isVideoEnabled || isVideoOff || isScreenSharing) return;
-    try {
-      let devices = videoDevicesRef.current;
-      if (!devices || devices.length === 0) {
-        const all = await navigator.mediaDevices.enumerateDevices().catch(() => []);
-        devices = all.filter((d) => d.kind === "videoinput");
-        videoDevicesRef.current = devices;
-      }
-      if (!devices || devices.length <= 1) return;
-      const currentId = activeVideoDeviceIdRef.current;
-      const idx = devices.findIndex((d) => d.deviceId === currentId);
-      const next = devices[(idx + 1) % devices.length];
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          deviceId: next?.deviceId ? { exact: next.deviceId } : void 0,
-          width: { ideal: 640, max: 1280 },
-          height: { ideal: 360, max: 720 },
-          frameRate: { ideal: 24, max: 30 }
-        },
-        audio: false
-      });
-      const newTrack = newStream.getVideoTracks()[0];
-      if (!newTrack) return;
-      activeVideoDeviceIdRef.current = next?.deviceId || activeVideoDeviceIdRef.current;
-      await replaceOutgoingVideoTrackAll(newTrack);
-    } catch (e) {
-      console.warn("switchCamera failed:", e);
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = combined;
+      tryPlayRemoteAudio();
     }
-  };
+  }, [remoteStreamsByUid, tryPlayRemoteAudio]);
 
-  const stopScreenShare = useCallback(async () => {
-    if (!isScreenSharing) return;
-    try {
-      const s = screenStreamRef.current;
-      screenStreamRef.current = null;
-      setIsScreenSharing(false);
-      if (s) {
-        try { s.getTracks().forEach((t) => t.stop()); } catch { }
-      }
-      if (!isVideoEnabled) return;
-      const deviceId = activeVideoDeviceIdRef.current;
-      const camStream = await navigator.mediaDevices.getUserMedia({
-        video: deviceId ? { deviceId: { exact: deviceId }, width: { ideal: 640, max: 1280 }, height: { ideal: 360, max: 720 }, frameRate: { ideal: 24, max: 30 } } : { facingMode: "user", width: { ideal: 640, max: 1280 }, height: { ideal: 360, max: 720 }, frameRate: { ideal: 24, max: 30 } },
-        audio: false
-      });
-      const camTrack = camStream.getVideoTracks()[0];
-      if (camTrack) await replaceOutgoingVideoTrackAll(camTrack);
-    } catch (e) {
-      console.warn("stopScreenShare failed:", e);
-    }
-  }, [isScreenSharing, isVideoEnabled]);
+  const tiles = [user.uid, ...participants.filter((uid) => uid && uid !== user.uid)];
+  const total = tiles.length;
+  const cols = total <= 1 ? 1 : total <= 4 ? 2 : total <= 9 ? 3 : 4;
 
-  const toggleScreenShare = async () => {
-    if (!isVideoEnabled || isVideoOff) return;
-    if (isScreenSharing) {
-      await stopScreenShare();
-      return;
-    }
-    try {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-      const track = displayStream.getVideoTracks()[0];
-      if (!track) return;
-      screenStreamRef.current = displayStream;
-      setIsScreenSharing(true);
-      track.onended = () => {
-        stopScreenShare();
-      };
-      await replaceOutgoingVideoTrackAll(track);
-    } catch (e) {
-      console.warn("toggleScreenShare failed:", e);
-    }
-  };
-
-  const tiles = useMemo(() => {
-    const remotes = Object.entries(remoteStreams).map(([uid, stream]) => ({ uid, stream, isLocal: false }));
-    const local = { uid: user.uid, stream: localStreamRef.current, isLocal: true };
-    return [local, ...remotes];
-  }, [remoteStreams, user.uid]);
-
-  const cols = useMemo(() => {
-    const n = tiles.length;
-    if (n <= 1) return 1;
-    if (n === 2) return 2;
-    if (n <= 4) return 2;
-    if (n <= 6) return 3;
-    return 3;
-  }, [tiles.length]);
-
-  if (callError) {
-    return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black flex items-center justify-center text-white flex-col gap-4", children: [
-      /* @__PURE__ */ jsx(AlertCircle, { className: "w-16 h-16 text-red-500" }),
-      /* @__PURE__ */ jsx("p", { className: "font-bold text-lg text-center px-8", children: callError }),
-      /* @__PURE__ */ jsx("button", { onClick: onEndCall, className: "bg-red-600 px-6 py-3 rounded-full font-bold", children: "戻る" })
-    ] });
-  }
-
-  return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black flex flex-col", children: [
-    /* @__PURE__ */ jsx("div", { className: "flex-1 relative overflow-hidden", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : void 0, backgroundSize: "cover", backgroundPosition: "center" }, children: /* @__PURE__ */ jsx("div", { className: "w-full h-full p-2", style: { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: "8px" }, children: tiles.map((t) => {
-      const isLocal = t.isLocal;
-      const filter = isLocal ? getFilterStyle(activeEffect) : "none";
-      return /* @__PURE__ */ jsxs("div", { className: "relative bg-black rounded-xl overflow-hidden border border-white/10", children: [
-        /* @__PURE__ */ jsx("video", { ref: (el) => {
-          if (!el) return;
-          if (t.stream && el.srcObject !== t.stream) el.srcObject = t.stream;
-          el.muted = isLocal;
-          el.playsInline = true;
-          el.autoplay = true;
-          try { el.play(); } catch { }
-        }, className: "w-full h-full object-cover", style: { filter, transform: isLocal ? "scaleX(-1)" : void 0 }, autoPlay: true, playsInline: true }),
-        /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/40 text-white text-[10px] px-2 py-0.5 rounded-full", children: isLocal ? "You" : (participants.find((p) => p.uid === t.uid)?.name || t.uid.slice(0, 6)) })
-      ] }, t.uid);
-    }) }) }),
-    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-6 pb-6 backdrop-blur-lg", children: [
-      /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `w-16 h-16 rounded-full ${isMuted ? "bg-red-600 text-white" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
-      /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: !isVideoEnabled || isVideoOff || isScreenSharing, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff || isScreenSharing ? "bg-gray-700/50 text-white/50" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
-      /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: !isVideoEnabled || isVideoOff, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff ? "bg-gray-700/50 text-white/50" : isScreenSharing ? "bg-green-500 text-white hover:bg-green-600" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: isScreenSharing ? /* @__PURE__ */ jsx(ScreenShareOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(ScreenShare, { className: "w-6 h-6" }) }),
-      /* @__PURE__ */ jsxs("button", { onClick: onEndCall, className: "w-20 h-20 bg-red-600 rounded-full text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
+  return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black flex flex-col animate-in fade-in", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : "none", backgroundSize: "cover" }, children: [
+    /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "hidden" }),
+    /* @__PURE__ */ jsxs("div", { className: "relative flex-1 backdrop-blur-md bg-black/30 p-2", children: [
+      needsRemotePlay && /* @__PURE__ */ jsxs("button", { onClick: tryPlayRemoteAudio, className: "absolute top-4 left-1/2 -translate-x-1/2 bg-white/90 text-gray-800 text-xs font-bold px-4 py-2 rounded-full shadow-lg z-10", children: [
+        /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
+        "\u97F3\u58F0\u3092\u518D\u751F"
+      ] }),
+      /* @__PURE__ */ jsx("div", { className: "grid gap-2 w-full h-full", style: { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }, children: tiles.map((uid) => {
+        const meta = getUserMeta(uid);
+        const isLocal = uid === user.uid;
+        const stream = isLocal ? localStreamRef.current : remoteStreamsByUid[uid];
+        const hasVideo = !!stream?.getVideoTracks?.().some((t) => t.readyState === "live");
+        return /* @__PURE__ */ jsxs("div", { className: "relative rounded-xl overflow-hidden bg-black/40 border border-white/10", children: [
+          hasVideo ? /* @__PURE__ */ jsx("video", { ref: (el) => {
+            if (!el) return;
+            if (isLocal) localVideoRef.current = el;
+            try {
+              el.srcObject = stream;
+              el.muted = isLocal;
+              el.playsInline = true;
+              el.autoplay = true;
+              el.play().catch(() => {
+              });
+            } catch {
+            }
+          }, autoPlay: true, playsInline: true, muted: isLocal, className: `w-full h-full object-cover ${isLocal ? "transform scale-x-[-1]" : ""}`, style: isLocal ? { filter: getFilterStyle(activeEffect) } : void 0 }) : /* @__PURE__ */ jsxs("div", { className: "w-full h-full flex flex-col items-center justify-center text-white gap-3", children: [
+            meta.avatar ? /* @__PURE__ */ jsx("img", { src: meta.avatar, className: "w-16 h-16 rounded-full object-cover" }) : /* @__PURE__ */ jsx("div", { className: "w-16 h-16 rounded-full bg-gray-700 flex items-center justify-center", children: /* @__PURE__ */ jsx(User, { className: "w-8 h-8" }) }),
+            /* @__PURE__ */ jsx("div", { className: "text-xs font-bold opacity-90", children: meta.name })
+          ] }),
+          /* @__PURE__ */ jsx("div", { className: "absolute bottom-2 left-2 bg-black/50 text-white text-[10px] px-2 py-1 rounded", children: meta.name })
+        ] }, uid);
+      }) })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-6 pb-6 backdrop-blur-lg shrink-0", children: [
+      /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `p-4 rounded-full transition-all ${isMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
+      /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, className: `p-4 rounded-full transition-all ${isScreenSharing ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: /* @__PURE__ */ jsx(Upload, { className: "w-6 h-6" }) }),
+      /* @__PURE__ */ jsxs("button", { onClick: onEndCall, className: "p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
         /* @__PURE__ */ jsx(PhoneOff, { className: "w-8 h-8" }),
         /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u7D42\u4E86" })
       ] }),
-      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `w-16 h-16 rounded-full ${isVideoOff ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }) })
+      /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `p-4 rounded-full transition-all ${isVideoOff ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }) }),
+      /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: isScreenSharing, className: `p-4 rounded-full transition-all ${isScreenSharing ? "bg-gray-600 text-gray-300 opacity-60" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) })
     ] })
   ] });
 };
@@ -2140,12 +2289,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
         try {
           let base64Data = "";
           if (m.chunkCount) {
-            const chunkPromises = [];
-            for (let i = 0; i < m.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks", `${i}`)));
-            const chunkDocs = await Promise.all(chunkPromises);
-            chunkDocs.forEach((d) => {
-              if (d.exists()) base64Data += d.data().data;
-            });
+            base64Data = await fetchChunkDataByCount((i) => doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks", `${i}`), m.chunkCount, CHUNK_FETCH_LIMIT);
           } else {
             const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc")));
             snap.forEach((d) => base64Data += d.data().data);
@@ -2191,12 +2335,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
       if (!dataUrl && m.hasChunks) {
         let base64Data = "";
         if (m.chunkCount) {
-          const chunkPromises = [];
-          for (let i = 0; i < m.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks", `${i}`)));
-          const chunkDocs = await Promise.all(chunkPromises);
-          chunkDocs.forEach((d) => {
-            if (d.exists()) base64Data += d.data().data;
-          });
+          base64Data = await fetchChunkDataByCount((i) => doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks", `${i}`), m.chunkCount, CHUNK_FETCH_LIMIT);
         } else {
           const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc")));
           snap.forEach((d) => base64Data += d.data().data);
@@ -2296,7 +2435,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
           ] }),
           /* @__PURE__ */ jsx("button", { onClick: (e) => {
             e.stopPropagation();
-            onJoinCall(m.callType === "video", m.senderId, m.callSessionId || m.sessionId);
+            onJoinCall(m.callType === "video", m.senderId, m.sessionId);
           }, className: "w-full bg-green-500 text-white font-bold py-2 rounded-xl shadow mt-2 hover:bg-green-600 transition-colors", children: "\u53C2\u52A0\u3059\u308B" })
         ] }),
         m.type === "sticker" && /* @__PURE__ */ jsxs("div", { className: "relative group/sticker", onClick: handleStickerClick, children: [
@@ -2415,12 +2554,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
       (async () => {
         let mergedData = "";
         if (post.chunkCount) {
-          const chunkPromises = [];
-          for (let i = 0; i < post.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks", `${i}`)));
-          const chunkDocs = await Promise.all(chunkPromises);
-          chunkDocs.forEach((d) => {
-            if (d.exists()) mergedData += d.data().data;
-          });
+          mergedData = await fetchChunkDataByCount((i) => doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks", `${i}`), post.chunkCount, CHUNK_FETCH_LIMIT);
         } else {
           const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"), orderBy("index", "asc")));
           snap.forEach((d) => mergedData += d.data().data);
@@ -3966,7 +4100,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       if (file && file.size > CHUNK_SIZE) {
         hasChunks = true;
         chunkCount = Math.ceil(file.size / CHUNK_SIZE);
-        const CONCURRENCY = 5;
+        // Upload chunks with bounded concurrency for better throughput and reliability.
+        const CONCURRENCY = 10;
         const executing = /* @__PURE__ */ new Set();
         let completed = 0;
         for (let i = 0; i < chunkCount; i++) {
@@ -4427,153 +4562,155 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     coinModalTarget && /* @__PURE__ */ jsx(CoinTransferModal, { onClose: () => setCoinModalTarget(null), myWallet: profile.wallet, myUid: user.uid, targetUid: coinModalTarget.uid, targetName: coinModalTarget.name, showNotification })
   ] });
 };
-const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, appId: appId2, onLoadMore, hasMore, loadingMore }) => {
-  const [content, setContent] = useState("");
-  const [mediaFile, setMediaFile] = useState(null);
-  const [mediaPreview, setMediaPreview] = useState(null);
-  const [mediaType, setMediaType] = useState("image");
-  const [isUploading, setIsUploading] = useState(false);
-  const listRef = useRef(null);
-  const sentinelRef = useRef(null);
-
-  useEffect(() => {
-    if (!onLoadMore) return;
-    const root = listRef.current;
-    const target = sentinelRef.current;
-    if (!root || !target) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        const e = entries[0];
-        if (e?.isIntersecting && hasMore && !loadingMore) {
-          onLoadMore();
-        }
-      },
-      { root, rootMargin: "250px" }
-    );
-    obs.observe(target);
-    return () => obs.disconnect();
-  }, [onLoadMore, hasMore, loadingMore]);
-
+const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, appId: appId2 }) => {
+  const [content, setContent] = useState(""), [mediaFile, setMediaFile] = useState(null), [mediaPreview, setMediaPreview] = useState(null), [mediaType, setMediaType] = useState("image"), [isUploading, setIsUploading] = useState(false);
+  const [voomPosts, setVoomPosts] = useState([]);
+  const [lastPostDoc, setLastPostDoc] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const scrollContainerRef = useRef(null);
+  const PAGE_SIZE = 5;
   useEffect(() => {
     return () => {
-      if (mediaPreview && mediaPreview.startsWith("blob:")) URL.revokeObjectURL(mediaPreview);
+      try {
+        if (mediaPreview && mediaPreview.startsWith("blob:")) URL.revokeObjectURL(mediaPreview);
+      } catch {
+      }
     };
   }, [mediaPreview]);
-
-  const readAsDataURL = (file) => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (ev) => resolve(ev.target.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-
-  const uploadChunksBase64 = async (postId, file) => {
-    const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
-    const CONCURRENCY = 5;
-    const executing = new Set();
-    for (let i = 0; i < chunkCount; i++) {
-      const start = i * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, file.size);
-      const blobSlice = file.slice(start, end);
-      const p = new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-          try {
-            const base64Data = e.target.result.split(",")[1];
-            await setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", postId, "chunks", `${i}`), { data: base64Data, index: i });
-            resolve(null);
-          } catch (err) {
-            reject(err);
-          }
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blobSlice);
-      });
-      const pWrapper = p.then(() => executing.delete(pWrapper));
-      executing.add(pWrapper);
-      if (executing.size >= CONCURRENCY) {
-        await Promise.race(executing);
+  const fetchPosts = async ({ mode = "reset" } = {}) => {
+    if (loadingMore) return;
+    if (mode === "more" && (!hasMore || !lastPostDoc)) return;
+    setLoadingMore(true);
+    try {
+      const postsCol = collection(db2, "artifacts", appId2, "public", "data", "posts");
+      const q = mode === "more" && lastPostDoc ? query(postsCol, orderBy("createdAt", "desc"), startAfter(lastPostDoc), limit(PAGE_SIZE)) : query(postsCol, orderBy("createdAt", "desc"), limit(PAGE_SIZE));
+      const snap = await getDocs(q);
+      const newItems = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (mode === "more") {
+        setVoomPosts((prev) => {
+          const ids = new Set(prev.map((p) => p.id));
+          return [...prev, ...newItems.filter((p) => !ids.has(p.id))];
+        });
+      } else {
+        setVoomPosts(newItems);
       }
+      setLastPostDoc(snap.docs[snap.docs.length - 1] || null);
+      setHasMore(snap.docs.length === PAGE_SIZE);
+    } catch {
+    } finally {
+      setLoadingMore(false);
     }
-    await Promise.all(executing);
-    return chunkCount;
   };
-
+  useEffect(() => {
+    setVoomPosts([]);
+    setLastPostDoc(null);
+    setHasMore(true);
+    fetchPosts({ mode: "reset" });
+  }, [user?.uid]);
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (remaining < 500) fetchPosts({ mode: "more" });
+  };
   const postMessage = async () => {
-    if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
-    if ((!content && !mediaFile) || isUploading) return;
-
+    if (profile?.isBanned) return showNotification("\u30A2\u30AB\u30A6\u30F3\u30C8\u304C\u5229\u7528\u505C\u6B62\u3055\u308C\u3066\u3044\u307E\u3059 \u{1F6AB}");
+    if (!content && !mediaFile || isUploading) return;
     setIsUploading(true);
     try {
       const newPostRef = doc(collection(db2, "artifacts", appId2, "public", "data", "posts"));
+      let storedMedia = null;
       let hasChunks = false;
       let chunkCount = 0;
-      let storedMedia = null;
       let mimeType = null;
-
       if (mediaFile) {
         mimeType = mediaFile.type || null;
         if (mediaFile.size > CHUNK_SIZE) {
           hasChunks = true;
+          chunkCount = Math.ceil(mediaFile.size / CHUNK_SIZE);
+          const CONCURRENCY = 10;
+          const executing = /* @__PURE__ */ new Set();
+          let completed = 0;
+          for (let i = 0; i < chunkCount; i++) {
+            const start = i * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, mediaFile.size);
+            const blobSlice = mediaFile.slice(start, end);
+            const p = new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = async (e) => {
+                try {
+                  const base64Data = e.target.result.split(",")[1];
+                  await setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", newPostRef.id, "chunks", `${i}`), { data: base64Data, index: i });
+                  completed++;
+                  resolve(null);
+                } catch (err) {
+                  reject(err);
+                }
+              };
+              reader.onerror = reject;
+              reader.readAsDataURL(blobSlice);
+            });
+            const pWrapper = p.then(() => executing.delete(pWrapper));
+            executing.add(pWrapper);
+            if (executing.size >= CONCURRENCY) await Promise.race(executing);
+          }
+          await Promise.all(executing);
           storedMedia = null;
-          chunkCount = await uploadChunksBase64(newPostRef.id, mediaFile);
         } else {
-          storedMedia = await readAsDataURL(mediaFile);
-          hasChunks = false;
-          chunkCount = 0;
+          storedMedia = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.readAsDataURL(mediaFile);
+          });
         }
       }
-
-      await setDoc(newPostRef, {
-        userId: user.uid,
-        content,
-        media: storedMedia,
-        mediaType,
-        mimeType,
-        hasChunks,
-        chunkCount,
-        likes: [],
-        comments: [],
-        createdAt: serverTimestamp()
-      });
-
+      await setDoc(newPostRef, { userId: user.uid, content, media: storedMedia, mediaType, mimeType, hasChunks, chunkCount, likes: [], comments: [], createdAt: serverTimestamp() });
       setContent("");
       setMediaFile(null);
-      if (mediaPreview && mediaPreview.startsWith("blob:")) URL.revokeObjectURL(mediaPreview);
+      if (mediaPreview && mediaPreview.startsWith("blob:")) {
+        try {
+          URL.revokeObjectURL(mediaPreview);
+        } catch {
+        }
+      }
       setMediaPreview(null);
-      showNotification("投稿しました");
-    } catch (e) {
-      console.error(e);
-      showNotification("投稿に失敗しました");
+      showNotification("\u6295\u7A3F\u3057\u307E\u3057\u305F");
+      fetchPosts({ mode: "reset" });
     } finally {
       setIsUploading(false);
     }
   };
-
   const handleVoomFileUpload = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
-    if (mediaPreview && mediaPreview.startsWith("blob:")) URL.revokeObjectURL(mediaPreview);
-    setMediaFile(file);
-    try {
-      setMediaPreview(URL.createObjectURL(file));
-    } catch {
-      setMediaPreview(null);
+    if (mediaPreview && mediaPreview.startsWith("blob:")) {
+      try {
+        URL.revokeObjectURL(mediaPreview);
+      } catch {
+      }
     }
+    setMediaFile(file);
     setMediaType(file.type.startsWith("video") ? "video" : "image");
+    setMediaPreview(URL.createObjectURL(file));
   };
-
+  const displayedPosts = voomPosts.length ? voomPosts : posts;
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-gray-50", children: [
     /* @__PURE__ */ jsx("div", { className: "bg-white p-4 border-b shrink-0", children: /* @__PURE__ */ jsx("h1", { className: "text-xl font-bold", children: "VOOM" }) }),
-    /* @__PURE__ */ jsxs("div", { ref: listRef, className: "flex-1 overflow-y-auto scrollbar-hide pb-20", children: [
+    /* @__PURE__ */ jsxs("div", { ref: scrollContainerRef, onScroll: handleScroll, className: "flex-1 overflow-y-auto scrollbar-hide pb-20", children: [
       /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2", children: [
-        /* @__PURE__ */ jsx("textarea", { className: "w-full text-sm outline-none resize-none min-h-[60px]", placeholder: "何をしていますか？", value: content, onChange: (e) => setContent(e.target.value) }),
+        /* @__PURE__ */ jsx("textarea", { className: "w-full text-sm outline-none resize-none min-h-[60px]", placeholder: "\u4F55\u3092\u3057\u3066\u3044\u307E\u3059\u304B\uFF1F", value: content, onChange: (e) => setContent(e.target.value) }),
         mediaPreview && /* @__PURE__ */ jsxs("div", { className: "relative mt-2", children: [
           mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaPreview, className: "w-full rounded-xl bg-black", controls: true }) : /* @__PURE__ */ jsx("img", { src: mediaPreview, className: "max-h-60 rounded-xl" }),
           /* @__PURE__ */ jsx("button", { onClick: () => {
-            if (mediaPreview && mediaPreview.startsWith("blob:")) URL.revokeObjectURL(mediaPreview);
-            setMediaPreview(null);
             setMediaFile(null);
+            if (mediaPreview && mediaPreview.startsWith("blob:")) {
+              try {
+                URL.revokeObjectURL(mediaPreview);
+              } catch {
+              }
+            }
+            setMediaPreview(null);
           }, className: "absolute top-1 right-1 bg-black/50 text-white rounded-full p-1", children: /* @__PURE__ */ jsx(X, { className: "w-3 h-3" }) })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "flex justify-between items-center pt-2 border-t mt-2", children: [
@@ -4581,11 +4718,10 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
             /* @__PURE__ */ jsx(ImageIcon, { className: "w-5 h-5 text-gray-400" }),
             /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*,video/*", onChange: handleVoomFileUpload })
           ] }),
-          /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || mediaFile ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: "投稿" })
+          /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || mediaPreview ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: "\u6295\u7A3F" })
         ] })
       ] }),
-      posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id)),
-      /* @__PURE__ */ jsx("div", { ref: sentinelRef, className: "h-8" })
+      displayedPosts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id))
     ] })
   ] });
 };
@@ -4596,7 +4732,7 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
   }, [profile]);
   const handleSave = () => {
     updateDoc(doc(db, "artifacts", appId, "public", "data", "users", user.uid), edit);
-    try { if (user?.isAnonymous) localStorage.setItem("guestProfile", JSON.stringify(edit)); } catch { }
+    saveProfileCache({ ...profile, ...edit });
     showNotification("\u4FDD\u5B58\u3057\u307E\u3057\u305F \u2705");
   };
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-white", children: [
@@ -4641,7 +4777,10 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
             /* @__PURE__ */ jsx("input", { className: "w-full border-b py-2 outline-none", value: edit.status || "", onChange: (e) => setEdit({ ...edit, status: e.target.value }) })
           ] }),
           /* @__PURE__ */ jsx("button", { onClick: handleSave, className: "w-full bg-green-500 text-white py-4 rounded-2xl font-bold shadow-lg", children: "\u4FDD\u5B58" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => { try { if (user?.isAnonymous) localStorage.setItem("guestProfile", JSON.stringify(edit)); } catch { } signOut(auth); }, className: "w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4", children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })
+          /* @__PURE__ */ jsx("button", { onClick: () => {
+            saveProfileCache({ ...profile, ...edit });
+            signOut(auth);
+          }, className: "w-full bg-gray-100 text-red-500 py-4 rounded-2xl font-bold mt-4", children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })
         ] })
       ] })
     ] })
@@ -4651,53 +4790,176 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [scanning, setScanning] = useState(false);
-  const startScanner = async () => {
-    setScanning(true);
+  const scanningRef = useRef(false);
+  const detectorRef = useRef(null);
+
+  const ensureDetector = () => {
+    if (detectorRef.current) return detectorRef.current;
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-        videoRef.current.setAttribute("playsinline", "true");
-        videoRef.current.play();
-        requestAnimationFrame(tick);
+      if (window.BarcodeDetector) {
+        detectorRef.current = new window.BarcodeDetector({ formats: ["qr_code"] });
       }
-    } catch (err) {
-      setScanning(false);
+    } catch (e) {
+      console.warn("BarcodeDetector init failed:", e);
+      detectorRef.current = null;
     }
+    return detectorRef.current;
   };
-  useEffect(() => {
-    return () => {
-      if (videoRef.current && videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject;
-        stream.getTracks().forEach((t) => t.stop());
+
+  const stopStream = () => {
+    try {
+      const stream = videoRef.current?.srcObject;
+      if (stream && typeof stream.getTracks === "function") {
+        stream.getTracks().forEach((t) => {
+          try {
+            t.stop();
+          } catch {
+          }
+        });
       }
-    };
-  }, []);
-  const tick = () => {
-    if (videoRef.current?.readyState === videoRef.current?.HAVE_ENOUGH_DATA) {
+    } catch {
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+  };
+
+  const handleFound = (val) => {
+    if (!val) return;
+    stopStream();
+    scanningRef.current = false;
+    setScanning(false);
+    addFriendById(val);
+  };
+
+  const tick = async () => {
+    if (!scanningRef.current) return;
+    try {
+      const v = videoRef.current;
       const c = canvasRef.current;
-      const ctx = c?.getContext("2d");
-      if (c && ctx) {
-        c.height = videoRef.current.videoHeight;
-        c.width = videoRef.current.videoWidth;
-        ctx.drawImage(videoRef.current, 0, 0, c.width, c.height);
-        const win = window;
-        if (win.jsQR) {
-          const code = win.jsQR(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
-          if (code) {
-            if (videoRef.current.srcObject) {
-              const stream = videoRef.current.srcObject;
-              stream.getTracks().forEach((t) => t.stop());
+      if (v && c && v.readyState >= v.HAVE_CURRENT_DATA) {
+        const ctx = c.getContext("2d", { willReadFrequently: true });
+        if (ctx) {
+          const vw = v.videoWidth || 0;
+          const vh = v.videoHeight || 0;
+          if (vw > 0 && vh > 0) {
+            c.width = vw;
+            c.height = vh;
+            ctx.drawImage(v, 0, 0, vw, vh);
+
+            // 1) Prefer native detector (fast, no external libs)
+            const detector = ensureDetector();
+            if (detector) {
+              try {
+                const bmp = await createImageBitmap(c);
+                const res = await detector.detect(bmp);
+                try {
+                  bmp.close?.();
+                } catch {
+                }
+                const code = res?.[0]?.rawValue;
+                if (code) return handleFound(code);
+              } catch (e) {
+                // ignore, fallback below
+              }
             }
-            setScanning(false);
-            addFriendById(code.data);
-            return;
+
+            // 2) Fallback: jsQR if provided (optional)
+            const win = window;
+            if (win.jsQR) {
+              const imgData = ctx.getImageData(0, 0, vw, vh);
+              const code = win.jsQR(imgData.data, vw, vh);
+              if (code?.data) return handleFound(code.data);
+            }
           }
         }
       }
+    } catch (e) {
+      // keep scanning; transient failures happen
     }
-    if (scanning) requestAnimationFrame(tick);
+    if (scanningRef.current) requestAnimationFrame(() => tick());
   };
+
+  const startScanner = async () => {
+    if (scanningRef.current) return;
+    setScanning(true);
+    scanningRef.current = true;
+    try {
+      stopStream();
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+        videoRef.current.muted = true;
+        videoRef.current.setAttribute("playsinline", "true");
+        try {
+          await videoRef.current.play();
+        } catch {
+        }
+        requestAnimationFrame(() => tick());
+      }
+    } catch (err) {
+      console.warn("Failed to start QR scanner:", err);
+      scanningRef.current = false;
+      setScanning(false);
+    }
+  };
+
+  useEffect(() => {
+    ensureDetector();
+    return () => {
+      scanningRef.current = false;
+      stopStream();
+    };
+  }, []);
+
+  const decodeFromFile = async (file) => {
+    if (!file) return;
+    try {
+      const detector = ensureDetector();
+      // Use native detector if available
+      if (detector) {
+        const bmp = await createImageBitmap(file);
+        const res = await detector.detect(bmp);
+        try {
+          bmp.close?.();
+        } catch {
+        }
+        const code = res?.[0]?.rawValue;
+        if (code) return handleFound(code);
+      }
+    } catch {
+      // fallback below
+    }
+
+    // Fallback: jsQR (optional)
+    try {
+      const r = new FileReader();
+      r.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement("canvas");
+          const ctx = c.getContext("2d", { willReadFrequently: true });
+          if (!ctx) return;
+          c.width = img.width;
+          c.height = img.height;
+          ctx.drawImage(img, 0, 0);
+          const win = window;
+          if (!win.jsQR) return;
+          const code = win.jsQR(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
+          if (code?.data) handleFound(code.data);
+        };
+        img.src = ev.target.result;
+      };
+      r.readAsDataURL(file);
+    } catch {
+    }
+  };
+
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-white", children: [
     /* @__PURE__ */ jsxs("div", { className: "p-4 border-b flex items-center gap-4", children: [
       /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("home") }),
@@ -4717,23 +4979,12 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
           /* @__PURE__ */ jsx(Upload, { className: "w-6 h-6 text-blue-500" }),
           /* @__PURE__ */ jsx("span", { children: "\u8AAD\u8FBC" }),
           /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*", onChange: (e) => {
-            const r = new FileReader();
-            r.onload = (ev) => {
-              const img = new Image();
-              img.onload = () => {
-                const c = document.createElement("canvas"), ctx = c.getContext("2d");
-                if (ctx) {
-                  c.width = img.width;
-                  c.height = img.height;
-                  ctx.drawImage(img, 0, 0);
-                  const win = window;
-                  const code = win.jsQR(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
-                  if (code) addFriendById(code.data);
-                }
-              };
-              img.src = ev.target.result;
-            };
-            r.readAsDataURL(e.target.files[0]);
+            const f = e.target.files?.[0];
+            decodeFromFile(f);
+            try {
+              e.target.value = "";
+            } catch {
+            }
           } })
         ] })
       ] })
@@ -5124,11 +5375,6 @@ function App() {
   const [allUsers, setAllUsers] = useState([]);
   const [chats, setChats] = useState([]);
   const [posts, setPosts] = useState([]);
-  const [postsHasMore, setPostsHasMore] = useState(true);
-  const [postsLoadingMore, setPostsLoadingMore] = useState(false);
-  const postsCursorRef = useRef(null);
-  const POSTS_PAGE_SIZE = 5;
-
   const [notification, setNotification] = useState(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -5173,30 +5419,25 @@ function App() {
         if (docSnap.exists()) {
           setProfile(docSnap.data());
         } else {
-                    let savedGuest = null;
-          if (u.isAnonymous) {
-            try {
-              savedGuest = JSON.parse(localStorage.getItem("guestProfile") || "null");
-            } catch {
-              savedGuest = null;
-            }
-          }
+          const cachedRaw = loadProfileCache();
+          const cached = cachedRaw && cachedRaw.uid === u.uid ? cachedRaw : null;
           const initialProfile = {
             uid: u.uid,
-            name: savedGuest?.name || u.displayName || `User_${u.uid.slice(0, 4)}`,
-            id: savedGuest?.id || `user_${u.uid.slice(0, 6)}`,
-            status: savedGuest?.status || "よろしくお願いします！",
-            birthday: savedGuest?.birthday || "",
-            avatar: savedGuest?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
-            cover: savedGuest?.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
-            friends: Array.isArray(savedGuest?.friends) ? savedGuest.friends : [],
-            hiddenFriends: Array.isArray(savedGuest?.hiddenFriends) ? savedGuest.hiddenFriends : [],
-            hiddenChats: Array.isArray(savedGuest?.hiddenChats) ? savedGuest.hiddenChats : [],
-            wallet: typeof savedGuest?.wallet === "number" ? savedGuest.wallet : 1e3,
+            name: cached?.name || u.displayName || `User_${u.uid.slice(0, 4)}`,
+            id: cached?.id || `user_${u.uid.slice(0, 6)}`,
+            status: cached?.status || "\u3088\u308D\u3057\u304F\u304A\u9858\u3044\u3057\u307E\u3059\uFF01",
+            birthday: cached?.birthday || "",
+            avatar: cached?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid,
+            cover: cached?.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80",
+            friends: Array.isArray(cached?.friends) ? cached.friends : [],
+            hiddenFriends: Array.isArray(cached?.hiddenFriends) ? cached.hiddenFriends : [],
+            hiddenChats: Array.isArray(cached?.hiddenChats) ? cached.hiddenChats : [],
+            wallet: typeof cached?.wallet === "number" ? cached.wallet : 1e3,
             isBanned: false
           };
           await setDoc(doc(db, "artifacts", appId, "public", "data", "users", u.uid), initialProfile);
           setProfile(initialProfile);
+          saveProfileCache(initialProfile);
         }
         setView("home");
       } else {
@@ -5219,47 +5460,14 @@ function App() {
     navigator.clipboard.writeText(text);
     showNotification("ID\u3092\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F");
   };
-
-const loadMorePosts = async () => {
-  if (!user) return;
-  if (!postsHasMore || postsLoadingMore) return;
-  const cursor = postsCursorRef.current;
-  if (!cursor) return;
-  setPostsLoadingMore(true);
-  try {
-    const q = query(
-      collection(db, "artifacts", appId, "public", "data", "posts"),
-      orderBy("createdAt", "desc"),
-      startAfter(cursor),
-      limit(POSTS_PAGE_SIZE)
-    );
-    const snap = await getDocs(q);
-    const more = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    if (more.length > 0) {
-      setPosts((prev) => {
-        const seen = new Set(prev.map((p) => p.id));
-        const merged = [...prev, ...more.filter((p) => !seen.has(p.id))];
-        merged.sort((a, b) => {
-          const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : a.createdAt?.seconds ? a.createdAt.seconds * 1e3 : 0;
-          const tb = b.createdAt?.toMillis ? b.createdAt.toMillis() : b.createdAt?.seconds ? b.createdAt.seconds * 1e3 : 0;
-          return tb - ta;
-        });
-        return merged;
-      });
-      postsCursorRef.current = snap.docs[snap.docs.length - 1];
-    }
-    if (snap.docs.length < POSTS_PAGE_SIZE) setPostsHasMore(false);
-  } catch (e) {
-    console.error("loadMorePosts failed:", e);
-  } finally {
-    setPostsLoadingMore(false);
-  }
-};
-
   useEffect(() => {
     if (!user) return;
     const unsubProfile = onSnapshot(doc(db, "artifacts", appId, "public", "data", "users", user.uid), (doc2) => {
-      if (doc2.exists()) setProfile(doc2.data());
+      if (doc2.exists()) {
+        const data = doc2.data();
+        setProfile(data);
+        saveProfileCache(data);
+      }
     });
     const unsubUsers = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "users")), (snap) => {
       setAllUsers(snap.docs.map((d) => d.data()));
@@ -5321,33 +5529,9 @@ const loadMorePosts = async () => {
         return null;
       });
     });
-        // VOOM: 少しずつ読み込む（limit=5）
-    setPosts([]);
-    postsCursorRef.current = null;
-    setPostsHasMore(true);
-
-    const firstPostsQuery = query(
-      collection(db, "artifacts", appId, "public", "data", "posts"),
-      orderBy("createdAt", "desc"),
-      limit(POSTS_PAGE_SIZE)
-    );
-    const unsubPosts = onSnapshot(firstPostsQuery, (snap) => {
-      const first = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      if (!postsCursorRef.current && snap.docs.length > 0) {
-        postsCursorRef.current = snap.docs[snap.docs.length - 1];
-      }
-      setPostsHasMore((prev) => prev && snap.docs.length === POSTS_PAGE_SIZE);
-      setPosts((prev) => {
-        const map = new Map(prev.map((p) => [p.id, p]));
-        first.forEach((p) => map.set(p.id, p));
-        const merged = Array.from(map.values());
-        merged.sort((a, b) => {
-          const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : a.createdAt?.seconds ? a.createdAt.seconds * 1e3 : 0;
-          const tb = b.createdAt?.toMillis ? b.createdAt.toMillis() : b.createdAt?.seconds ? b.createdAt.seconds * 1e3 : 0;
-          return tb - ta;
-        });
-        return merged;
-      });
+    // VOOM: load in smaller batches (limit=5) instead of fetching everything at once.
+    const unsubPosts = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "posts"), orderBy("createdAt", "desc"), limit(5)), (snap) => {
+      setPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
     return () => {
       unsubProfile();
@@ -5435,202 +5619,123 @@ const loadMorePosts = async () => {
       console.warn("cleanupCallSignaling failed (non-fatal):", e);
     }
   };
-
-const cleanupGroupCallArtifacts = async (chatId, sessionId) => {
-  if (!chatId || !sessionId) return;
-  try {
-    const sessionRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "group_calls", sessionId);
-
-    const deleteDocsInCollection = async (colRef) => {
-      const snap = await getDocs(colRef).catch(() => null);
-      if (!snap) return;
-      const BATCH_LIMIT = 450;
-      let batch = writeBatch(db);
-      let i = 0;
-      for (const d of snap.docs) {
-        batch.delete(d.ref);
-        i++;
-        if (i % BATCH_LIMIT === 0) {
-          await batch.commit();
-          batch = writeBatch(db);
-        }
-      }
-      await batch.commit();
-    };
-
-    const pairsCol = collection(sessionRef, "pairs");
-    const pairsSnap = await getDocs(pairsCol).catch(() => null);
-    if (pairsSnap) {
-      for (const pairDoc of pairsSnap.docs) {
-        await deleteDocsInCollection(collection(pairDoc.ref, "candidates"));
-        await deleteDoc(pairDoc.ref).catch(() => {});
-      }
-    }
-
-    await deleteDocsInCollection(collection(sessionRef, "participants"));
-    await deleteDoc(sessionRef).catch(() => {});
-  } catch (e) {
-    console.warn("cleanupGroupCallArtifacts failed (non-fatal):", e);
-  }
-};
-
-const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) => {
-  if (!chatId || !sessionId) return;
-  const chatRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId);
-  const sessionRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "group_calls", sessionId);
-  try {
-    await deleteDoc(doc(sessionRef, "participants", user.uid)).catch(() => {});
-    const remainingSnap = await getDocs(query(collection(sessionRef, "participants"), limit(1))).catch(() => null);
-    const isEmpty = !!remainingSnap?.empty;
-
-    const chatSnap = await getDoc(chatRef).catch(() => null);
-    const cs = chatSnap?.data?.()?.callStatus || null;
-    const shouldClear = forceClear || (cs?.status === "group" && cs?.sessionId === sessionId && isEmpty);
-
-    if (shouldClear) {
-      await updateDoc(chatRef, { callStatus: deleteField() }).catch(() => {});
-    }
-    if (isEmpty) {
-      await cleanupGroupCallArtifacts(chatId, sessionId);
-    }
-  } catch (e) {
-    console.warn("leaveGroupCall failed (non-fatal):", e);
-  }
-};
-
   const startVideoCall = async (chatId, isVideo = true, isJoin = false, joinCallerId, joinSessionId) => {
-  const chat = chats.find((c) => c.id === chatId);
-  const isGroup = chat?.isGroup;
-  const callType = isVideo ? "video" : "audio";
-  const chatRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId);
-
-  // Join an existing call (used by "参加する" button)
-  if (isJoin) {
-    const callerId = joinCallerId || chat?.callStatus?.callerId || user.uid;
-    const sessionId = joinSessionId || chat?.callStatus?.sessionId || `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-
+    const chat = chats.find((c) => c.id === chatId);
+    const isGroup = chat?.isGroup;
     if (isGroup) {
-      try {
-        const sessionRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "group_calls", sessionId);
-        await setDoc(sessionRef, { sessionId, callType, updatedAt: serverTimestamp() }, { merge: true });
-        await setDoc(doc(sessionRef, "participants", user.uid), {
-          uid: user.uid,
-          name: profile?.name || user.displayName || "",
-          joinedAt: serverTimestamp(),
-          videoEnabled: !!isVideo,
-          screenSharing: false
-        }, { merge: true });
-      } catch (e) {
-        console.warn("Failed to join group call presence (non-fatal):", e);
-      }
-    }
-
-    setActiveCall({
-      chatId,
-      callData: { callerId, sessionId, callType, status: "accepted" },
-      isVideo,
-      isGroupCall: !!isGroup,
-      isCaller: callerId === user.uid,
-      phase: "inCall"
-    });
-    return;
-  }
-
-  // Start a new call
-  if (isGroup) {
-    try {
-      const sessionId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-
-      // Store session info on the chat so everyone joins the same session.
-      await updateDoc(chatRef, {
-        callStatus: {
-          status: "group",
-          callerId: user.uid,
-          callType,
-          sessionId,
-          timestamp: Date.now()
+      // Group call: use a session under chats/{chatId}/call_sessions/{sessionId}
+      if (isJoin) {
+        const callerId = joinCallerId || user.uid;
+        const sessionId = joinSessionId || chat?.callStatus?.sessionId;
+        if (!sessionId) {
+          showNotification("\u901A\u8A71\u60C5\u5831\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093");
+          return;
         }
-      });
-
-      const sessionRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "group_calls", sessionId);
-      await setDoc(sessionRef, { sessionId, callType, hostId: user.uid, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
-      await setDoc(doc(sessionRef, "participants", user.uid), {
-        uid: user.uid,
-        name: profile?.name || user.displayName || "",
-        joinedAt: serverTimestamp(),
-        videoEnabled: !!isVideo,
-        screenSharing: false
-      }, { merge: true });
-
-      await addDoc(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "messages"), {
-        senderId: user.uid,
-        content: "通話を開始しました",
-        type: "call_invite",
-        callType,
-        callSessionId: sessionId,
-        createdAt: serverTimestamp(),
-        readBy: [user.uid]
-      });
-
-      setActiveCall({
-        chatId,
-        callData: { callerId: user.uid, sessionId, callType, status: "accepted" },
-        isVideo,
-        isGroupCall: true,
-        isCaller: true,
-        phase: "inCall"
-      });
-    } catch (e) {
-      console.error(e);
-      showNotification("開始に失敗しました");
-    }
-  } else {
-    try {
+        // Register participant (best-effort)
+        await setDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_sessions", sessionId, "participants", user.uid), {
+          uid: user.uid,
+          name: profile?.name || "",
+          avatar: profile?.avatar || "",
+          joinedAt: serverTimestamp()
+        }, { merge: true }).catch(() => {
+        });
+        setActiveCall({
+          chatId,
+          callData: { callerId, sessionId, callType: isVideo ? "video" : "audio", status: "active" },
+          isVideo,
+          isGroupCall: true,
+          isCaller: callerId === user.uid,
+          phase: "inCall"
+        });
+        return;
+      }
       const sessionId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       await cleanupCallSignaling(chatId);
-      await updateDoc(chatRef, {
-        callStatus: {
-          status: "ringing",
-          callerId: user.uid,
-          callType,
+      try {
+        await setDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_sessions", sessionId), {
           sessionId,
-          timestamp: Date.now()
-        }
-      });
+          callerId: user.uid,
+          callType: isVideo ? "video" : "audio",
+          createdAt: serverTimestamp()
+        });
+        await setDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_sessions", sessionId, "participants", user.uid), {
+          uid: user.uid,
+          name: profile?.name || "",
+          avatar: profile?.avatar || "",
+          joinedAt: serverTimestamp()
+        }, { merge: true });
+        await addDoc(collection(db, "artifacts", appId, "public", "data", "chats", chatId, "messages"), {
+          senderId: user.uid,
+          content: "\u901A\u8A71\u3092\u958B\u59CB\u3057\u307E\u3057\u305F",
+          type: "call_invite",
+          callType: isVideo ? "video" : "audio",
+          sessionId,
+          createdAt: serverTimestamp(),
+          readBy: [user.uid]
+        });
+        setActiveCall({ chatId, callData: { callerId: user.uid, sessionId, callType: isVideo ? "video" : "audio", status: "active" }, isVideo, isGroupCall: true, isCaller: true, phase: "inCall" });
+      } catch (e) {
+        showNotification("\u958B\u59CB\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+      }
+    } else if (isJoin) {
+      // 1:1 call join (kept for compatibility)
+      const callerId = joinCallerId || chat?.callStatus?.callerId || user.uid;
+      const sessionId = chat?.callStatus?.sessionId || `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       setActiveCall({
         chatId,
-        callData: { status: "ringing", callerId: user.uid, callType, sessionId },
+        callData: { callerId, sessionId, callType: isVideo ? "video" : "audio", status: "accepted" },
         isVideo,
         isGroupCall: false,
-        isCaller: true,
-        phase: "dialing"
+        isCaller: callerId === user.uid,
+        phase: "inCall"
       });
-    } catch (e) {
-      console.error(e);
-      showNotification("発信に失敗しました");
-    }
-  }
-};
-  const endCall = async (chatId, callData, { clearStatus = true } = {}) => {
-  const isGroup = !!(activeCall && activeCall.chatId === chatId && activeCall.isGroupCall);
-  try {
-    if (isGroup) {
-      const sessionId = callData?.sessionId || activeCall?.callData?.sessionId || null;
-      if (sessionId) {
-        await leaveGroupCall(chatId, sessionId, { forceClear: clearStatus });
-      }
+      return;
     } else {
+      try {
+        const sessionId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        await cleanupCallSignaling(chatId);
+        await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), {
+          callStatus: {
+            status: "ringing",
+            callerId: user.uid,
+            callType: isVideo ? "video" : "audio",
+            sessionId,
+            timestamp: Date.now()
+          }
+        });
+        setActiveCall({
+          chatId,
+          callData: { status: "ringing", callerId: user.uid, callType: isVideo ? "video" : "audio", sessionId },
+          isVideo,
+          isGroupCall: false,
+          isCaller: true,
+          phase: "dialing"
+        });
+      } catch (e) {
+        console.error(e);
+        showNotification("\u767A\u4FE1\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+      }
+    }
+  };
+  const endCall = async (chatId, callData, { clearStatus = true, isGroupCall = false } = {}) => {
+    try {
+      if (isGroupCall && callData?.sessionId) {
+        // Leave the group session (best-effort). This keeps group calls consistent
+        // without changing any UI.
+        await deleteDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId, "call_sessions", callData.sessionId, "participants", user.uid)).catch(() => {
+        });
+      }
       if (clearStatus) {
         await updateDoc(doc(db, "artifacts", appId, "public", "data", "chats", chatId), { callStatus: deleteField() });
       }
       await cleanupCallSignaling(chatId, callData?.sessionId || null);
+    } catch (e) {
+      console.error("Failed to end call:", e);
+    } finally {
+      setActiveCall(null);
     }
-  } catch (e) {
-    console.error("Failed to end call:", e);
-  } finally {
-    setActiveCall(null);
-  }
-};  const acceptIncomingCall = async () => {
+  };
+  const acceptIncomingCall = async () => {
     if (!activeCall) return;
     try {
       const callData = activeCallChat?.callStatus || activeCall.callData || {};
@@ -5692,31 +5797,32 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
         }
       ) : /* @__PURE__ */ jsxs("div", { className: "relative w-full h-full", children: [
         activeCall.isGroupCall ? /* @__PURE__ */ jsx(
-  GroupCallView,
-  {
-    user,
-    chatId: activeCall.chatId,
-    callData: syncedCallData || activeCall.callData,
-    effects: userEffects,
-    isVideoEnabled: activeCall.isVideo,
-    activeEffect,
-    backgroundUrl: currentChatBackground,
-    onEndCall: () => endCall(activeCall.chatId, syncedCallData || activeCall.callData, { clearStatus: !activeCall.isGroupCall })
-  }
-) : /* @__PURE__ */ jsx(
-  VideoCallView,
-  {
-    user,
-    chatId: activeCall.chatId,
-    callData: syncedCallData || activeCall.callData,
-    isCaller: activeCall.isCaller,
-    effects: userEffects,
-    isVideoEnabled: activeCall.isVideo,
-    activeEffect,
-    backgroundUrl: currentChatBackground,
-    onEndCall: () => endCall(activeCall.chatId, syncedCallData || activeCall.callData, { clearStatus: !activeCall.isGroupCall })
-  }
-),
+          GroupCallView,
+          {
+            user,
+            profile,
+            allUsers,
+            chatId: activeCall.chatId,
+            callData: syncedCallData || activeCall.callData,
+            isVideoEnabled: activeCall.isVideo,
+            activeEffect,
+            backgroundUrl: currentChatBackground,
+            onEndCall: () => endCall(activeCall.chatId, syncedCallData || activeCall.callData, { clearStatus: false, isGroupCall: true })
+          }
+        ) : /* @__PURE__ */ jsx(
+          VideoCallView,
+          {
+            user,
+            chatId: activeCall.chatId,
+            callData: syncedCallData || activeCall.callData,
+            isCaller: activeCall.isCaller,
+            effects: userEffects,
+            isVideoEnabled: activeCall.isVideo,
+            activeEffect,
+            backgroundUrl: currentChatBackground,
+            onEndCall: () => endCall(activeCall.chatId, syncedCallData || activeCall.callData, { clearStatus: true, isGroupCall: false })
+          }
+        ),
         /* @__PURE__ */ jsxs("div", { className: "absolute top-4 left-0 right-0 px-4 flex gap-2 overflow-x-auto scrollbar-hide z-[1001]", children: [
           /* @__PURE__ */ jsx("button", { onClick: () => setActiveEffect("Normal"), className: `p-2 rounded-xl text-xs font-bold whitespace-nowrap ${activeEffect === "Normal" ? "bg-white text-black" : "bg-black/50 text-white"}`, children: "Normal" }),
           userEffects.map((ef) => /* @__PURE__ */ jsxs("button", { onClick: () => setActiveEffect(ef.name), className: `p-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-1 ${activeEffect === ef.name ? "bg-white text-black" : "bg-black/50 text-white"}`, children: [
@@ -5727,7 +5833,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
         ] })
       ] }) : /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden relative", children: [
         view === "home" && /* @__PURE__ */ jsx(HomeView, { user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }),
-        view === "voom" && /* @__PURE__ */ jsx(VoomView, { user, allUsers, profile, posts, showNotification, db, appId, onLoadMore: loadMorePosts, hasMore: postsHasMore, loadingMore: postsLoadingMore }),
+        view === "voom" && /* @__PURE__ */ jsx(VoomView, { user, allUsers, profile, posts, showNotification, db, appId }),
         view === "chatroom" && /* @__PURE__ */ jsx(ChatRoomView, { user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }),
         view === "profile" && /* @__PURE__ */ jsx(ProfileEditView, { user, profile, setView, showNotification, copyToClipboard }),
         view === "qr" && /* @__PURE__ */ jsx(QRScannerView, { user, setView, addFriendById }),
