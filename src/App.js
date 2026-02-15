@@ -4453,6 +4453,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
   const [mediaPreview, setMediaPreview] = useState(null);
   const [mediaType, setMediaType] = useState("image");
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const listRef = useRef(null);
   const sentinelRef = useRef(null);
 
