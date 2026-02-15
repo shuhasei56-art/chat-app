@@ -1232,6 +1232,47 @@ const GroupCallView = ({ user, profile, allUsers, chatId, callData, onEndCall, i
   const returnToCameraAfterShareRef = useRef(false);
   const facingModeRef = useRef("user");
 
+  // GroupCallView uses the same video filter logic as 1:1 CallView.
+  // This was missing and caused a build error: 'getFilterStyle' is not defined.
+  const getFilterStyle = (effectName) => {
+    if (!effectName || effectName === "Normal") return "none";
+    const sanitizeFilter = (filterValue) => {
+      if (typeof filterValue !== "string") return "none";
+      const v = filterValue.trim();
+      // Avoid expensive/unsupported filters that can freeze video rendering on some devices.
+      if (!v || v.length > 120 || /blur\s*\(|drop-shadow\s*\(|url\s*\(/i.test(v)) return "none";
+      return v;
+    };
+    const match = (effects || []).find(
+      (e) => e?.name === effectName && typeof e?.filter === "string" && e.filter.trim() !== ""
+    );
+    if (match?.filter) return sanitizeFilter(match.filter);
+    switch (effectName) {
+      case "Sepia":
+        return "sepia(100%)";
+      case "Grayscale":
+        return "grayscale(100%)";
+      case "Invert":
+        return "invert(100%)";
+      case "Hue":
+        return "hue-rotate(90deg)";
+      case "Contrast":
+        return "contrast(200%)";
+      case "Blur":
+        return "none";
+      case "Bright":
+        return "brightness(150%)";
+      case "Fire":
+        return "sepia(100%) hue-rotate(-35deg) saturate(180%)";
+      case "Ice":
+        return "sepia(40%) hue-rotate(170deg) saturate(160%)";
+      case "Rainbow":
+        return "hue-rotate(80deg) saturate(150%)";
+      default:
+        return "none";
+    }
+  };
+
   const getUserMeta = (uid) => {
     if (uid === user.uid) return { name: "\u3042\u306A\u305F", avatar: profile?.avatar };
     const u = allUsers?.find?.((x) => x.uid === uid);
