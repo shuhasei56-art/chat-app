@@ -1158,6 +1158,10 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const resumeRemotePlayback = async () => {
     await tryPlayRemoteMedia();
   };
+  useEffect(() => {
+    // Prevent media from pausing when UI effects are changed (mobile browsers may pause playback on reflow)
+    tryPlayRemoteMedia();
+  }, [activeEffect, tryPlayRemoteMedia]);
   const toggleMute = () => {
     const stream = localStreamRef.current;
     if (!stream) return;
@@ -1317,20 +1321,21 @@ const toggleScreenShare = async () => {
         /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
         "\u97F3\u58F0\u3092\u518D\u751F"
             ] }),
-      /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: !isVideoEnabled || isVideoOff || isScreenSharing, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff || isScreenSharing ? "bg-gray-700/50 text-white/50" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
-      /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: !isVideoEnabled || isVideoOff, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff ? "bg-gray-700/50 text-white/50" : isScreenSharing ? "bg-green-500 text-white hover:bg-green-600" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: isScreenSharing ? /* @__PURE__ */ jsx(ScreenShareOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(ScreenShare, { className: "w-6 h-6" }) }),
       isVideoEnabled && /* @__PURE__ */ jsxs("div", { className: "absolute top-4 right-4 w-32 h-48 bg-black rounded-xl overflow-hidden border-2 border-white shadow-lg transition-all", children: [
         /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover transform scale-x-[-1]", style: { filter: getFilterStyle(activeEffect) } }),
         activeEffect && activeEffect !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/50 text-white text-[8px] px-1 rounded", children: activeEffect })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-8 pb-6 backdrop-blur-lg", children: [
+    /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-5 pb-6 backdrop-blur-lg", children: [
       /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `p-4 rounded-full transition-all ${isMuted ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
+      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `p-4 rounded-full transition-all ${isVideoOff ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }) }),
+      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: isVideoOff, className: `p-4 rounded-full transition-all ${isVideoOff ? "bg-gray-700/50 text-white/50" : isScreenSharing ? "bg-green-500 text-white hover:bg-green-600" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isScreenSharing ? /* @__PURE__ */ jsx(ScreenShareOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(ScreenShare, { className: "w-6 h-6" }) }),
+      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: isVideoOff || isScreenSharing, className: `p-4 rounded-full transition-all ${isVideoOff || isScreenSharing ? "bg-gray-700/50 text-white/50" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
       /* @__PURE__ */ jsxs("button", { onClick: onEndCall, className: "p-4 rounded-full bg-red-600 text-white shadow-lg hover:bg-red-700 transform hover:scale-110 transition-all flex flex-col items-center justify-center gap-1", children: [
         /* @__PURE__ */ jsx(PhoneOff, { className: "w-8 h-8" }),
         /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u7D42\u4E86" })
-      ] }),
-      isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `p-4 rounded-full transition-all ${isVideoOff ? "bg-white text-black" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }) })
+      ] })
+    ] })
     ] })
   ] });
 };
