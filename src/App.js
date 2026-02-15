@@ -1336,7 +1336,6 @@ const toggleScreenShare = async () => {
         /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u7D42\u4E86" })
       ] })
     ] })
-    ] })
   ] });
 };
 
