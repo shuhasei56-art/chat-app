@@ -581,8 +581,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const videoDevicesRef = useRef([]);
   const activeVideoDeviceIdRef = useRef(null);
   const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
+  const remoteAudioStreamRef = useRef(new MediaStream());
+  const remoteVideoRef = useRef(null);
   const pcRef = useRef(null);
   const localStreamRef = useRef(null);
   const remoteStreamRef = useRef(new MediaStream());
@@ -4069,15 +4070,85 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     }
   };
   const handleDeleteMessage = useCallback(async (msgId) => {
+  try {
+    const chatRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId);
+    const msgRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId);
+
+    // Read message first (needed to fix unread counts + lastMessage)
+    let msgData = null;
     try {
-      await deleteDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId));
-      const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId, "chunks"));
-      for (const d of c.docs) await deleteDoc(d.ref);
-      showNotification("\u30E1\u30C3\u30BB\u30FC\u30B8\u306E\u9001\u4FE1\u3092\u53D6\u308A\u6D88\u3057\u307E\u3057\u305F");
-    } catch (e) {
-      showNotification("\u9001\u4FE1\u53D6\u6D88\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+      const snap = await getDoc(msgRef);
+      if (snap.exists()) msgData = snap.data();
+    } catch {
+      msgData = null;
     }
-  }, [db2, appId2, activeChatId, showNotification]);
+
+    // Delete message document first
+    await deleteDoc(msgRef);
+
+    // Delete chunks (if any)
+    const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId, "chunks"));
+    for (const d of c.docs) await deleteDoc(d.ref);
+
+    // If the deleted message was unread for someone, decrement their unreadCounts
+    if (msgData) {
+      const readBy = Array.isArray(msgData.readBy) ? msgData.readBy : [];
+      const senderId = msgData.senderId;
+
+      await runTransaction(db2, async (tx) => {
+        const chatSnap = await tx.get(chatRef);
+        if (!chatSnap.exists()) return;
+        const chatData = chatSnap.data();
+        const participants = Array.isArray(chatData.participants) ? chatData.participants : [];
+        const unreadCounts = { ...(chatData.unreadCounts || {}) };
+
+        participants.forEach((uid) => {
+          // unreadCounts is per-recipient; never count sender's own message
+          if (uid === senderId) return;
+          // Don't decrement if already read
+          if (readBy.includes(uid)) return;
+          const cur = typeof unreadCounts[uid] === "number" ? unreadCounts[uid] : 0;
+          unreadCounts[uid] = Math.max(0, cur - 1);
+        });
+
+        tx.update(chatRef, { unreadCounts });
+      });
+    }
+
+    // Fix lastMessage if needed (or if it pointed to a deleted/unsent message)
+    try {
+      const latestQ = query(
+        collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages"),
+        orderBy("createdAt", "desc"),
+        limit(1)
+      );
+      const latestSnap = await getDocs(latestQ);
+      if (latestSnap.empty) {
+        await updateDoc(chatRef, { lastMessage: deleteField(), updatedAt: serverTimestamp() });
+      } else {
+        const latest = latestSnap.docs[0].data();
+        // If latest is marked deleted (rare), clear lastMessage
+        if (latest?.isDeleted || latest?.deleted) {
+          await updateDoc(chatRef, { lastMessage: deleteField(), updatedAt: serverTimestamp() });
+        } else {
+          await updateDoc(chatRef, {
+            lastMessage: {
+              content: latest.type === "text" ? latest.content : `[${latest.type}]`,
+              senderId: latest.senderId,
+              readBy: latest.readBy || []
+            },
+            updatedAt: serverTimestamp()
+          });
+        }
+      }
+    } catch {
+    }
+
+    showNotification("\u30E1\u30C3\u30BB\u30FC\u30B8\u306E\u9001\u4FE1\u3092\u53D6\u308A\u6D88\u3057\u307E\u3057\u305F");
+  } catch (e) {
+    showNotification("\u9001\u4FE1\u53D6\u6D88\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+  }
+}, [db2, appId2, activeChatId, chats, user.uid, showNotification]);
   const handleEditMessage = useCallback((id, content) => {
     setEditingMsgId(id);
     setEditingText(content);
@@ -5165,6 +5236,46 @@ function App() {
   const [allUsers, setAllUsers] = useState([]);
   const [chats, setChats] = useState([]);
   const [posts, setPosts] = useState([]);
+const [voomLastSeen, setVoomLastSeen] = useState(0);
+useEffect(() => {
+  if (!user) return;
+  try {
+    const key = `voomLastSeen_${user.uid}`;
+    const v = Number(localStorage.getItem(key) || "0");
+    setVoomLastSeen(Number.isFinite(v) ? v : 0);
+  } catch {
+    setVoomLastSeen(0);
+  }
+}, [user?.uid]);
+
+useEffect(() => {
+  if (!user) return;
+  if (view === "voom") {
+    try {
+      const key = `voomLastSeen_${user.uid}`;
+      const now = Date.now();
+      localStorage.setItem(key, String(now));
+      setVoomLastSeen(now);
+    } catch {
+    }
+  }
+}, [view, user?.uid]);
+
+const voomUnreadCount = useMemo(() => {
+  if (!user) return 0;
+  const last = voomLastSeen || 0;
+  let cnt = 0;
+  for (const p of posts) {
+    if (!p) continue;
+    // Exclude deleted/removed posts
+    if (p.isDeleted || p.deleted || p.deletedAt) continue;
+    // Exclude my own posts
+    if (p.authorId === user.uid || p.userId === user.uid || p.uid === user.uid) continue;
+    const t = p.createdAt?.toMillis ? p.createdAt.toMillis() : p.createdAt?.seconds ? p.createdAt.seconds * 1e3 : typeof p.createdAt === "number" ? p.createdAt : 0;
+    if (t > last) cnt++;
+  }
+  return cnt;
+}, [posts, voomLastSeen, user?.uid]);
   useEffect(() => {
     if (typeof window !== "undefined") window.__voomPostsSetter = setPosts;
     return () => { if (typeof window !== "undefined" && window.__voomPostsSetter === setPosts) delete window.__voomPostsSetter; };
@@ -5796,7 +5907,10 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
         ] }),
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "voom" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("voom"), children: [
           /* @__PURE__ */ jsx(LayoutGrid, { className: "w-6 h-6" }),
-          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "VOOM" })
+/* @__PURE__ */ jsxs("div", { className: "relative", children: [
+  /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "VOOM" }),
+  voomUnreadCount > 0 && /* @__PURE__ */ jsx("span", { className: "absolute -top-2 -right-4 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center flex items-center justify-center h-5 border-2 border-white shadow-sm", children: voomUnreadCount > 99 ? "99+" : voomUnreadCount })
+] })
         ] })
       ] })
     ] }),
