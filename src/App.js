@@ -702,7 +702,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     },
     [user?.uid, sessionId, isCaller, isVideoEnabled]
   );
-Prop : callData?.callerId === user.uid;
   const getFilterStyle = (effectName) => {
     if (!effectName || effectName === "Normal") return "none";
     const sanitizeFilter = (filterValue) => {
