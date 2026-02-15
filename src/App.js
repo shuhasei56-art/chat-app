@@ -581,9 +581,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const videoDevicesRef = useRef([]);
   const activeVideoDeviceIdRef = useRef(null);
   const localVideoRef = useRef(null);
-  const remoteAudioRef = useRef(null);
-  const remoteAudioStreamRef = useRef(new MediaStream());
   const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
   const pcRef = useRef(null);
   const localStreamRef = useRef(null);
   const remoteStreamRef = useRef(new MediaStream());
@@ -722,16 +721,19 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     if (audioEl) {
       audioEl.muted = false;
       audioEl.volume = 1;
-      try {
-        await audioEl.play();
-      } catch {
-        audioFailed = true;
+      if (hasVideoTrack) {
+        audioEl.pause();
+      } else {
+        try {
+          await audioEl.play();
+        } catch {
+          audioFailed = true;
+        }
       }
     }
     if (videoEl) {
-      // Keep remote video muted; audio is played via <audio> to avoid autoplay restrictions
-      videoEl.muted = true;
-      videoEl.volume = 0;
+      videoEl.muted = false;
+      videoEl.volume = 1;
       try {
         await videoEl.play();
       } catch {
@@ -806,8 +808,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           remoteAudioRef.current.srcObject = stream;
           remoteAudioRef.current.muted = false;
           remoteAudioRef.current.volume = 1;
-          remoteAudioRef.current.play?.().catch(() => {
-          });
+          remoteAudioRef.current.play?.().catch(() => {});
         }
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = stream;
@@ -1142,9 +1143,10 @@ const toggleScreenShare = async () => {
     ] });
   }
   return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black flex flex-col animate-in fade-in", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : "none", backgroundSize: "cover" }, children: [
+      /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true }),
     /* @__PURE__ */ jsxs("div", { className: "relative flex-1 flex items-center justify-center backdrop-blur-md bg-black/30", children: [
       /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "hidden" }),
-      remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover" }) : /* @__PURE__ */ jsxs("div", { className: "text-white flex flex-col items-center gap-4", children: [
+      remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover" }) : /* @__PURE__ */ jsxs("div", { className: "text-white flex flex-col items-center gap-4", children: [
         /* @__PURE__ */ jsx("div", { className: "w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center animate-pulse", children: /* @__PURE__ */ jsx(User, { className: "w-10 h-10" }) }),
         /* @__PURE__ */ jsx("p", { className: "font-bold text-lg drop-shadow-md", children: remoteStream ? isVideoEnabled ? "\u30D3\u30C7\u30AA\u3092\u53D7\u4FE1\u4E2D..." : "\u97F3\u58F0\u901A\u8A71\u4E2D..." : "\u63A5\u7D9A\u4E2D..." })
       ] }),
@@ -1177,6 +1179,7 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [callError, setCallError] = useState(null);
+  const remoteAudioRef = useRef(null);
   const localVideoRef = useRef(null);
   const pcsRef = useRef(new Map());
   const localStreamRef = useRef(null);
@@ -1322,6 +1325,22 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
       event.streams?.[0]?.getTracks?.().forEach((t) => {
         try { remoteStream.addTrack(t); } catch { }
       });
+      // Ensure remote audio keeps playing (Safari/autoplay and Wi-Fi switch robustness)
+      try {
+        if (remoteAudioRef.current) {
+          const audioTracks = remoteStream.getAudioTracks ? remoteStream.getAudioTracks() : [];
+          const mixed = new MediaStream();
+          audioTracks.forEach((t) => {
+            try { mixed.addTrack(t); } catch { }
+          });
+          if (mixed.getAudioTracks().length > 0) {
+            remoteAudioRef.current.srcObject = mixed;
+            remoteAudioRef.current.muted = false;
+            remoteAudioRef.current.volume = 1;
+            remoteAudioRef.current.play?.().catch(() => {});
+          }
+        }
+      } catch { }
     };
 
     const sessionRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "group_calls", sessionId);
@@ -1523,7 +1542,7 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   }
 
   return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black flex flex-col", children: [
-    /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, style: { display: "none" } }),
+      /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true }),
     /* @__PURE__ */ jsx("div", { className: "flex-1 relative overflow-hidden", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : void 0, backgroundSize: "cover", backgroundPosition: "center" }, children: /* @__PURE__ */ jsx("div", { className: "w-full h-full p-2", style: { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: "8px" }, children: tiles.map((t) => {
       const isLocal = t.isLocal;
       const filter = isLocal ? getFilterStyle(activeEffect) : "none";
@@ -2113,17 +2132,19 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
   const [showMenu, setShowMenu] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
   const isInvalidBlob = !isMe && m.content?.startsWith("blob:");
-  const setBlobSrcFromBase64 = (base64Data, mimeType) => {
+  const base64ToBlobUrl = async (base64Data, mimeType) => {
     try {
-      const byteCharacters = atob(base64Data);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: mimeType });
-      setMediaSrc(URL.createObjectURL(blob));
+      const res = await fetch(`data:${mimeType};base64,${base64Data}`);
+      const blob = await res.blob();
+      return URL.createObjectURL(blob);
     } catch (e) {
       console.error("Blob creation failed", e);
+      return null;
     }
+  };
+  const setBlobSrcFromBase64 = async (base64Data, mimeType) => {
+    const url = await base64ToBlobUrl(base64Data, mimeType);
+    if (url) setMediaSrc(url);
   };
   useEffect(() => {
     if (isMe && m.content?.startsWith("blob:")) {
@@ -2142,17 +2163,51 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
       (async () => {
         try {
           let base64Data = "";
-          if (m.chunkCount) {
-            const chunkPromises = [];
-            for (let i = 0; i < m.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks", `${i}`)));
-            const chunkDocs = await Promise.all(chunkPromises);
-            chunkDocs.forEach((d) => {
-              if (d.exists()) base64Data += d.data().data;
-            });
-          } else {
-            const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc")));
-            snap.forEach((d) => base64Data += d.data().data);
-          }
+          const loadChunksReliable = async () => {
+            const total = m.chunkCount || null;
+            const pathBase = doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks");
+            if (!total) {
+              // fallback: query orderBy index
+              const snap = await getDocs(query(collection(pathBase), orderBy("index", "asc")));
+              const parts = [];
+              snap.forEach((d) => parts.push(d.data().data || ""));
+              return parts.join("");
+            }
+            const parts = new Array(total).fill(null);
+            const missing = new Set(Array.from({ length: total }, (_, i) => i));
+            const CONCURRENCY = 8;
+            for (let attempt = 0; attempt < 5 && missing.size > 0; attempt++) {
+              const idxs = Array.from(missing);
+              let cursor = 0;
+              const workers = Array.from({ length: Math.min(CONCURRENCY, idxs.length) }, async () => {
+                while (cursor < idxs.length) {
+                  const i = idxs[cursor++];
+                  try {
+                    const d = await getDoc(doc(pathBase, `${i}`));
+                    if (d.exists()) {
+                      const v = d.data().data || "";
+                      if (v) {
+                        parts[i] = v;
+                        missing.delete(i);
+                      }
+                    }
+                  } catch {
+                    // ignore; will retry
+                  }
+                }
+              });
+              await Promise.all(workers);
+              if (missing.size > 0) {
+                // exponential backoff
+                await new Promise((r) => setTimeout(r, 250 * Math.pow(2, attempt)));
+              }
+            }
+            if (missing.size > 0) {
+              throw new Error(`Missing chunks: ${Array.from(missing).slice(0, 10).join(",")}${missing.size > 10 ? "..." : ""}`);
+            }
+            return parts.join("");
+          };
+          base64Data = await loadChunksReliable();
           if (base64Data) {
             let mimeType = m.mimeType;
             if (!mimeType) {
@@ -2161,7 +2216,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
               else if (m.type === "audio") mimeType = "audio/webm";
               else mimeType = "application/octet-stream";
             }
-            if (m.type !== "text" && m.type !== "contact") setBlobSrcFromBase64(base64Data, mimeType);
+            if (m.type !== "text" && m.type !== "contact") await setBlobSrcFromBase64(base64Data, mimeType);
           } else if (m.preview) {
             setMediaSrc(m.preview);
           }
@@ -2407,7 +2462,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
     ] })
   ] });
 });
-const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, showNotification, onDeleted }) => {
+const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => {
   const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [postPreview, setPostPreview] = useState(null);
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
@@ -2417,27 +2472,52 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, showN
       setIsLoadingMedia(true);
       (async () => {
         let mergedData = "";
-        if (post.chunkCount) {
-          const chunkPromises = [];
-          for (let i = 0; i < post.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks", `${i}`)));
-          const chunkDocs = await Promise.all(chunkPromises);
-          chunkDocs.forEach((d) => {
-            if (d.exists()) mergedData += d.data().data;
-          });
-        } else {
-          const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"), orderBy("index", "asc")));
-          snap.forEach((d) => mergedData += d.data().data);
-        }
+        const loadPostChunksReliable = async () => {
+          const total = post.chunkCount || null;
+          const pathBase = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks");
+          if (!total) {
+            const snap = await getDocs(query(collection(pathBase), orderBy("index", "asc")));
+            const parts = [];
+            snap.forEach((d) => parts.push(d.data().data || ""));
+            return parts.join("");
+          }
+          const parts = new Array(total).fill(null);
+          const missing = new Set(Array.from({ length: total }, (_, i) => i));
+          const CONCURRENCY = 8;
+          for (let attempt = 0; attempt < 5 && missing.size > 0; attempt++) {
+            const idxs = Array.from(missing);
+            let cursor = 0;
+            const workers = Array.from({ length: Math.min(CONCURRENCY, idxs.length) }, async () => {
+              while (cursor < idxs.length) {
+                const i = idxs[cursor++];
+                try {
+                  const d = await getDoc(doc(pathBase, `${i}`));
+                  if (d.exists()) {
+                    const v = d.data().data || "";
+                    if (v) {
+                      parts[i] = v;
+                      missing.delete(i);
+                    }
+                  }
+                } catch {
+                }
+              }
+            });
+            await Promise.all(workers);
+            if (missing.size > 0) await new Promise((r) => setTimeout(r, 250 * Math.pow(2, attempt)));
+          }
+          if (missing.size > 0) throw new Error("Missing post chunks");
+          return parts.join("");
+        };
+        mergedData = await loadPostChunksReliable();
         if (mergedData) {
           try {
             if (mergedData.startsWith("data:")) {
               setMediaSrc(mergedData);
             } else {
               const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
-              const byteCharacters = atob(mergedData);
-              const byteNumbers = new Array(byteCharacters.length);
-              for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
-              const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+              const res = await fetch(`data:${mimeType};base64,${mergedData}`);
+              const blob = await res.blob();
               setMediaSrc(URL.createObjectURL(blob));
             }
           } catch (e) {
@@ -2460,31 +2540,12 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, showN
     setCommentText("");
   };
   return /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2 border-b", children: [
-    /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-3", children: [
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
-        /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-          /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
-          isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
-        ] }),
-        /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
+      /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+        /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
+        isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
       ] }),
-      isMe && /* @__PURE__ */ jsxs("button", { onClick: async () => {
-        try {
-          if (!window.confirm("\u3053\u306e\u6295\u7a3f\u3092\u524a\u9664\u3057\u307e\u3059\u304b\uff1f")) return;
-          // delete chunks (if any) then delete post
-          const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"));
-          for (const d of c.docs) await deleteDoc(d.ref);
-          await deleteDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id));
-          onDeleted && onDeleted(post.id);
-          showNotification && showNotification("\u524a\u9664\u3057\u307e\u3057\u305f");
-        } catch (e2) {
-          console.error(e2);
-          showNotification && showNotification("\u524a\u9664\u306b\u5931\u6557\u3057\u307e\u3057\u305f");
-        }
-      }, className: "text-red-500 text-xs font-bold flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-red-50", children: [
-        /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }),
-        "\u524a\u9664"
-      ] })
+      /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
     (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
@@ -3975,7 +4036,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         if (["image", "video"].includes(type)) {
           previewData = await generateThumbnail(file);
         }
-        await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, preview: previewData, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, isUploading: true, uploadProgress: 0, createdAt: serverTimestamp(), readBy: [user.uid] });
+        await setDoc(newMsgRef, { senderId: user.uid, content: storedContent, type, preview: previewData, ...additionalData, ...replyData, ...fileData, hasChunks: false, chunkCount: 0, isUploading: true, createdAt: serverTimestamp(), readBy: [user.uid] });
         await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId), updateData);
         setText("");
         setPlusMenuOpen(false);
@@ -3988,7 +4049,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       if (file && file.size > CHUNK_SIZE) {
         hasChunks = true;
         chunkCount = Math.ceil(file.size / CHUNK_SIZE);
-        const CONCURRENCY = 200;
+        const CONCURRENCY = 5;
         const executing = /* @__PURE__ */ new Set();
         let completed = 0;
         for (let i = 0; i < chunkCount; i++) {
@@ -4002,22 +4063,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
                 const base64Data = e.target.result.split(",")[1];
                 await setDoc(doc(msgCol, newMsgRef.id, "chunks", `${i}`), { data: base64Data, index: i });
                 completed++;
-        const pct = Math.round(completed / chunkCount * 100);
-        // Persist progress to Firestore so it survives room navigation
-        try {
-          // throttle updates (avoid too many writes)
-          const now = Date.now();
-          if (!window.__lastUploadProgress) window.__lastUploadProgress = {};
-          const key = `${activeChatId}:${newMsgRef.id}`;
-          const last = window.__lastUploadProgress[key] || { pct: -1, t: 0 };
-          if (pct === 100 || pct >= last.pct + 1 && now - last.t >= 500) {
-            window.__lastUploadProgress[key] = { pct, t: now };
-            await updateDoc(newMsgRef, { uploadProgress: pct });
-          }
-        } catch (e3) {
-          // ignore progress write errors
-        }
-        setUploadProgress(pct);
+                setUploadProgress(Math.round(completed / chunkCount * 100));
                 resolve(null);
               } catch (err) {
                 reject(err);
@@ -4070,85 +4116,15 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     }
   };
   const handleDeleteMessage = useCallback(async (msgId) => {
-  try {
-    const chatRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId);
-    const msgRef = doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId);
-
-    // Read message first (needed to fix unread counts + lastMessage)
-    let msgData = null;
     try {
-      const snap = await getDoc(msgRef);
-      if (snap.exists()) msgData = snap.data();
-    } catch {
-      msgData = null;
+      await deleteDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId));
+      const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId, "chunks"));
+      for (const d of c.docs) await deleteDoc(d.ref);
+      showNotification("\u30E1\u30C3\u30BB\u30FC\u30B8\u306E\u9001\u4FE1\u3092\u53D6\u308A\u6D88\u3057\u307E\u3057\u305F");
+    } catch (e) {
+      showNotification("\u9001\u4FE1\u53D6\u6D88\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
     }
-
-    // Delete message document first
-    await deleteDoc(msgRef);
-
-    // Delete chunks (if any)
-    const c = await getDocs(collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages", msgId, "chunks"));
-    for (const d of c.docs) await deleteDoc(d.ref);
-
-    // If the deleted message was unread for someone, decrement their unreadCounts
-    if (msgData) {
-      const readBy = Array.isArray(msgData.readBy) ? msgData.readBy : [];
-      const senderId = msgData.senderId;
-
-      await runTransaction(db2, async (tx) => {
-        const chatSnap = await tx.get(chatRef);
-        if (!chatSnap.exists()) return;
-        const chatData = chatSnap.data();
-        const participants = Array.isArray(chatData.participants) ? chatData.participants : [];
-        const unreadCounts = { ...(chatData.unreadCounts || {}) };
-
-        participants.forEach((uid) => {
-          // unreadCounts is per-recipient; never count sender's own message
-          if (uid === senderId) return;
-          // Don't decrement if already read
-          if (readBy.includes(uid)) return;
-          const cur = typeof unreadCounts[uid] === "number" ? unreadCounts[uid] : 0;
-          unreadCounts[uid] = Math.max(0, cur - 1);
-        });
-
-        tx.update(chatRef, { unreadCounts });
-      });
-    }
-
-    // Fix lastMessage if needed (or if it pointed to a deleted/unsent message)
-    try {
-      const latestQ = query(
-        collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages"),
-        orderBy("createdAt", "desc"),
-        limit(1)
-      );
-      const latestSnap = await getDocs(latestQ);
-      if (latestSnap.empty) {
-        await updateDoc(chatRef, { lastMessage: deleteField(), updatedAt: serverTimestamp() });
-      } else {
-        const latest = latestSnap.docs[0].data();
-        // If latest is marked deleted (rare), clear lastMessage
-        if (latest?.isDeleted || latest?.deleted) {
-          await updateDoc(chatRef, { lastMessage: deleteField(), updatedAt: serverTimestamp() });
-        } else {
-          await updateDoc(chatRef, {
-            lastMessage: {
-              content: latest.type === "text" ? latest.content : `[${latest.type}]`,
-              senderId: latest.senderId,
-              readBy: latest.readBy || []
-            },
-            updatedAt: serverTimestamp()
-          });
-        }
-      }
-    } catch {
-    }
-
-    showNotification("\u30E1\u30C3\u30BB\u30FC\u30B8\u306E\u9001\u4FE1\u3092\u53D6\u308A\u6D88\u3057\u307E\u3057\u305F");
-  } catch (e) {
-    showNotification("\u9001\u4FE1\u53D6\u6D88\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
-  }
-}, [db2, appId2, activeChatId, chats, user.uid, showNotification]);
+  }, [db2, appId2, activeChatId, showNotification]);
   const handleEditMessage = useCallback((id, content) => {
     setEditingMsgId(id);
     setEditingText(content);
@@ -4576,7 +4552,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
 
   const uploadChunksBase64 = async (postId, file) => {
     const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
-    const CONCURRENCY = 200;
+    const CONCURRENCY = 5;
     const executing = new Set();
     for (let i = 0; i < chunkCount; i++) {
       const start = i * CHUNK_SIZE;
@@ -4691,12 +4667,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
           /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || mediaFile ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: "投稿" })
         ] })
       ] }),
-      posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile, showNotification, onDeleted: (postId) => {
-        // optimistic remove for instant UI
-        if (typeof window !== "undefined" && window.__voomPostsSetter) {
-          window.__voomPostsSetter((prev) => prev.filter((x) => x.id !== postId));
-        }
-      } }, p.id)),
+      posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id)),
       /* @__PURE__ */ jsx("div", { ref: sentinelRef, className: "h-8" })
     ] })
   ] });
@@ -4762,91 +4733,186 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
 const QRScannerView = ({ user, setView, addFriendById }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const rafRef = useRef(0);
+  const scanningRef = useRef(false);
+  const jsqrRef = useRef(null);
   const [scanning, setScanning] = useState(false);
-  const startScanner = async () => {
-    setScanning(true);
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-        videoRef.current.setAttribute("playsinline", "true");
-        videoRef.current.play();
-        requestAnimationFrame(tick);
-      }
-    } catch (err) {
-      setScanning(false);
-    }
-  };
+  const [qrError, setQrError] = useState("");
+
   useEffect(() => {
-    return () => {
-      if (videoRef.current && videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject;
-        stream.getTracks().forEach((t) => t.stop());
-      }
-    };
+    let mounted = true;
+    // Prefer module import; fall back to window.jsQR if present.
+    import("jsqr").then((m) => {
+      if (!mounted) return;
+      jsqrRef.current = m?.default || m;
+    }).catch(() => {});
+    return () => { mounted = false; };
   }, []);
-  const tick = () => {
-    if (videoRef.current?.readyState === videoRef.current?.HAVE_ENOUGH_DATA) {
-      const c = canvasRef.current;
-      const ctx = c?.getContext("2d");
-      if (c && ctx) {
-        c.height = videoRef.current.videoHeight;
-        c.width = videoRef.current.videoWidth;
-        ctx.drawImage(videoRef.current, 0, 0, c.width, c.height);
-        const win = window;
-        if (win.jsQR) {
-          const code = win.jsQR(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
-          if (code) {
-            if (videoRef.current.srcObject) {
-              const stream = videoRef.current.srcObject;
-              stream.getTracks().forEach((t) => t.stop());
+
+  const stopScanner = useCallback(() => {
+    scanningRef.current = false;
+    setScanning(false);
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
+
+    const s = streamRef.current || (videoRef.current ? videoRef.current.srcObject : null);
+    if (s && typeof s.getTracks === "function") {
+      try { s.getTracks().forEach((t) => t.stop()); } catch { }
+    }
+    streamRef.current = null;
+    if (videoRef.current) {
+      try { videoRef.current.srcObject = null; } catch { }
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => stopScanner();
+  }, [stopScanner]);
+
+  const startScanner = useCallback(async () => {
+    setQrError("");
+    setScanning(true);
+    scanningRef.current = true;
+
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      });
+      streamRef.current = mediaStream;
+
+      const v = videoRef.current;
+      if (!v) return;
+
+      v.srcObject = mediaStream;
+      v.setAttribute("playsinline", "true");
+
+      await v.play().catch(() => {});
+
+      const scan = () => {
+        if (!scanningRef.current) return;
+
+        const video = videoRef.current;
+        const c = canvasRef.current;
+        if (video && c && video.readyState >= 2) {
+          const vw = video.videoWidth || 0;
+          const vh = video.videoHeight || 0;
+          if (vw > 0 && vh > 0) {
+            c.width = vw;
+            c.height = vh;
+            const ctx = c.getContext("2d", { willReadFrequently: true });
+            if (ctx) {
+              ctx.drawImage(video, 0, 0, vw, vh);
+              const imageData = ctx.getImageData(0, 0, vw, vh);
+              const jsqr = jsqrRef.current || window.jsQR;
+              if (jsqr) {
+                const code = jsqr(imageData.data, vw, vh, { inversionAttempts: "attemptBoth" });
+                if (code?.data) {
+                  stopScanner();
+                  addFriendById(code.data);
+                  return;
+                }
+              } else {
+                setQrError("QR読み取りライブラリの読み込みに失敗しました");
+              }
             }
-            setScanning(false);
-            addFriendById(code.data);
-            return;
           }
         }
-      }
+        rafRef.current = requestAnimationFrame(scan);
+      };
+
+      rafRef.current = requestAnimationFrame(scan);
+    } catch (err) {
+      console.error(err);
+      setQrError("カメラを開始できませんでした（権限/HTTPS/端末設定を確認）");
+      stopScanner();
     }
-    if (scanning) requestAnimationFrame(tick);
-  };
+  }, [addFriendById, stopScanner]);
+
+  const onPickImage = useCallback((file) => {
+    if (!file) return;
+    setQrError("");
+    const r = new FileReader();
+    r.onload = async (ev) => {
+      try {
+        const dataUrl = ev?.target?.result;
+        if (!dataUrl) return;
+
+        // Use createImageBitmap when available (faster & more reliable).
+        let bitmap = null;
+        try {
+          const blob = await (await fetch(dataUrl)).blob();
+          bitmap = await createImageBitmap(blob);
+        } catch { /* ignore */ }
+
+        const c = document.createElement("canvas");
+        const ctx = c.getContext("2d", { willReadFrequently: true });
+        if (!ctx) return;
+
+        if (bitmap) {
+          c.width = bitmap.width;
+          c.height = bitmap.height;
+          ctx.drawImage(bitmap, 0, 0);
+        } else {
+          const img = new Image();
+          img.onload = () => {
+            c.width = img.width;
+            c.height = img.height;
+            ctx.drawImage(img, 0, 0);
+            const jsqr = jsqrRef.current || window.jsQR;
+            if (jsqr) {
+              const imageData = ctx.getImageData(0, 0, c.width, c.height);
+              const code = jsqr(imageData.data, c.width, c.height, { inversionAttempts: "attemptBoth" });
+              if (code?.data) addFriendById(code.data);
+              else setQrError("QRコードが見つかりませんでした");
+            }
+          };
+          img.src = dataUrl;
+          return;
+        }
+
+        const jsqr = jsqrRef.current || window.jsQR;
+        if (jsqr) {
+          const imageData = ctx.getImageData(0, 0, c.width, c.height);
+          const code = jsqr(imageData.data, c.width, c.height, { inversionAttempts: "attemptBoth" });
+          if (code?.data) addFriendById(code.data);
+          else setQrError("QRコードが見つかりませんでした");
+        } else {
+          setQrError("QR読み取りライブラリの読み込みに失敗しました");
+        }
+      } catch (e) {
+        console.error(e);
+        setQrError("画像の読み込みに失敗しました");
+      }
+    };
+    r.readAsDataURL(file);
+  }, [addFriendById]);
+
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-white", children: [
     /* @__PURE__ */ jsxs("div", { className: "p-4 border-b flex items-center gap-4", children: [
-      /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("home") }),
+      /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6 cursor-pointer", onClick: () => { stopScanner(); setView("home"); } }),
       /* @__PURE__ */ jsx("span", { className: "font-bold", children: "QR" })
     ] }),
-    /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-8", children: /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center justify-center gap-8 min-h-full", children: [
+    /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-8", children: /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center justify-center gap-6 min-h-full", children: [
+      qrError ? /* @__PURE__ */ jsx("div", { className: "text-sm text-red-500", children: qrError }) : null,
       scanning ? /* @__PURE__ */ jsxs("div", { className: "relative w-64 h-64 border-4 border-green-500 rounded-3xl overflow-hidden", children: [
-        /* @__PURE__ */ jsx("video", { ref: videoRef, className: "w-full h-full object-cover" }),
+        /* @__PURE__ */ jsx("video", { ref: videoRef, className: "w-full h-full object-cover", muted: true, playsInline: true }),
         /* @__PURE__ */ jsx("canvas", { ref: canvasRef, className: "hidden" })
-      ] }) : /* @__PURE__ */ jsx("div", { className: "bg-white p-6 rounded-[40px] shadow-xl border", children: /* @__PURE__ */ jsx("img", { src: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user?.uid}`, className: "w-48 h-48" }) }),
+      ] }) : /* @__PURE__ */ jsx("div", { className: "bg-white p-6 rounded-[40px] shadow-xl border", children: /* @__PURE__ */ jsx("img", { src: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${user?.uid}`, className: "w-48 h-48", alt: "my-qr" }) }),
       /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-4 w-full", children: [
         /* @__PURE__ */ jsxs("button", { onClick: startScanner, className: "flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border", children: [
           /* @__PURE__ */ jsx(Maximize, { className: "w-6 h-6 text-green-500" }),
-          /* @__PURE__ */ jsx("span", { children: "\u30B9\u30AD\u30E3\u30F3" })
+          /* @__PURE__ */ jsx("span", { children: "スキャン" })
         ] }),
         /* @__PURE__ */ jsxs("label", { className: "flex flex-col items-center gap-2 bg-gray-50 p-4 rounded-3xl border cursor-pointer", children: [
           /* @__PURE__ */ jsx(Upload, { className: "w-6 h-6 text-blue-500" }),
-          /* @__PURE__ */ jsx("span", { children: "\u8AAD\u8FBC" }),
-          /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*", onChange: (e) => {
-            const r = new FileReader();
-            r.onload = (ev) => {
-              const img = new Image();
-              img.onload = () => {
-                const c = document.createElement("canvas"), ctx = c.getContext("2d");
-                if (ctx) {
-                  c.width = img.width;
-                  c.height = img.height;
-                  ctx.drawImage(img, 0, 0);
-                  const win = window;
-                  const code = win.jsQR(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
-                  if (code) addFriendById(code.data);
-                }
-              };
-              img.src = ev.target.result;
-            };
-            r.readAsDataURL(e.target.files[0]);
-          } })
+          /* @__PURE__ */ jsx("span", { children: "読込" }),
+          /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*", onChange: (e) => onPickImage(e?.target?.files?.[0]) })
         ] })
       ] })
     ] }) })
@@ -5236,50 +5302,6 @@ function App() {
   const [allUsers, setAllUsers] = useState([]);
   const [chats, setChats] = useState([]);
   const [posts, setPosts] = useState([]);
-const [voomLastSeen, setVoomLastSeen] = useState(0);
-useEffect(() => {
-  if (!user) return;
-  try {
-    const key = `voomLastSeen_${user.uid}`;
-    const v = Number(localStorage.getItem(key) || "0");
-    setVoomLastSeen(Number.isFinite(v) ? v : 0);
-  } catch {
-    setVoomLastSeen(0);
-  }
-}, [user?.uid]);
-
-useEffect(() => {
-  if (!user) return;
-  if (view === "voom") {
-    try {
-      const key = `voomLastSeen_${user.uid}`;
-      const now = Date.now();
-      localStorage.setItem(key, String(now));
-      setVoomLastSeen(now);
-    } catch {
-    }
-  }
-}, [view, user?.uid]);
-
-const voomUnreadCount = useMemo(() => {
-  if (!user) return 0;
-  const last = voomLastSeen || 0;
-  let cnt = 0;
-  for (const p of posts) {
-    if (!p) continue;
-    // Exclude deleted/removed posts
-    if (p.isDeleted || p.deleted || p.deletedAt) continue;
-    // Exclude my own posts
-    if (p.authorId === user.uid || p.userId === user.uid || p.uid === user.uid) continue;
-    const t = p.createdAt?.toMillis ? p.createdAt.toMillis() : p.createdAt?.seconds ? p.createdAt.seconds * 1e3 : typeof p.createdAt === "number" ? p.createdAt : 0;
-    if (t > last) cnt++;
-  }
-  return cnt;
-}, [posts, voomLastSeen, user?.uid]);
-  useEffect(() => {
-    if (typeof window !== "undefined") window.__voomPostsSetter = setPosts;
-    return () => { if (typeof window !== "undefined" && window.__voomPostsSetter === setPosts) delete window.__voomPostsSetter; };
-  }, []);
   const [postsHasMore, setPostsHasMore] = useState(true);
   const [postsLoadingMore, setPostsLoadingMore] = useState(false);
   const postsCursorRef = useRef(null);
@@ -5907,10 +5929,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
         ] }),
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "voom" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("voom"), children: [
           /* @__PURE__ */ jsx(LayoutGrid, { className: "w-6 h-6" }),
-/* @__PURE__ */ jsxs("div", { className: "relative", children: [
-  /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "VOOM" }),
-  voomUnreadCount > 0 && /* @__PURE__ */ jsx("span", { className: "absolute -top-2 -right-4 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center flex items-center justify-center h-5 border-2 border-white shadow-sm", children: voomUnreadCount > 99 ? "99+" : voomUnreadCount })
-] })
+          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "VOOM" })
         ] })
       ] })
     ] }),
