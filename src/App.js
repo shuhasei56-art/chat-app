@@ -4447,15 +4447,17 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     coinModalTarget && /* @__PURE__ */ jsx(CoinTransferModal, { onClose: () => setCoinModalTarget(null), myWallet: profile.wallet, myUid: user.uid, targetUid: coinModalTarget.uid, targetName: coinModalTarget.name, showNotification })
   ] });
 };
-const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, appId: appId2, onLoadMore, hasMore, loadingMore }) => {
+
+const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, appId: appId2, onLoadMore, hasMore, loadingMore, voomUpload, startVoomUpload }) => {
   const [content, setContent] = useState("");
   const [mediaFile, setMediaFile] = useState(null);
   const [mediaPreview, setMediaPreview] = useState(null);
   const [mediaType, setMediaType] = useState("image");
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const listRef = useRef(null);
   const sentinelRef = useRef(null);
+
+  const isUploading = !!voomUpload?.isUploading;
+  const uploadProgress = typeof voomUpload?.progress === "number" ? voomUpload.progress : 0;
 
   useEffect(() => {
     if (!onLoadMore) return;
@@ -4481,121 +4483,8 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
     };
   }, [mediaPreview]);
 
-  const readAsDataURL = (file, onProgress) => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    if (typeof onProgress === "function") {
-      reader.onprogress = (ev) => {
-        try {
-          if (ev.lengthComputable) onProgress(ev.loaded / ev.total);
-        } catch {
-        }
-      };
-    }
-    reader.onload = (ev) => resolve(ev.target.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-
-  const uploadChunksBase64 = async (postId, file, onProgress) => {
-    const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
-    let completed = 0;
-    const CONCURRENCY = 5;
-    const executing = new Set();
-    for (let i = 0; i < chunkCount; i++) {
-      const start = i * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, file.size);
-      const blobSlice = file.slice(start, end);
-      const p = new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-          try {
-            const base64Data = e.target.result.split(",")[1];
-            await setDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", postId, "chunks", `${i}`), { data: base64Data, index: i });
-            try {
-              completed += 1;
-              if (typeof onProgress === "function") onProgress(completed / chunkCount);
-            } catch {
-            }
-            resolve(null);
-          } catch (err) {
-            reject(err);
-          }
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blobSlice);
-      });
-      const pWrapper = p.then(() => executing.delete(pWrapper));
-      executing.add(pWrapper);
-      if (executing.size >= CONCURRENCY) {
-        await Promise.race(executing);
-      }
-    }
-    await Promise.all(executing);
-    return chunkCount;
-  };
-
-  const postMessage = async () => {
-    if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
-    if ((!content && !mediaFile) || isUploading) return;
-
-    setIsUploading(true);
-    try {
-      const newPostRef = doc(collection(db2, "artifacts", appId2, "public", "data", "posts"));
-      let hasChunks = false;
-      let chunkCount = 0;
-      let storedMedia = null;
-      let mimeType = null;
-
-      if (mediaFile) {
-        mimeType = mediaFile.type || null;
-        if (mediaFile.size > CHUNK_SIZE) {
-          hasChunks = true;
-          storedMedia = null;
-          chunkCount = await uploadChunksBase64(newPostRef.id, mediaFile, (ratio) => {
-            const pct = Math.max(1, Math.min(99, Math.floor(ratio * 100)));
-            setUploadProgress(pct);
-          });
-        } else {
-          storedMedia = await readAsDataURL(mediaFile, (ratio) => {
-            const pct = Math.max(1, Math.min(80, Math.floor(ratio * 80)));
-            setUploadProgress(pct);
-          });
-          hasChunks = false;
-          chunkCount = 0;
-        }
-      }
-
-      setUploadProgress((p) => Math.max(p, 90));
-      await setDoc(newPostRef, {
-        userId: user.uid,
-        content,
-        media: storedMedia,
-        mediaType,
-        mimeType,
-        hasChunks,
-        chunkCount,
-        likes: [],
-        comments: [],
-        createdAt: serverTimestamp()
-      });
-
-      setUploadProgress(100);
-      setContent("");
-      setMediaFile(null);
-      if (mediaPreview && mediaPreview.startsWith("blob:")) URL.revokeObjectURL(mediaPreview);
-      setMediaPreview(null);
-      showNotification("投稿しました");
-    } catch (e) {
-      console.error(e);
-      showNotification("投稿に失敗しました");
-    } finally {
-      setIsUploading(false);
-      setUploadProgress(0);
-    }
-  };
-
   const handleVoomFileUpload = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
     if (mediaPreview && mediaPreview.startsWith("blob:")) URL.revokeObjectURL(mediaPreview);
     setMediaFile(file);
@@ -4605,6 +4494,24 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
       setMediaPreview(null);
     }
     setMediaType(file.type.startsWith("video") ? "video" : "image");
+  };
+
+  const postMessage = async () => {
+    if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
+    if ((!content && !mediaFile) || isUploading) return;
+
+    // 投稿処理は App 側で走らせる（画面を離れても継続）
+    startVoomUpload?.({
+      content,
+      mediaFile,
+      mediaType
+    });
+
+    // 画面側は即クリア（アップロードはバックグラウンドで継続）
+    setContent("");
+    setMediaFile(null);
+    if (mediaPreview && mediaPreview.startsWith("blob:")) URL.revokeObjectURL(mediaPreview);
+    setMediaPreview(null);
   };
 
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-gray-50", children: [
@@ -4633,6 +4540,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
     ] })
   ] });
 };
+
 const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard }) => {
   const [edit, setEdit] = useState(profile || {});
   useEffect(() => {
@@ -5171,6 +5079,7 @@ function App() {
   const [postsHasMore, setPostsHasMore] = useState(true);
   const [postsLoadingMore, setPostsLoadingMore] = useState(false);
   const [voomUnreadCount, setVoomUnreadCount] = useState(0);
+  const [voomUpload, setVoomUpload] = useState({ isUploading: false, progress: 0, postId: null });
   const voomLastSeenRef = useRef(0);
   const postsCursorRef = useRef(null);
   const POSTS_PAGE_SIZE = 5;
@@ -5273,6 +5182,171 @@ function App() {
     navigator.clipboard.writeText(text);
     showNotification("ID\u3092\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F");
   };
+
+
+  // --- VOOM uploader (keeps running even if you leave the VOOM screen) ---
+  const voomUploadDocRef = useMemo(() => {
+    if (!user) return null;
+    return doc(db, "artifacts", appId, "public", "data", "voomUploads", user.uid);
+  }, [user]);
+
+  useEffect(() => {
+    if (!voomUploadDocRef) return;
+    const unsub = onSnapshot(voomUploadDocRef, (snap) => {
+      if (!snap.exists()) return;
+      const d = snap.data() || {};
+      if (typeof d.progress === "number" || typeof d.isUploading === "boolean") {
+        setVoomUpload((prev) => ({
+          ...prev,
+          isUploading: !!d.isUploading,
+          progress: typeof d.progress === "number" ? d.progress : prev.progress,
+          postId: d.postId || prev.postId
+        }));
+      }
+    });
+    return () => unsub();
+  }, [voomUploadDocRef]);
+
+  const readAsDataURLProgress = useCallback((file, onProgress) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    if (typeof onProgress === "function") {
+      reader.onprogress = (ev) => {
+        try {
+          if (ev.lengthComputable) onProgress(ev.loaded / ev.total);
+        } catch {
+        }
+      };
+    }
+    reader.onload = (ev) => resolve(ev.target.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  }), []);
+
+  const uploadChunksBase64Progress = useCallback(async (postId, file, onProgress) => {
+    const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
+    let completed = 0;
+    const CONCURRENCY = 5;
+    const executing = new Set();
+    for (let i = 0; i < chunkCount; i++) {
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const blobSlice = file.slice(start, end);
+      const p = new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          try {
+            const base64Data = e.target.result.split(",")[1];
+            await setDoc(doc(db, "artifacts", appId, "public", "data", "posts", postId, "chunks", `${i}`), { data: base64Data, index: i });
+            try {
+              completed += 1;
+              if (typeof onProgress === "function") onProgress(completed / chunkCount);
+            } catch {
+            }
+            resolve(null);
+          } catch (err) {
+            reject(err);
+          }
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blobSlice);
+      });
+      const pWrapper = p.then(() => executing.delete(pWrapper));
+      executing.add(pWrapper);
+      if (executing.size >= CONCURRENCY) {
+        await Promise.race(executing);
+      }
+    }
+    await Promise.all(executing);
+    return chunkCount;
+  }, [user]);
+
+  const startVoomUpload = useCallback(async ({ content, mediaFile, mediaType }) => {
+    if (!user || !voomUploadDocRef) return;
+    if (profile?.isBanned) return showNotification("アカウントが利用停止されています 🚫");
+
+    // すでに投稿中なら二重起動しない
+    if (voomUpload?.isUploading) return;
+
+    const updateCloud = async (patch) => {
+      try {
+        await setDoc(voomUploadDocRef, { ...patch, updatedAt: serverTimestamp() }, { merge: true });
+      } catch {
+      }
+    };
+
+    const setProgress = async (pct) => {
+      const clamped = Math.max(0, Math.min(100, pct));
+      setVoomUpload((prev) => ({ ...prev, isUploading: true, progress: clamped }));
+      await updateCloud({ isUploading: true, progress: clamped });
+    };
+
+    // まず「投稿中」状態をクラウドへ（ホームに戻っても状況が残る）
+    await updateCloud({
+      isUploading: true,
+      progress: 0,
+      contentPreview: (content || "").slice(0, 100),
+      startedAt: serverTimestamp()
+    });
+    setVoomUpload((prev) => ({ ...prev, isUploading: true, progress: 0 }));
+
+    try {
+      const newPostRef = doc(collection(db, "artifacts", appId, "public", "data", "posts"));
+      await updateCloud({ postId: newPostRef.id });
+
+      let hasChunks = false;
+      let chunkCount = 0;
+      let storedMedia = null;
+      let mimeType = null;
+
+      if (mediaFile) {
+        mimeType = mediaFile.type || null;
+        if (mediaFile.size > CHUNK_SIZE) {
+          hasChunks = true;
+          storedMedia = null;
+          chunkCount = await uploadChunksBase64Progress(newPostRef.id, mediaFile, async (ratio) => {
+            const pct = Math.max(1, Math.min(99, Math.floor(ratio * 100)));
+            // 5%刻みでクラウド更新（書き込み多発を抑える）
+            setVoomUpload((prev) => ({ ...prev, isUploading: true, progress: pct }));
+            if (pct % 5 === 0) await updateCloud({ progress: pct });
+          });
+        } else {
+          storedMedia = await readAsDataURLProgress(mediaFile, async (ratio) => {
+            const pct = Math.max(1, Math.min(80, Math.floor(ratio * 80)));
+            setVoomUpload((prev) => ({ ...prev, isUploading: true, progress: pct }));
+            if (pct % 10 === 0) await updateCloud({ progress: pct });
+          });
+          hasChunks = false;
+          chunkCount = 0;
+        }
+      }
+
+      await setProgress(90);
+      await setDoc(newPostRef, {
+        userId: user.uid,
+        content,
+        media: storedMedia,
+        mediaType,
+        mimeType,
+        hasChunks,
+        chunkCount,
+        likes: [],
+        comments: [],
+        createdAt: serverTimestamp()
+      });
+
+      await setProgress(100);
+      showNotification("投稿しました");
+    } catch (e) {
+      console.error(e);
+      showNotification("投稿に失敗しました");
+    } finally {
+      try {
+        if (voomUploadDocRef) await deleteDoc(voomUploadDocRef);
+      } catch {
+      }
+      setVoomUpload({ isUploading: false, progress: 0, postId: null });
+    }
+  }, [user, voomUploadDocRef, profile, voomUpload]);
 
 const loadMorePosts = async () => {
   if (!user) return;
@@ -5826,7 +5900,7 @@ return /* @__PURE__ */ jsx("div", { className: "w-full h-[100dvh] bg-[#d7dbe1] f
         ] })
       ] }) : /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden relative", children: [
         view === "home" && /* @__PURE__ */ jsx(HomeView, { user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }),
-        view === "voom" && /* @__PURE__ */ jsx(VoomView, { user, allUsers, profile, posts, showNotification, db, appId, onLoadMore: loadMorePosts, hasMore: postsHasMore, loadingMore: postsLoadingMore }),
+        view === "voom" && /* @__PURE__ */ jsx(VoomView, { user, allUsers, profile, posts, showNotification, db, appId, onLoadMore: loadMorePosts, hasMore: postsHasMore, loadingMore: postsLoadingMore, voomUpload, startVoomUpload }),
         view === "chatroom" && /* @__PURE__ */ jsx(ChatRoomView, { user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }),
         view === "profile" && /* @__PURE__ */ jsx(ProfileEditView, { user, profile, setView, showNotification, copyToClipboard }),
         view === "qr" && /* @__PURE__ */ jsx(QRScannerView, { user, setView, addFriendById }),
