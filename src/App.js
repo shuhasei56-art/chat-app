@@ -2110,18 +2110,42 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
   const [showMenu, setShowMenu] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
   const isInvalidBlob = !isMe && m.content?.startsWith("blob:");
-  const setBlobSrcFromBase64 = (base64Data, mimeType) => {
+  const setBlobSrcFromBase64 = async (base64Data, mimeType) => {
     try {
-      const byteCharacters = atob(base64Data);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: mimeType });
+      // Faster & more reliable than manual atob loops for large payloads (videos).
+      const res = await fetch(`data:${mimeType};base64,${base64Data}`);
+      const blob = await res.blob();
       setMediaSrc(URL.createObjectURL(blob));
     } catch (e) {
       console.error("Blob creation failed", e);
     }
   };
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  const fetchChunksBase64 = async (total) => {
+    const parts = new Array(total).fill(null);
+    let missing = Array.from({ length: total }, (_, i) => i);
+    const CONCURRENCY = 8;
+    for (let attempt = 0; attempt < 5 && missing.length; attempt++) {
+      let cursor = 0;
+      while (cursor < missing.length) {
+        const batch = missing.slice(cursor, cursor + CONCURRENCY);
+        cursor += CONCURRENCY;
+        const docs = await Promise.all(batch.map((i) => getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks", `${i}`))));
+        docs.forEach((d, idx) => {
+          const i = batch[idx];
+          if (d.exists()) parts[i] = d.data().data;
+        });
+      }
+      missing = [];
+      for (let i = 0; i < total; i++) if (!parts[i]) missing.push(i);
+      if (missing.length) await sleep(300 * Math.pow(2, attempt));
+    }
+    if (missing.length) throw new Error(`Missing chunks: ${missing.length}`);
+    return parts.join("");
+  };
+
   useEffect(() => {
     if (isMe && m.content?.startsWith("blob:")) {
       setMediaSrc(m.content);
@@ -2140,12 +2164,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
         try {
           let base64Data = "";
           if (m.chunkCount) {
-            const chunkPromises = [];
-            for (let i = 0; i < m.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks", `${i}`)));
-            const chunkDocs = await Promise.all(chunkPromises);
-            chunkDocs.forEach((d) => {
-              if (d.exists()) base64Data += d.data().data;
-            });
+            base64Data = await fetchChunksBase64(m.chunkCount);
           } else {
             const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc")));
             snap.forEach((d) => base64Data += d.data().data);
@@ -2191,13 +2210,8 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
       if (!dataUrl && m.hasChunks) {
         let base64Data = "";
         if (m.chunkCount) {
-          const chunkPromises = [];
-          for (let i = 0; i < m.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks", `${i}`)));
-          const chunkDocs = await Promise.all(chunkPromises);
-          chunkDocs.forEach((d) => {
-            if (d.exists()) base64Data += d.data().data;
-          });
-        } else {
+            base64Data = await fetchChunksBase64(m.chunkCount);
+          } else {
           const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks"), orderBy("index", "asc")));
           snap.forEach((d) => base64Data += d.data().data);
         }
@@ -2409,18 +2423,37 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
   const [postPreview, setPostPreview] = useState(null);
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const fetchPostChunksBase64 = async (total) => {
+    const parts = new Array(total).fill(null);
+    let missing = Array.from({ length: total }, (_, i) => i);
+    const CONCURRENCY = 8;
+    for (let attempt = 0; attempt < 5 && missing.length; attempt++) {
+      let cursor = 0;
+      while (cursor < missing.length) {
+        const batch = missing.slice(cursor, cursor + CONCURRENCY);
+        cursor += CONCURRENCY;
+        const docs = await Promise.all(batch.map((i) => getDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks", `${i}`))));
+        docs.forEach((d, idx2) => {
+          const i = batch[idx2];
+          if (d.exists()) parts[i] = d.data().data;
+        });
+      }
+      missing = [];
+      for (let i = 0; i < total; i++) if (!parts[i]) missing.push(i);
+      if (missing.length) await sleep(300 * Math.pow(2, attempt));
+    }
+    if (missing.length) throw new Error(`Missing post chunks: ${missing.length}`);
+    return parts.join("");
+  };
   useEffect(() => {
     if (post.hasChunks && !mediaSrc) {
       setIsLoadingMedia(true);
       (async () => {
         let mergedData = "";
         if (post.chunkCount) {
-          const chunkPromises = [];
-          for (let i = 0; i < post.chunkCount; i++) chunkPromises.push(getDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks", `${i}`)));
-          const chunkDocs = await Promise.all(chunkPromises);
-          chunkDocs.forEach((d) => {
-            if (d.exists()) mergedData += d.data().data;
-          });
+          mergedData = await fetchPostChunksBase64(post.chunkCount);
         } else {
           const snap = await getDocs(query(collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"), orderBy("index", "asc")));
           snap.forEach((d) => mergedData += d.data().data);
@@ -2431,10 +2464,8 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
               setMediaSrc(mergedData);
             } else {
               const mimeType = post.mimeType || (post.mediaType === "video" ? "video/webm" : "image/jpeg");
-              const byteCharacters = atob(mergedData);
-              const byteNumbers = new Array(byteCharacters.length);
-              for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
-              const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+              const res = await fetch(`data:${mimeType};base64,${mergedData}`);
+              const blob = await res.blob();
               setMediaSrc(URL.createObjectURL(blob));
             }
           } catch (e) {
