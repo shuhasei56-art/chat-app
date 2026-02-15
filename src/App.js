@@ -622,7 +622,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const reconnectInFlightRef = useRef(false);
   const hasRemoteVideoTrackRef = useRef(false);
   const sessionId = callData?.sessionId || "";
-  const isCaller = typeof isCallerProp === "boolean" ? isCaller
+  const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData?.callerId === user.uid;
   const tryStartReconnect = useCallback(
     async (reason) => {
       const pc = pcRef.current;
