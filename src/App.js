@@ -449,6 +449,27 @@ const writeCachedProfile = (uid, profile) => {
   } catch {
   }
 };
+const fixMojibakeText = (value) => {
+  if (typeof value !== "string" || value.length === 0) return value;
+  const hasLikelyMojibake = /[\uFFFD]|[ÃÂãæçøœ‰™]|縺|繧|繝/.test(value);
+  if (!hasLikelyMojibake) return value;
+  const decodeLatin1AsUtf8 = (text) => {
+    try {
+      const bytes = new Uint8Array(Array.from(text).map((ch) => ch.charCodeAt(0) & 255));
+      return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    } catch {
+      return text;
+    }
+  };
+  const score = (text) => {
+    const jpCount = (text.match(/[\u3040-\u30FF\u3400-\u9FFF]/g) || []).length;
+    const badCount = (text.match(/[\uFFFDÃÂãæçøœ‰™]/g) || []).length;
+    return jpCount * 2 - badCount * 3;
+  };
+  const repaired = decodeLatin1AsUtf8(value);
+  if (!repaired || repaired === value) return value;
+  return score(repaired) > score(value) ? repaired : value;
+};
 const getEffectOwnerUidFromRefPath = (refPath) => {
   if (!refPath || typeof refPath !== "string") return "";
   const parts = refPath.split("/");
@@ -832,32 +853,32 @@ const AuthView = ({ onLogin, showNotification }) => {
   };
   const getAuthErrorMessage = (error, mode = "login") => {
     const code = error?.code || "";
-    if (code === "auth/invalid-email") return "ID�`�����s���ł��B�p������ . _ - �̂ݎg�p�ł��܂��B";
-    if (code === "auth/user-not-found") return "����ID�͓o�^����Ă��܂���B";
-    if (code === "auth/wrong-password" || code === "auth/invalid-credential" || code === "auth/invalid-login-credentials") return "ID�܂��̓p�X���[�h���Ⴂ�܂��B";
-    if (code === "auth/account-exists-with-different-credential") return "����ID�̓p�X���[�h���O�C���ł͂Ȃ��A�ʂ̃��O�C�����@�iGoogle���j�ō쐬����Ă��܂��B";
-    if (code === "auth/email-already-in-use") return "����ID�͊��Ɏg���Ă��܂��B";
-    if (code === "auth/weak-password") return "�p�X���[�h��6�����ȏ�œ��͂��Ă��������B";
-    if (code === "auth/too-many-requests") return "���s�񐔂��������܂��B���΂炭�҂��Ă���Ď��s���Ă��������B";
-    if (code === "auth/network-request-failed") return "�l�b�g���[�N�G���[�ł��B�ڑ����m�F���čĎ��s���Ă��������B";
-    if (code === "auth/operation-not-allowed") return "Firebase Authentication�ł��̃��O�C�����@�������ł��BSign-in method ��L�������Ă��������B";
-    return `${mode === "signup" ? "�o�^" : "���O�C��"}�Ɏ��s���܂���: ${error?.message || "�s���ȃG���["}`;
+    if (code === "auth/invalid-email") return "ID形式が不正です。英数字と . _ - のみ使用できます。";
+    if (code === "auth/user-not-found") return "このIDは登録されていません。";
+    if (code === "auth/wrong-password" || code === "auth/invalid-credential" || code === "auth/invalid-login-credentials") return "IDまたはパスワードが違います。";
+    if (code === "auth/account-exists-with-different-credential") return "このIDはパスワードログインではなく、別のログイン方法（Google等）で作成されています。";
+    if (code === "auth/email-already-in-use") return "このIDは既に使われています。";
+    if (code === "auth/weak-password") return "パスワードは6文字以上で入力してください。";
+    if (code === "auth/too-many-requests") return "試行回数が多すぎます。しばらく待ってから再試行してください。";
+    if (code === "auth/network-request-failed") return "ネットワークエラーです。接続を確認して再試行してください。";
+    if (code === "auth/operation-not-allowed") return "Firebase Authenticationでこのログイン方法が無効です。Sign-in method を有効化してください。";
+    return `${mode === "signup" ? "登録" : "ログイン"}に失敗しました: ${error?.message || "不明なエラー"}`;
   };
   const getGoogleLoginErrorMessage = (error) => {
     const code = error?.code || "";
     if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request") {
-      return "�|�b�v�A�b�v���u���b�N���ꂽ���߁A���_�C���N�g�Ń��O�C�����܂��B";
+      return "ポップアップがブロックされたため、リダイレクトでログインします。";
     }
     if (code === "auth/popup-closed-by-user") {
-      return "Google���O�C�����L�����Z������܂����B";
+      return "Googleログインがキャンセルされました。";
     }
     if (code === "auth/unauthorized-domain") {
-      return "���̃h���C����Firebase Authentication�ŋ�����Ă��܂���BFirebase�R���\�[���ŏ��F�ς݃h���C����ǉ����Ă��������B";
+      return "このドメインはFirebase Authenticationで許可されていません。Firebaseコンソールで承認済みドメインを追加してください。";
     }
     if (code === "auth/operation-not-allowed") {
-      return "Firebase��Google���O�C�����L��������Ă��܂���BAuthentication > Sign-in method �ŗL���ɂ��Ă��������B";
+      return "FirebaseでGoogleログインが有効化されていません。Authentication > Sign-in method で有効にしてください。";
     }
-    return `Google���O�C���Ɏ��s���܂���: ${error?.message || "�s���ȃG���["}`;
+    return `Googleログインに失敗しました: ${error?.message || "不明なエラー"}`;
   };
   const handleGoogleLogin = async () => {
     const googleProvider = new GoogleAuthProvider();
@@ -870,7 +891,7 @@ const AuthView = ({ onLogin, showNotification }) => {
       const code = error?.code || "";
       if (code === "auth/popup-blocked" || code === "auth/cancelled-popup-request" || code === "auth/operation-not-supported-in-this-environment") {
         try {
-          showNotification("�|�b�v�A�b�v���g���Ȃ����߁A���_�C���N�g�Ń��O�C�����܂��B");
+          showNotification("ポップアップが使えないため、リダイレクトでログインします。");
           await signInWithRedirect(auth, googleProvider);
           return;
         } catch (redirectError) {
@@ -2108,7 +2129,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   }, [needsRemotePlay, tryPlayRemoteMedia]);
   const networkQualityLabel = networkQuality === "good" ? "\u56DE\u7DDA: \u826F\u597D" : networkQuality === "medium" ? "\u56DE\u7DDA: \u666E\u901A" : networkQuality === "poor" ? "\u56DE\u7DDA: \u4E0D\u5B89\u5B9A" : "\u56DE\u7DDA: \u78BA\u8A8D\u4E2D";
   const networkQualityClass = networkQuality === "good" ? "bg-emerald-500/80 text-white" : networkQuality === "medium" ? "bg-yellow-500/80 text-black" : networkQuality === "poor" ? "bg-red-500/80 text-white" : "bg-gray-500/80 text-white";
-  const qualityModeLabel = qualityMode === "auto" ? "�掿: ����" : qualityMode === "low" ? "�掿: ��" : qualityMode === "medium" ? "�掿: ��" : "�掿: ��";
+  const qualityModeLabel = qualityMode === "auto" ? "画質: 自動" : qualityMode === "low" ? "画質: 低" : qualityMode === "medium" ? "画質: 中" : "画質: 高";
   const remoteVideoTransform = `${isRemoteMirror ? "scaleX(-1) " : ""}scale(${remoteZoom})`.trim();
   const remoteVideoFilter = `brightness(${remoteBrightness}%) contrast(${remoteContrast}%) saturate(${remoteSaturation}%)`;
   const localVideoTransform = `${isLocalMirror ? "scaleX(-1) " : ""}scale(${localZoom})`.trim();
@@ -2332,7 +2353,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   };
   const handleEndCallRequest = () => {
     if (confirmBeforeHangup) {
-      const ok = window.confirm("�ʘb���I�����܂����H");
+      const ok = window.confirm("通話を終了しますか？");
       if (!ok) return;
     }
     onEndCall?.();
@@ -2486,7 +2507,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       console.warn("PiP toggle failed:", e);
     }
   };
-  const localPreviewClass = "absolute top-6 right-6 w-[150px] sm:w-[180px] h-[250px] sm:h-[300px] rounded-[22px] overflow-hidden border-[4px] border-white/90 shadow-[0_0_0_1px_rgba(255,255,255,0.2)] bg-black";
+  const localPreviewClass = "absolute top-5 right-5 w-[126px] sm:w-[156px] h-[210px] sm:h-[250px] rounded-[18px] overflow-hidden border-[3px] border-white/90 shadow-[0_0_0_1px_rgba(255,255,255,0.2)] bg-black";
   const effectNameAliases = {
     Normal: "Normal",
     "\u901A\u5E38": "Normal",
@@ -2507,22 +2528,28 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   };
   const normalizeEffectName = (name) => {
     const raw = String(name || "").trim();
-    const normalized = effectNameAliases[raw] || effectNameAliases[raw.toLowerCase()] || raw;
-    return normalized;
+    const cleaned = raw.normalize("NFKC").replace(/^[^\p{L}\p{N}\u3040-\u30FF\u4E00-\u9FFF]+/u, "").trim();
+    if (!cleaned) return "";
+    const direct = effectNameAliases[cleaned] || effectNameAliases[cleaned.toLowerCase()];
+    if (direct) return direct;
+    const lowered = cleaned.toLowerCase();
+    for (const [alias, canonical] of Object.entries(effectNameAliases)) {
+      if (lowered.includes(String(alias).toLowerCase())) return canonical;
+    }
+    return cleaned;
   };
   const effectChipNames = (() => {
-    const names = ["Normal", ...((effects || []).map((ef) => ef?.name))];
-    const seen = /* @__PURE__ */ new Set();
-    const deduped = [];
-    for (const name of names) {
-      const normalized = normalizeEffectName(name);
-      if (!normalized) continue;
-      const key = normalized.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      deduped.push(normalized);
-    }
-    return deduped.slice(0, 5);
+    const preferredOrder = ["Normal", "Invert", "Contrast", "Grayscale", "Sepia", "Bright", "Blur", "Hue"];
+    const available = /* @__PURE__ */ new Set(["Normal"]);
+    const current = normalizeEffectName(activeEffect);
+    if (current) available.add(current);
+    (effects || []).forEach((ef) => {
+      const normalized = normalizeEffectName(ef?.name);
+      if (normalized) available.add(normalized);
+    });
+    const ordered = preferredOrder.filter((name) => available.has(name));
+    if (current && !ordered.includes(current)) ordered.unshift(current);
+    return ordered.slice(0, 6);
   })();
   const effectLabelMap = {
     Normal: "\u901A\u5E38",
@@ -2547,8 +2574,8 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "absolute w-0 h-0 opacity-0 pointer-events-none" }),
       /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "absolute inset-0 w-full h-full object-cover bg-black", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }),
       (!remoteStream || !hasRemoteVideo) && /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 flex flex-col items-center justify-center gap-5 text-white", children: [
-        /* @__PURE__ */ jsx("div", { className: "w-28 h-28 rounded-full bg-[#2f3b53] flex items-center justify-center", children: /* @__PURE__ */ jsx(User, { className: "w-12 h-12 opacity-80" }) }),
-        /* @__PURE__ */ jsx("p", { className: "text-[50px] font-black leading-none tracking-tight", children: remoteStream ? isVideoEnabled ? "\u30D3\u30C7\u30AA\u53D7\u4FE1\u4E2D..." : "\u97F3\u58F0\u901A\u8A71\u4E2D..." : "\u63A5\u7D9A\u4E2D..." })
+        /* @__PURE__ */ jsx("div", { className: "w-24 h-24 rounded-full bg-[#2f3b53] flex items-center justify-center", children: /* @__PURE__ */ jsx(User, { className: "w-10 h-10 opacity-80" }) }),
+        /* @__PURE__ */ jsx("p", { className: "text-[40px] sm:text-[44px] font-black leading-none tracking-tight", children: remoteStream ? isVideoEnabled ? "\u30D3\u30C7\u30AA\u53D7\u4FE1\u4E2D..." : "\u97F3\u58F0\u901A\u8A71\u4E2D..." : "\u63A5\u7D9A\u4E2D..." })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: localPreviewClass, children: [
         /* @__PURE__ */ jsx(
@@ -2568,15 +2595,19 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         ),
         (!isVideoEnabled || isVideoOff) && /* @__PURE__ */ jsx("div", { className: "absolute inset-0 w-full h-full text-white flex items-center justify-center bg-black/60 backdrop-blur-sm", children: /* @__PURE__ */ jsx(VideoOff, { className: "w-7 h-7 opacity-80" }) })
       ] }),
-      /* @__PURE__ */ jsxs("div", { className: "absolute top-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 sm:gap-4 max-w-[86vw] overflow-x-auto px-2", children: [
-        effectChipNames.map((name) => { const label = toJapaneseEffectLabel(name); return /* @__PURE__ */ jsx("button", { className: `whitespace-nowrap px-4 sm:px-5 py-2 rounded-[18px] text-sm sm:text-lg font-black transition-colors ${name === activeEffect ? "bg-white text-black" : "bg-transparent text-white/95 hover:text-white"}`, children: name === activeEffect ? label : `* ${label}` }, name); }),
-        /* @__PURE__ */ jsx("div", { className: "whitespace-nowrap bg-black/55 text-white text-xs font-black px-3 py-1.5 rounded-full backdrop-blur-md", children: formatCallDuration(callDurationSec) }),
-        isRecordingCall && /* @__PURE__ */ jsxs("div", { className: "whitespace-nowrap bg-red-600/90 text-white text-xs font-black px-3 py-1.5 rounded-full backdrop-blur-md flex items-center gap-1", children: [
+      /* @__PURE__ */ jsx("div", { className: "absolute top-3 inset-x-0 z-20 px-3", children: /* @__PURE__ */ jsx("div", { className: "mx-auto w-full max-w-[92vw] rounded-2xl bg-black/45 border border-white/10 backdrop-blur-md px-2 py-2", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide", children: [
+        effectChipNames.map((name) => {
+          const label = toJapaneseEffectLabel(name);
+          const isActiveChip = normalizeEffectName(activeEffect) === name;
+          return /* @__PURE__ */ jsx("button", { className: `shrink-0 px-3 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-black transition-colors ${isActiveChip ? "bg-white text-black" : "bg-white/15 text-white hover:bg-white/25"}`, children: label }, name);
+        }),
+        /* @__PURE__ */ jsx("div", { className: "shrink-0 bg-black/55 text-white text-xs font-black px-3 py-1.5 rounded-full", children: formatCallDuration(callDurationSec) }),
+        isRecordingCall && /* @__PURE__ */ jsxs("div", { className: "shrink-0 bg-red-600/90 text-white text-xs font-black px-3 py-1.5 rounded-full flex items-center gap-1", children: [
           /* @__PURE__ */ jsx(Disc, { className: "w-3 h-3 animate-pulse" }),
-          "REC ",
+          "録画 ",
           formatCallDuration(recordingDurationSec)
         ] })
-      ] }),
+      ] }) }) }),
       needsRemotePlay && /* @__PURE__ */ jsxs("button", { onClick: resumeRemotePlayback, className: "absolute top-16 left-1/2 -translate-x-1/2 z-30 bg-white text-gray-900 text-xs font-black px-4 py-2 rounded-full", children: [
         /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
         "\u97F3\u58F0\u3092\u518D\u751F"
@@ -2597,7 +2628,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: () => setIsLocalMirror((v) => !v), className: `px-3 py-2 rounded-full text-xs font-bold ${isLocalMirror ? "bg-gray-700 text-white hover:bg-gray-600" : "bg-white text-black hover:bg-gray-200"}`, children: isLocalMirror ? "\u30DF\u30E9\u30FCON" : "\u30DF\u30E9\u30FCOFF" }),
           isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, className: `px-3 py-2 rounded-full text-xs font-bold ${isScreenSharing ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isScreenSharing ? "\u5171\u6709\u505C\u6B62" : "\u753B\u9762\u5171\u6709" }),
           /* @__PURE__ */ jsx("button", { onClick: toggleCallRecording, className: `px-3 py-2 rounded-full text-xs font-bold ${isRecordingCall ? "bg-red-600 text-white hover:bg-red-500" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isRecordingCall ? "\u9332\u753B\u505C\u6B62" : "\u9332\u753B" }),
-          /* @__PURE__ */ jsx("button", { onClick: togglePictureInPicture, disabled: !hasRemoteVideo, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600 disabled:bg-gray-500", children: isRemotePip ? "PiP\u7D42\u4E86" : "PiP" }),
+          /* @__PURE__ */ jsx("button", { onClick: togglePictureInPicture, disabled: !hasRemoteVideo, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600 disabled:bg-gray-500", children: isRemotePip ? "小窓表示終了" : "小窓表示" }),
           /* @__PURE__ */ jsx("button", { onClick: copyCallDebugInfo, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u60C5\u5831\u30B3\u30D4\u30FC" }),
           /* @__PURE__ */ jsx("button", { onClick: toggleHold, className: `px-3 py-2 rounded-full text-xs font-bold ${isHold ? "bg-yellow-500 text-black hover:bg-yellow-400" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isHold ? "\u4FDD\u7559\u4E2D" : "\u4FDD\u7559" }),
           /* @__PURE__ */ jsx("button", { onClick: addBookmark, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u3057\u304A\u308A" }),
@@ -2648,14 +2679,14 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
           /* @__PURE__ */ jsx(Settings, { className: "w-3.5 h-3.5" }),
           "\u8A2D\u5B9A"
         ] })
-      ] }),      showShortcutHelp && /* @__PURE__ */ jsx("div", { className: "mb-3 rounded-2xl border border-white/10 bg-black/40 p-3 text-white text-xs font-bold", children: "Shortcut: M=Mic / V=Video / H=Hold / S=Snapshot / F=Fullscreen / P=PiP / ?=Help" }),
-      /* @__PURE__ */ jsxs("div", { className: "flex items-end justify-center gap-8 md:gap-10", children: [
-        /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `w-[82px] h-[82px] rounded-full transition-all flex items-center justify-center ${isMuted ? "bg-white text-black" : "bg-[#2f3b53] text-white hover:bg-[#3c4864]"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-9 h-9" }) : /* @__PURE__ */ jsx(Mic, { className: "w-9 h-9" }) }),
-        /* @__PURE__ */ jsxs("button", { onClick: handleEndCallRequest, className: "w-[112px] h-[112px] rounded-full bg-[#ef2f2f] text-white shadow-lg hover:bg-[#de2424] transition-all flex flex-col items-center justify-center gap-1", children: [
-          /* @__PURE__ */ jsx(PhoneOff, { className: "w-11 h-11" }),
+      ] }),      showShortcutHelp && /* @__PURE__ */ jsx("div", { className: "mb-3 rounded-2xl border border-white/10 bg-black/40 p-3 text-white text-xs font-bold", children: "ショートカット: M=マイク / V=ビデオ / H=保留 / S=スクリーンショット / F=全画面 / P=ピクチャーインピクチャー / ?=ヘルプ" }),
+      /* @__PURE__ */ jsxs("div", { className: "flex items-end justify-center gap-6 md:gap-8", children: [
+        /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `w-[72px] h-[72px] rounded-full transition-all flex items-center justify-center ${isMuted ? "bg-white text-black" : "bg-[#2f3b53] text-white hover:bg-[#3c4864]"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-8 h-8" }) : /* @__PURE__ */ jsx(Mic, { className: "w-8 h-8" }) }),
+        /* @__PURE__ */ jsxs("button", { onClick: handleEndCallRequest, className: "w-[96px] h-[96px] rounded-full bg-[#ef2f2f] text-white shadow-lg hover:bg-[#de2424] transition-all flex flex-col items-center justify-center gap-1", children: [
+          /* @__PURE__ */ jsx(PhoneOff, { className: "w-9 h-9" }),
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u7D42\u4E86" })
         ] }),
-        isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `w-[82px] h-[82px] rounded-full transition-all flex items-center justify-center ${isVideoOff ? "bg-white text-black" : "bg-[#2f3b53] text-white hover:bg-[#3c4864]"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-9 h-9" }) : /* @__PURE__ */ jsx(Video, { className: "w-9 h-9" }) })
+        isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `w-[72px] h-[72px] rounded-full transition-all flex items-center justify-center ${isVideoOff ? "bg-white text-black" : "bg-[#2f3b53] text-white hover:bg-[#3c4864]"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-8 h-8" }) : /* @__PURE__ */ jsx(Video, { className: "w-8 h-8" }) })
       ] })
     ] })
   ] });
@@ -2807,7 +2838,7 @@ const CoinTransferModal = ({ onClose, myWallet, myUid, targetUid, targetName, sh
       /* @__PURE__ */ jsx("div", { className: "text-3xl font-black text-yellow-500 mt-1", children: myWallet?.toLocaleString() })
     ] }),
     /* @__PURE__ */ jsxs("p", { className: "text-sm font-bold text-gray-500 mb-2", children: [
-      "To: ",
+      "宛先: ",
       targetName
     ] }),
     /* @__PURE__ */ jsxs("div", { className: "relative mb-6", children: [
@@ -2840,7 +2871,7 @@ const BirthdayCardModal = ({ onClose, onSend, toName }) => {
     /* @__PURE__ */ jsx("div", { className: "mb-4 flex gap-3", children: colors.map((c) => /* @__PURE__ */ jsx("button", { onClick: () => setColor(c.id), className: `w-10 h-10 rounded-full border-2 ${c.class} ${color === c.id ? "scale-125 ring-2 ring-gray-300" : ""}` }, c.id)) }),
     /* @__PURE__ */ jsxs("div", { className: `p-4 rounded-2xl border-2 mb-4 ${colors.find((c) => c.id === color)?.class}`, children: [
       /* @__PURE__ */ jsxs("div", { className: "font-bold text-gray-700 mb-2", children: [
-        "To: ",
+        "宛先: ",
         toName
       ] }),
       /* @__PURE__ */ jsx("textarea", { className: "w-full bg-white/50 rounded-xl p-3 text-sm focus:outline-none min-h-[100px]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8...", value: message, onChange: (e) => setMessage(e.target.value) })
@@ -3056,7 +3087,7 @@ const IncomingCallOverlay = ({ callData, onAccept, onDecline, allUsers }) => {
           /* @__PURE__ */ jsx(PhoneCall, { className: "w-5 h-5 animate-pulse" }),
           /* @__PURE__ */ jsx("span", { className: "text-sm font-bold tracking-widest", children: "\u7740\u4FE1\u4E2D..." })
         ] }),
-        /* @__PURE__ */ jsx("h2", { className: "text-4xl font-bold text-white drop-shadow-xl text-center leading-tight", children: caller?.name || "Unknown" }),
+        /* @__PURE__ */ jsx("h2", { className: "text-4xl font-bold text-white drop-shadow-xl text-center leading-tight", children: caller?.name || "不明" }),
         /* @__PURE__ */ jsx("div", { className: "text-white/70 text-sm font-bold mt-1", children: isVideo ? "\u30D3\u30C7\u30AA\u901A\u8A71" : "\u97F3\u58F0\u901A\u8A71" })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "relative mt-8", children: [
@@ -3142,7 +3173,7 @@ const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, m
         await updateDoc(userRef, { hiddenFriends: arrayRemove(friend.uid) });
         showNotification?.("\u975E\u8868\u793A\u3092\u89E3\u9664\u3057\u307E\u3057\u305F");
       } else {
-        const ok = window.confirm("通話を終了しますか？");
+        const ok = window.confirm("\u3053\u306E\u53CB\u3060\u3061\u3092\u975E\u8868\u793A\u306B\u3057\u307E\u3059\u304B\uFF1F");
         if (!ok) return;
         await updateDoc(userRef, { hiddenFriends: arrayUnion(friend.uid) });
         showNotification?.("\u975E\u8868\u793A\u306B\u3057\u307E\u3057\u305F");
@@ -3566,7 +3597,7 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
         "\u524A\u9664"
       ] })
     ] }),
-    /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: localPost.content }),
+    /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: fixMojibakeText(localPost.content) }),
     (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-black/5 rounded-2xl flex items-center justify-center min-h-[140px] max-h-96 relative overflow-hidden", children: [
       isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : localPost.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full h-full max-h-96 rounded-2xl bg-black object-contain cursor-zoom-in", controls: true, playsInline: true, preload: "metadata", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full h-full max-h-96 rounded-2xl object-contain bg-black/5 cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
       !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: localPost.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
@@ -3585,8 +3616,8 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, onDel
       ] })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "space-y-3 mb-4", children: localPost.comments?.map((c, i) => /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-3 py-2", children: [
-      /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-500", children: c.userName }),
-      /* @__PURE__ */ jsx("div", { className: "text-xs", children: c.text })
+      /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-500", children: fixMojibakeText(c.userName) }),
+      /* @__PURE__ */ jsx("div", { className: "text-xs", children: fixMojibakeText(c.text) })
     ] }, i)) }),
     /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 bg-gray-100 rounded-full px-4 py-1", children: [
       /* @__PURE__ */ jsx("input", { className: "flex-1 bg-transparent text-xs py-2 outline-none", placeholder: "\u30B3\u30E1\u30F3\u30C8...", value: commentText, onChange: (e) => setCommentText(e.target.value), onKeyPress: (e) => e.key === "Enter" && submitComment() }),
@@ -3698,11 +3729,11 @@ const BirthdayCardBox = ({ user, setView }) => {
     ] }),
     /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide bg-gray-50", children: myCards.length === 0 ? /* @__PURE__ */ jsx("div", { className: "text-center py-20 text-gray-400 font-bold", children: "\u30AB\u30FC\u30C9\u306F\u307E\u3060\u3042\u308A\u307E\u305B\u3093" }) : myCards.map((card) => /* @__PURE__ */ jsxs("div", { className: `p-6 rounded-3xl border-2 shadow-sm relative ${getColorClass(card.color)}`, children: [
       /* @__PURE__ */ jsx("div", { className: "absolute top-4 right-4 text-4xl opacity-50", children: "\u{1F382}" }),
-      /* @__PURE__ */ jsx("div", { className: "font-bold text-lg mb-2", children: "Happy Birthday!" }),
+      /* @__PURE__ */ jsx("div", { className: "font-bold text-lg mb-2", children: "お誕生日おめでとう！" }),
       /* @__PURE__ */ jsx("div", { className: "whitespace-pre-wrap text-sm font-medium mb-4", children: card.message }),
       /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mt-4 pt-4 border-t border-black/10", children: [
         /* @__PURE__ */ jsxs("div", { className: "text-xs font-bold opacity-70", children: [
-          "From: ",
+          "差出人: ",
           card.fromName
         ] }),
         /* @__PURE__ */ jsx("div", { className: "text-[10px] opacity-60", children: formatDate(card.createdAt) })
@@ -4800,7 +4831,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       /* @__PURE__ */ jsx("button", { onClick: () => {
         setBanTarget(null);
         setGrantAmount("");
-      }, className: "w-full py-3 bg-gray-100 hover:bg-gray-200 font-bold rounded-2xl text-gray-600 transition-colors", children: "閉じる" })
+      }, className: "w-full py-3 bg-gray-100 hover:bg-gray-200 font-bold rounded-2xl text-gray-600 transition-colors", children: "\u9589\u3058\u308B" })
     ] }) })
   ] });
 };
@@ -5087,7 +5118,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       let localBlobUrl = null;
       let storedContent = content;
       let previewData = null;
-      const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: usersByUid.get(currentReply.senderId)?.name || "Unknown", type: currentReply.type } } : {};
+      const replyData = currentReply ? { replyTo: { id: currentReply.id, content: currentReply.content, senderName: usersByUid.get(currentReply.senderId)?.name || "不明", type: currentReply.type } } : {};
       const fileData = file ? { fileName: file.name, fileSize: file.size, mimeType: file.type || "" } : {};
       const currentChat = chats.find((c) => c.id === activeChatId);
       const updateData = {
@@ -5619,7 +5650,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
                       " \u4EBA"
                     ] }),
                     /* @__PURE__ */ jsxs("div", { className: "text-[10px] text-gray-300 font-mono mt-0.5 truncate", children: [
-                      "ChatID: ",
+                      "チャットID: ",
                       activeChatId
                     ] })
                   ] }),
@@ -5628,7 +5659,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
                     {
                       onClick: () => setGroupSettingsOpen(false),
                       className: "p-2 rounded-full bg-gray-100 hover:bg-gray-200",
-                      "aria-label": "閉じる",
+                      "aria-label": "\u9589\u3058\u308B",
                       children: /* @__PURE__ */ jsx(X, { className: "w-5 h-5" })
                     }
                   )
@@ -5807,7 +5838,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       replyTo && /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between bg-gray-100 p-2 rounded-xl text-xs mb-1 border-l-4 border-green-500", children: [
         /* @__PURE__ */ jsxs("div", { className: "flex flex-col max-w-[90%]", children: [
           /* @__PURE__ */ jsxs("span", { className: "font-bold text-green-600 mb-0.5", children: [
-            usersByUid.get(replyTo.senderId)?.name || "Unknown",
+            usersByUid.get(replyTo.senderId)?.name || "不明",
             " \u3078\u306E\u8FD4\u4FE1"
           ] }),
           /* @__PURE__ */ jsxs("div", { className: "truncate text-gray-600 flex items-center gap-1", children: [
@@ -5886,7 +5917,7 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
       setHasMorePosts(snap.docs.length === VOOM_PAGE_SIZE);
     } catch (e) {
       console.error("Failed to load VOOM posts:", e);
-      showNotification("VOOM�̓ǂݍ��݂Ɏ��s���܂���");
+      showNotification("VOOMの読み込みに失敗しました");
     } finally {
       setIsPostsLoading(false);
       setIsLoadingMorePosts(false);
@@ -5998,7 +6029,7 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
   const handleDeletePost = async (post) => {
     if (!post?.id || !user?.uid) return;
     if (post.userId !== user.uid) return;
-    const ok = window.confirm("通話を終了しますか？");
+    const ok = window.confirm("\u6295\u7A3F\u3092\u524A\u9664\u3057\u307E\u3059\u304B\uFF1F");
     if (!ok) return;
     try {
       const chunksRef = collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks");
@@ -6045,8 +6076,8 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
       , isUploading && /* @__PURE__ */ jsx("div", { className: "mt-2 h-1.5 w-full rounded-full bg-gray-100 overflow-hidden", children: /* @__PURE__ */ jsx("div", { className: "h-full bg-green-500 transition-all duration-150", style: { width: `${voomUploadProgress}%` } }) })
       ] }),
       isPostsLoading ? /* @__PURE__ */ jsx("div", { className: "py-10 flex items-center justify-center", children: /* @__PURE__ */ jsx(Loader2, { className: "w-6 h-6 animate-spin text-gray-400" }) }) : voomPosts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile, onDelete: handleDeletePost }, p.id)),
-      !isPostsLoading && voomPosts.length === 0 && /* @__PURE__ */ jsx("div", { className: "text-center text-sm text-gray-400 py-10", children: "���e������܂���" }),
-      hasMorePosts && !isPostsLoading && /* @__PURE__ */ jsx("div", { className: "px-4 py-6", children: /* @__PURE__ */ jsx("button", { onClick: () => loadVoomPosts(false), disabled: isLoadingMorePosts, className: "w-full py-3 rounded-xl bg-white border font-bold text-sm text-gray-700", children: isLoadingMorePosts ? /* @__PURE__ */ jsx(Loader2, { className: "w-4 h-4 animate-spin mx-auto" }) : "����ɓǂݍ���" }) })
+      !isPostsLoading && voomPosts.length === 0 && /* @__PURE__ */ jsx("div", { className: "text-center text-sm text-gray-400 py-10", children: "投稿がありません" }),
+      hasMorePosts && !isPostsLoading && /* @__PURE__ */ jsx("div", { className: "px-4 py-6", children: /* @__PURE__ */ jsx("button", { onClick: () => loadVoomPosts(false), disabled: isLoadingMorePosts, className: "w-full py-3 rounded-xl bg-white border font-bold text-sm text-gray-700", children: isLoadingMorePosts ? /* @__PURE__ */ jsx(Loader2, { className: "w-4 h-4 animate-spin mx-auto" }) : "さらに読み込む" }) })
     ] })
   ] });
 };
@@ -6167,7 +6198,7 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-white", children: [
     /* @__PURE__ */ jsxs("div", { className: "p-4 border-b flex items-center gap-4 sticky top-0 bg-white shrink-0", children: [
       /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("home") }),
-      /* @__PURE__ */ jsx("span", { className: "font-bold", children: "設定" })
+      /* @__PURE__ */ jsx("span", { className: "font-bold", children: "\u8A2D\u5B9A" })
     ] }),
     /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto pb-8", children: [
       /* @__PURE__ */ jsxs("div", { className: "w-full h-48 relative bg-gray-200", children: [
@@ -7259,7 +7290,7 @@ function App() {
           }
         ),
         /* @__PURE__ */ jsxs("div", { className: "absolute top-4 left-0 right-0 px-4 flex gap-2 overflow-x-auto scrollbar-hide z-[1001]", children: [
-          /* @__PURE__ */ jsx("button", { onClick: () => setActiveEffect("Normal"), className: `p-2 rounded-xl text-xs font-bold whitespace-nowrap ${activeEffect === "Normal" ? "bg-white text-black" : "bg-black/50 text-white"}`, children: "Normal" }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setActiveEffect("Normal"), className: `p-2 rounded-xl text-xs font-bold whitespace-nowrap ${activeEffect === "Normal" ? "bg-white text-black" : "bg-black/50 text-white"}`, children: "通常" }),
           userEffects.map((ef) => /* @__PURE__ */ jsxs("button", { onClick: () => setActiveEffect(ef.name), className: `p-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-1 ${activeEffect === ef.name ? "bg-white text-black" : "bg-black/50 text-white"}`, children: [
             /* @__PURE__ */ jsx(Sparkles, { className: "w-3 h-3" }),
             " ",
@@ -7281,7 +7312,7 @@ function App() {
         /* @__PURE__ */ jsx("h2", { className: "text-xl font-bold mb-6", children: "\u691C\u7D22" }),
         /* @__PURE__ */ jsx("input", { className: "w-full bg-gray-50 rounded-2xl py-4 px-6 mb-6 outline-none", placeholder: "ID\u3092\u5165\u529B", value: searchQuery, onChange: (e) => setSearchQuery(e.target.value) }),
         /* @__PURE__ */ jsxs("div", { className: "flex gap-4", children: [
-          /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 text-gray-600 font-bold", onClick: () => setSearchModalOpen(false), children: "閉じる" }),
+          /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 text-gray-600 font-bold", onClick: () => setSearchModalOpen(false), children: "\u9589\u3058\u308B" }),
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
       ] }) }),
@@ -7306,6 +7337,8 @@ var App_13_default = App;
 export {
   App_13_default as default
 };
+
+
 
 
 
