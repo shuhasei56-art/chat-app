@@ -1149,6 +1149,10 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     else await startScreenShare();
   };
   const facingModeRef = useRef("user");
+
+  // Local effects list (kept minimal for GroupCallView).
+  // In 1:1 CallView, this may be a richer list; here we keep defaults via getFilterStyle switch.
+  const effects = [];
   const switchCamera = async () => {
     if (isScreenSharing) return;
     try {
