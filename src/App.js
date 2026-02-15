@@ -165,7 +165,29 @@ const detectMimeTypeFromBase64Signature = (base64Data, fallbackType = "") => {
   if (bytes.length >= 12 && String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP") return "image/webp";
   return fallbackType || "";
 };
-const MAX_MEDIA_CACHE_SIZE = 180;
+const getDeviceMemoryGiB = () => {
+  const memory = Number(navigator.deviceMemory || 0);
+  return Number.isFinite(memory) && memory > 0 ? memory : 0;
+};
+const isLowMemoryDevice = (() => {
+  const memoryGiB = getDeviceMemoryGiB();
+  const cores = navigator.hardwareConcurrency || 8;
+  const net = navigator.connection?.effectiveType || "";
+  return memoryGiB > 0 && memoryGiB <= 4 || cores <= 4 || navigator.connection?.saveData || net === "slow-2g" || net === "2g";
+})();
+const MAX_MEDIA_CACHE_SIZE = isLowMemoryDevice ? 48 : 180;
+const MEDIA_READ_CONCURRENCY = (() => {
+  const base = getUploadConcurrency();
+  if (isLowMemoryDevice) return Math.max(2, Math.min(6, base));
+  return Math.max(4, Math.min(12, base));
+})();
+const shouldCacheMediaObjectUrl = (mimeType, type) => {
+  const normalizedType = String(type || "").toLowerCase();
+  const normalizedMime = String(mimeType || "").toLowerCase();
+  const isVideo = normalizedType === "video" || normalizedMime.startsWith("video/");
+  if (isLowMemoryDevice && isVideo) return false;
+  return true;
+};
 const messageMediaUrlCache = /* @__PURE__ */ new Map();
 const messageMediaPromiseCache = /* @__PURE__ */ new Map();
 const messageMediaUrlSet = /* @__PURE__ */ new Set();
@@ -202,6 +224,28 @@ const decodeBase64ToBytes = (base64Text) => {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 };
+const loadChunkDocsWithParallelReads = async ({ chunkCount, readByIndex, readByQuery }) => {
+  if (chunkCount) {
+    const buffered = new Array(chunkCount);
+    let allFound = true;
+    for (let start = 0; start < chunkCount; start += MEDIA_READ_CONCURRENCY) {
+      const end = Math.min(chunkCount, start + MEDIA_READ_CONCURRENCY);
+      const indexes = [];
+      for (let i = start; i < end; i++) indexes.push(i);
+      const snaps = await Promise.all(indexes.map((i) => readByIndex(i)));
+      snaps.forEach((snap, idx) => {
+        if (!snap.exists()) {
+          allFound = false;
+          return;
+        }
+        buffered[start + idx] = snap.data();
+      });
+      if (!allFound) break;
+    }
+    if (allFound) return buffered.filter(Boolean);
+  }
+  return readByQuery();
+};
 const loadChunkedMessageMedia = async ({ db: db2, appId: appId2, chatId, message }) => {
   const cacheKey = buildMessageMediaCacheKey(chatId, message.id, message.chunkCount, message.mimeType, message.type);
   const cached = messageMediaUrlCache.get(cacheKey);
@@ -209,36 +253,21 @@ const loadChunkedMessageMedia = async ({ db: db2, appId: appId2, chatId, message
   const inFlight = messageMediaPromiseCache.get(cacheKey);
   if (inFlight) return inFlight;
   const loadPromise = (async () => {
-    const chunkDocsData = [];
-    if (message.chunkCount) {
-      let allFound = true;
-      for (let i = 0; i < message.chunkCount; i++) {
-        const chunkSnap = await getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", message.id, "chunks", `${i}`));
-        if (!chunkSnap.exists()) {
-          allFound = false;
-          break;
-        }
-        chunkDocsData.push(chunkSnap.data());
-      }
-      if (!allFound) {
-        chunkDocsData.length = 0;
+    const chunkDocsData = await loadChunkDocsWithParallelReads({
+      chunkCount: message.chunkCount,
+      readByIndex: (i) => getDoc(doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", message.id, "chunks", `${i}`)),
+      readByQuery: async () => {
+        const list = [];
         const snap = await getDocs(
           query(
             collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", message.id, "chunks"),
             orderBy("index", "asc")
           )
         );
-        snap.forEach((d) => chunkDocsData.push(d.data()));
+        snap.forEach((d) => list.push(d.data()));
+        return list;
       }
-    } else {
-      const snap = await getDocs(
-        query(
-          collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", message.id, "chunks"),
-          orderBy("index", "asc")
-        )
-      );
-      snap.forEach((d) => chunkDocsData.push(d.data()));
-    }
+    });
     if (chunkDocsData.length === 0) return null;
     const fallbackMimeType = message.mimeType || getDefaultMimeTypeByMessageType(message.type);
     const decodeMode = chunkDocsData[0]?.enc === "slice" ? "slice" : "stream";
@@ -274,9 +303,11 @@ const loadChunkedMessageMedia = async ({ db: db2, appId: appId2, chatId, message
     try {
       const blob = new Blob(byteParts, { type: mimeType });
       const objectUrl = URL.createObjectURL(blob);
-      evictOldestMessageMediaCache();
-      messageMediaUrlCache.set(cacheKey, objectUrl);
-      messageMediaUrlSet.add(objectUrl);
+      if (shouldCacheMediaObjectUrl(mimeType, message.type)) {
+        evictOldestMessageMediaCache();
+        messageMediaUrlCache.set(cacheKey, objectUrl);
+        messageMediaUrlSet.add(objectUrl);
+      }
       return objectUrl;
     } catch (e) {
       console.warn("Chunk media decode failed:", e);
@@ -2075,9 +2106,9 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       window.removeEventListener("keydown", tryResume);
     };
   }, [needsRemotePlay, tryPlayRemoteMedia]);
-  const networkQualityLabel = networkQuality === "good" ? "\u56DE\u7DDA: \u826F\u597D" : networkQuality === "medium" ? "\u56DE\u7DDA: \u666E\u901A" : networkQuality === "poor" ? "\u56DE\u7DDA: \u4E0D\u5B89\u5B9A" : "\u56DE\u7DDA: \u78BA\u8A8D\u4E2D";
+  const networkQualityLabel = networkQuality === "good" ? "Network: Good" : networkQuality === "medium" ? "Network: Fair" : networkQuality === "poor" ? "Network: Unstable" : "Network: Checking";
   const networkQualityClass = networkQuality === "good" ? "bg-emerald-500/80 text-white" : networkQuality === "medium" ? "bg-yellow-500/80 text-black" : networkQuality === "poor" ? "bg-red-500/80 text-white" : "bg-gray-500/80 text-white";
-  const qualityModeLabel = qualityMode === "auto" ? "�掿: ����" : qualityMode === "low" ? "�掿: ��" : qualityMode === "medium" ? "�掿: ��" : "�掿: ��";
+  const qualityModeLabel = qualityMode === "auto" ? "Quality: Auto" : qualityMode === "low" ? "Quality: Low" : qualityMode === "medium" ? "Quality: Medium" : "Quality: High";
   const remoteVideoTransform = `${isRemoteMirror ? "scaleX(-1) " : ""}scale(${remoteZoom})`.trim();
   const remoteVideoFilter = `brightness(${remoteBrightness}%) contrast(${remoteContrast}%) saturate(${remoteSaturation}%)`;
   const localVideoTransform = `${isLocalMirror ? "scaleX(-1) " : ""}scale(${localZoom})`.trim();
@@ -2301,7 +2332,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   };
   const handleEndCallRequest = () => {
     if (confirmBeforeHangup) {
-      const ok = window.confirm("�ʘb���I�����܂����H");
+      const ok = window.confirm("End call?");
       if (!ok) return;
     }
     onEndCall?.();
@@ -2474,24 +2505,16 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
     Hue: "Hue",
     "\u8272\u76F8": "Hue"
   };
-  const normalizeEffectName = (name) => effectNameAliases[String(name || "").trim()] || String(name || "").trim();
+  const normalizeEffectName = (name) => {
+    const raw = String(name || "").trim().replace(/^[*\uFF0A\u2605\u2606\s]+/, "");
+    return effectNameAliases[raw] || raw;
+  };
+  const activeEffectNormalized = normalizeEffectName(activeEffect || "Normal") || "Normal";
   const effectChipNames = Array.from(
     new Set(
       ["Normal", ...((effects || []).map((ef) => normalizeEffectName(ef?.name)).filter(Boolean))]
     )
-  ).slice(0, 5);
-  const effectLabelMap = {
-    Normal: "\u901A\u5E38",
-    Invert: "\u53CD\u8EE2",
-    Contrast: "\u30B3\u30F3\u30C8\u30E9\u30B9\u30C8",
-    Grayscale: "\u30B0\u30EC\u30FC\u30B9\u30B1\u30FC\u30EB",
-    Sepia: "\u30BB\u30D4\u30A2",
-    Bright: "\u660E\u308B\u3044",
-    Blur: "\u307C\u304B\u3057",
-    Hue: "\u8272\u76F8"
-  };
-  const toJapaneseEffectLabel = (name) => effectLabelMap[name] || name;
-  const callUiScale = 0.6;
+  ).slice(0, 6);  const callUiScale = 0.9;
   if (callError) {
     return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center text-white flex-col gap-4", children: [
       /* @__PURE__ */ jsx(AlertCircle, { className: "w-16 h-16 text-red-500" }),
@@ -2505,7 +2528,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "absolute inset-0 w-full h-full object-cover bg-black", style: { transform: remoteVideoTransform || "none", filter: remoteVideoFilter } }),
       (!remoteStream || !hasRemoteVideo) && /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 flex flex-col items-center justify-center gap-5 text-white", style: { transform: `scale(${callUiScale})`, transformOrigin: "center center" }, children: [
         /* @__PURE__ */ jsx("div", { className: "w-20 h-20 rounded-full bg-[#2f3b53] flex items-center justify-center", children: /* @__PURE__ */ jsx(User, { className: "w-9 h-9 opacity-80" }) }),
-        /* @__PURE__ */ jsx("p", { className: "text-[38px] sm:text-[42px] font-black leading-none tracking-tight", children: remoteStream ? isVideoEnabled ? "\u30D3\u30C7\u30AA\u53D7\u4FE1\u4E2D..." : "\u97F3\u58F0\u901A\u8A71\u4E2D..." : "\u63A5\u7D9A\u4E2D..." })
+        /* @__PURE__ */ jsx("p", { className: "text-[38px] sm:text-[42px] font-black leading-none tracking-tight", children: remoteStream ? isVideoEnabled ? "Receiving video..." : "In voice call..." : "Connecting..." })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: localPreviewClass, style: { transform: `scale(${callUiScale})`, transformOrigin: "top right" }, children: [
         /* @__PURE__ */ jsx(
@@ -2526,7 +2549,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         (!isVideoEnabled || isVideoOff) && /* @__PURE__ */ jsx("div", { className: "absolute inset-0 w-full h-full text-white flex items-center justify-center bg-black/60 backdrop-blur-sm", children: /* @__PURE__ */ jsx(VideoOff, { className: "w-7 h-7 opacity-80" }) })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 sm:gap-2 max-w-[80vw] overflow-x-auto px-1", style: { transform: `scale(${callUiScale})`, transformOrigin: "top center" }, children: [
-        effectChipNames.map((name) => { const label = toJapaneseEffectLabel(name); return /* @__PURE__ */ jsx("button", { className: `whitespace-nowrap px-3 sm:px-4 py-1.5 rounded-[16px] text-xs sm:text-base font-black transition-colors ${name === activeEffect ? "bg-white text-black" : "bg-transparent text-white/95 hover:text-white"}`, children: name === activeEffect ? label : `* ${label}` }, name); }),
+        effectChipNames.map((name) => /* @__PURE__ */ jsx("button", { className: `whitespace-nowrap px-3 sm:px-4 py-1.5 rounded-[16px] text-xs sm:text-base font-black transition-colors ${name === activeEffectNormalized ? "bg-white text-black" : "bg-transparent text-white/95 hover:text-white"}`, children: name }, name)),
         /* @__PURE__ */ jsx("div", { className: "whitespace-nowrap bg-black/55 text-white text-xs font-black px-3 py-1.5 rounded-full backdrop-blur-md", children: formatCallDuration(callDurationSec) }),
         isRecordingCall && /* @__PURE__ */ jsxs("div", { className: "whitespace-nowrap bg-red-600/90 text-white text-xs font-black px-3 py-1.5 rounded-full backdrop-blur-md flex items-center gap-1", children: [
           /* @__PURE__ */ jsx(Disc, { className: "w-3 h-3 animate-pulse" }),
@@ -2536,81 +2559,81 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       ] }),
       needsRemotePlay && /* @__PURE__ */ jsxs("button", { onClick: resumeRemotePlayback, className: "absolute top-16 left-1/2 -translate-x-1/2 z-30 bg-white text-gray-900 text-xs font-black px-4 py-2 rounded-full", style: { transform: `scale(${callUiScale})`, transformOrigin: "top center" }, children: [
         /* @__PURE__ */ jsx(Volume2, { className: "w-4 h-4 inline mr-1" }),
-        "\u97F3\u58F0\u3092\u518D\u751F"
+        "Play Audio"
       ] })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: `relative z-[1003] bg-transparent px-4 pb-10 pt-2 transition-all duration-200 ${controlsVisible || showAdvancedPanel ? "opacity-100" : "opacity-0 pointer-events-none"}`, style: { transform: `scale(${callUiScale})`, transformOrigin: "bottom center" }, children: [
+    /* @__PURE__ */ jsxs("div", { className: `relative z-[1003] bg-transparent px-4 pb-10 pt-2 transition-all duration-200 ${controlsVisible || showAdvancedPanel ? "opacity-100" : "opacity-0 pointer-events-none"}`, style: showAdvancedPanel ? void 0 : { transform: `scale(${callUiScale})`, transformOrigin: "bottom center" }, children: [
       /* @__PURE__ */ jsx("div", { className: "absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-black/30 to-transparent pointer-events-none" }),
       showAdvancedPanel && /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1020] bg-black/95 backdrop-blur-xl p-4 md:p-6 text-white space-y-3 overflow-y-auto", children: [
         /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-2", children: [
-          /* @__PURE__ */ jsx("h2", { className: "text-lg md:text-xl font-black", children: "\u8A2D\u5B9A\u30D1\u30CD\u30EB" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setShowAdvancedPanel(false), className: "px-3 py-2 rounded-full bg-white/15 hover:bg-white/25 text-xs font-bold", children: "\u9589\u3058\u308B" })
+          /* @__PURE__ */ jsx("h2", { className: "text-lg md:text-xl font-black", children: "Settings Panel" }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setShowAdvancedPanel(false), className: "px-3 py-2 rounded-full bg-white/15 hover:bg-white/25 text-xs font-bold", children: "Close" })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 flex-wrap", children: [
-          /* @__PURE__ */ jsx("button", { onClick: retryRemotePlayback, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u518D\u751F" }),
-          /* @__PURE__ */ jsx("button", { onClick: captureCallSnapshot, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u30B9\u30AF\u30B7\u30E7" }),
-          /* @__PURE__ */ jsx("button", { onClick: toggleFullscreen, className: `p-2 rounded-full text-white ${isFullscreen ? "bg-green-600 hover:bg-green-500" : "bg-gray-700 hover:bg-gray-600"}`, title: isFullscreen ? "\u5168\u753B\u9762\u89E3\u9664" : "\u5168\u753B\u9762", children: /* @__PURE__ */ jsx(Maximize, { className: "w-4 h-4" }) }),
-          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: switchCameraFacing, disabled: isSwitchingCamera || isScreenSharing, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600 disabled:bg-gray-500", children: isSwitchingCamera ? "\u5207\u66FF\u4E2D..." : "\u30AB\u30E1\u30E9\u5207\u66FF" }),
-          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: () => setIsLocalMirror((v) => !v), className: `px-3 py-2 rounded-full text-xs font-bold ${isLocalMirror ? "bg-gray-700 text-white hover:bg-gray-600" : "bg-white text-black hover:bg-gray-200"}`, children: isLocalMirror ? "\u30DF\u30E9\u30FCON" : "\u30DF\u30E9\u30FCOFF" }),
-          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, className: `px-3 py-2 rounded-full text-xs font-bold ${isScreenSharing ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isScreenSharing ? "\u5171\u6709\u505C\u6B62" : "\u753B\u9762\u5171\u6709" }),
-          /* @__PURE__ */ jsx("button", { onClick: toggleCallRecording, className: `px-3 py-2 rounded-full text-xs font-bold ${isRecordingCall ? "bg-red-600 text-white hover:bg-red-500" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isRecordingCall ? "\u9332\u753B\u505C\u6B62" : "\u9332\u753B" }),
-          /* @__PURE__ */ jsx("button", { onClick: togglePictureInPicture, disabled: !hasRemoteVideo, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600 disabled:bg-gray-500", children: isRemotePip ? "PiP\u7D42\u4E86" : "PiP" }),
-          /* @__PURE__ */ jsx("button", { onClick: copyCallDebugInfo, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u60C5\u5831\u30B3\u30D4\u30FC" }),
-          /* @__PURE__ */ jsx("button", { onClick: toggleHold, className: `px-3 py-2 rounded-full text-xs font-bold ${isHold ? "bg-yellow-500 text-black hover:bg-yellow-400" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isHold ? "\u4FDD\u7559\u4E2D" : "\u4FDD\u7559" }),
-          /* @__PURE__ */ jsx("button", { onClick: addBookmark, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "\u3057\u304A\u308A" }),
+          /* @__PURE__ */ jsx("button", { onClick: retryRemotePlayback, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "Play" }),
+          /* @__PURE__ */ jsx("button", { onClick: captureCallSnapshot, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "Snapshot" }),
+          /* @__PURE__ */ jsx("button", { onClick: toggleFullscreen, className: `p-2 rounded-full text-white ${isFullscreen ? "bg-green-600 hover:bg-green-500" : "bg-gray-700 hover:bg-gray-600"}`, title: isFullscreen ? "Exit Fullscreen" : "Fullscreen", children: /* @__PURE__ */ jsx(Maximize, { className: "w-4 h-4" }) }),
+          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: switchCameraFacing, disabled: isSwitchingCamera || isScreenSharing, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600 disabled:bg-gray-500", children: isSwitchingCamera ? "Switching..." : "Switch Cam" }),
+          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: () => setIsLocalMirror((v) => !v), className: `px-3 py-2 rounded-full text-xs font-bold ${isLocalMirror ? "bg-gray-700 text-white hover:bg-gray-600" : "bg-white text-black hover:bg-gray-200"}`, children: isLocalMirror ? "Mirror ON" : "Mirror OFF" }),
+          isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, className: `px-3 py-2 rounded-full text-xs font-bold ${isScreenSharing ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isScreenSharing ? "Stop Share" : "Share Screen" }),
+          /* @__PURE__ */ jsx("button", { onClick: toggleCallRecording, className: `px-3 py-2 rounded-full text-xs font-bold ${isRecordingCall ? "bg-red-600 text-white hover:bg-red-500" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isRecordingCall ? "Stop Rec" : "Record" }),
+          /* @__PURE__ */ jsx("button", { onClick: togglePictureInPicture, disabled: !hasRemoteVideo, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600 disabled:bg-gray-500", children: isRemotePip ? "Exit PiP" : "PiP" }),
+          /* @__PURE__ */ jsx("button", { onClick: copyCallDebugInfo, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "Copy Info" }),
+          /* @__PURE__ */ jsx("button", { onClick: toggleHold, className: `px-3 py-2 rounded-full text-xs font-bold ${isHold ? "bg-yellow-500 text-black hover:bg-yellow-400" : "bg-gray-700 text-white hover:bg-gray-600"}`, children: isHold ? "On Hold" : "Hold" }),
+          /* @__PURE__ */ jsx("button", { onClick: addBookmark, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "Bookmark" }),
           /* @__PURE__ */ jsx("button", { onClick: () => setShowShortcutHelp((v) => !v), className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600", children: "?" }),
-          canSelectAudioOutput && audioOutputs.length > 0 && /* @__PURE__ */ jsx("select", { value: selectedAudioOutput, onChange: (e) => setSelectedAudioOutput(e.target.value), className: "bg-gray-700 text-white text-xs font-bold px-3 py-2 rounded-full outline-none max-w-[150px]", children: audioOutputs.map((d, i) => /* @__PURE__ */ jsx("option", { value: d.deviceId, children: d.label || `\u51FA\u529B${i + 1}` }, `${d.deviceId || "default"}-${i}`)) })
+          canSelectAudioOutput && audioOutputs.length > 0 && /* @__PURE__ */ jsx("select", { value: selectedAudioOutput, onChange: (e) => setSelectedAudioOutput(e.target.value), className: "bg-gray-700 text-white text-xs font-bold px-3 py-2 rounded-full outline-none max-w-[150px]", children: audioOutputs.map((d, i) => /* @__PURE__ */ jsx("option", { value: d.deviceId, children: d.label || `Output ${i + 1}` }, `${d.deviceId || "default"}-${i}`)) })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 flex-wrap", children: [
-          /* @__PURE__ */ jsx("label", { className: "text-[11px] font-bold opacity-80", children: "\u753B\u8CEA" }),
+          /* @__PURE__ */ jsx("label", { className: "text-[11px] font-bold opacity-80", children: "Quality" }),
           /* @__PURE__ */ jsx("select", { value: qualityMode, onChange: (e) => setQualityMode(e.target.value), className: "bg-gray-700 text-white text-xs font-bold px-2 py-1 rounded-lg outline-none", children: [
-            /* @__PURE__ */ jsx("option", { value: "auto", children: "\u81EA\u52D5" }),
-            /* @__PURE__ */ jsx("option", { value: "low", children: "\u4F4E" }),
-            /* @__PURE__ */ jsx("option", { value: "medium", children: "\u4E2D" }),
-            /* @__PURE__ */ jsx("option", { value: "high", children: "\u9AD8" })
+            /* @__PURE__ */ jsx("option", { value: "auto", children: "Auto" }),
+            /* @__PURE__ */ jsx("option", { value: "low", children: "Low" }),
+            /* @__PURE__ */ jsx("option", { value: "medium", children: "Medium" }),
+            /* @__PURE__ */ jsx("option", { value: "high", children: "High" })
           ] }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setAutoHideControls((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${autoHideControls ? "bg-blue-600" : "bg-gray-700"}`, children: autoHideControls ? "\u64CD\u4F5C\u81EA\u52D5\u975E\u8868\u793AON" : "\u64CD\u4F5C\u81EA\u52D5\u975E\u8868\u793AOFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setKeepAwake((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${keepAwake ? "bg-blue-600" : "bg-gray-700"}`, children: keepAwake ? "\u30B9\u30EA\u30FC\u30D7\u6291\u5236ON" : "\u30B9\u30EA\u30FC\u30D7\u6291\u5236OFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setShowClock((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${showClock ? "bg-blue-600" : "bg-gray-700"}`, children: showClock ? "\u6642\u8A08ON" : "\u6642\u8A08OFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setConfirmBeforeHangup((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${confirmBeforeHangup ? "bg-blue-600" : "bg-gray-700"}`, children: confirmBeforeHangup ? "\u7D42\u4E86\u78BA\u8A8DON" : "\u7D42\u4E86\u78BA\u8A8DOFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setPlayConnectSound((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${playConnectSound ? "bg-blue-600" : "bg-gray-700"}`, children: playConnectSound ? "\u63A5\u7D9A\u97F3ON" : "\u63A5\u7D9A\u97F3OFF" }),
-          /* @__PURE__ */ jsx("button", { onClick: () => setVibrateOnConnect((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${vibrateOnConnect ? "bg-blue-600" : "bg-gray-700"}`, children: vibrateOnConnect ? "\u30D0\u30A4\u30D6ON" : "\u30D0\u30A4\u30D6OFF" })
+          /* @__PURE__ */ jsx("button", { onClick: () => setAutoHideControls((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${autoHideControls ? "bg-blue-600" : "bg-gray-700"}`, children: autoHideControls ? "Auto-hide ON" : "Auto-hide OFF" }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setKeepAwake((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${keepAwake ? "bg-blue-600" : "bg-gray-700"}`, children: keepAwake ? "Keep Awake ON" : "Keep Awake OFF" }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setShowClock((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${showClock ? "bg-blue-600" : "bg-gray-700"}`, children: showClock ? "Clock ON" : "Clock OFF" }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setConfirmBeforeHangup((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${confirmBeforeHangup ? "bg-blue-600" : "bg-gray-700"}`, children: confirmBeforeHangup ? "Confirm End ON" : "Confirm End OFF" }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setPlayConnectSound((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${playConnectSound ? "bg-blue-600" : "bg-gray-700"}`, children: playConnectSound ? "Connect Tone ON" : "Connect Tone OFF" }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setVibrateOnConnect((v) => !v), className: `px-2 py-1 rounded-lg text-[11px] font-bold ${vibrateOnConnect ? "bg-blue-600" : "bg-gray-700"}`, children: vibrateOnConnect ? "Vibrate ON" : "Vibrate OFF" })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30CE\u30A4\u30BA\u6291\u5236 ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: noiseSuppressionEnabled, onChange: (e) => setNoiseSuppressionEnabled(e.target.checked), className: "ml-2" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30A8\u30B3\u30FC\u30AD\u30E3\u30F3\u30BB\u30EB ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: echoCancellationEnabled, onChange: (e) => setEchoCancellationEnabled(e.target.checked), className: "ml-2" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u81EA\u52D5\u30B2\u30A4\u30F3 ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: autoGainControlEnabled, onChange: (e) => setAutoGainControlEnabled(e.target.checked), className: "ml-2" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30EA\u30E2\u30FC\u30C8\u955C\u50CF ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: isRemoteMirror, onChange: (e) => setIsRemoteMirror(e.target.checked), className: "ml-2" })] })
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Noise Suppression ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: noiseSuppressionEnabled, onChange: (e) => setNoiseSuppressionEnabled(e.target.checked), className: "ml-2" })] }),
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Echo Cancellation ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: echoCancellationEnabled, onChange: (e) => setEchoCancellationEnabled(e.target.checked), className: "ml-2" })] }),
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Auto Gain ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: autoGainControlEnabled, onChange: (e) => setAutoGainControlEnabled(e.target.checked), className: "ml-2" })] }),
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Remote Mirror ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: isRemoteMirror, onChange: (e) => setIsRemoteMirror(e.target.checked), className: "ml-2" })] })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30DE\u30A4\u30AF\u611F\u5EA6 ", micGain.toFixed(1), /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 2, step: 0.1, value: micGain, onChange: (e) => setMicGain(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u97F3\u91CF\u30D6\u30FC\u30B9\u30C8 ", remoteBoost.toFixed(1), /* @__PURE__ */ jsx("input", { type: "range", min: 1, max: 2, step: 0.1, value: remoteBoost, onChange: (e) => setRemoteBoost(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u660E\u308B\u3055 ", remoteBrightness, "%", /* @__PURE__ */ jsx("input", { type: "range", min: 70, max: 150, step: 5, value: remoteBrightness, onChange: (e) => setRemoteBrightness(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30B3\u30F3\u30C8\u30E9\u30B9\u30C8 ", remoteContrast, "%", /* @__PURE__ */ jsx("input", { type: "range", min: 70, max: 170, step: 5, value: remoteContrast, onChange: (e) => setRemoteContrast(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u5F69\u5EA6 ", remoteSaturation, "%", /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 200, step: 5, value: remoteSaturation, onChange: (e) => setRemoteSaturation(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30ED\u30FC\u30AB\u30EB\u30BA\u30FC\u30E0 ", localZoom.toFixed(2), /* @__PURE__ */ jsx("input", { type: "range", min: 1, max: 1.6, step: 0.05, value: localZoom, onChange: (e) => setLocalZoom(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30EA\u30E2\u30FC\u30C8\u30BA\u30FC\u30E0 ", remoteZoom.toFixed(2), /* @__PURE__ */ jsx("input", { type: "range", min: 1, max: 1.6, step: 0.05, value: remoteZoom, onChange: (e) => setRemoteZoom(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30B9\u30AF\u30B7\u30E7\u30AB\u30A6\u30F3\u30C8 ", snapshotCountdownSec, "s", /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 10, step: 1, value: snapshotCountdownSec, onChange: (e) => setSnapshotCountdownSec(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u81EA\u52D5\u30B9\u30AF\u30B7\u30E7 ", autoSnapshotSec, "s", /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 60, step: 5, value: autoSnapshotSec, onChange: (e) => setAutoSnapshotSec(Number(e.target.value)), className: "w-full" })] }),
-          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["\u30B9\u30AF\u30B7\u30E7\u6642\u523B ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: snapshotTimestampEnabled, onChange: (e) => setSnapshotTimestampEnabled(e.target.checked), className: "ml-2" })] })
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Mic Gain ", micGain.toFixed(1), /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 2, step: 0.1, value: micGain, onChange: (e) => setMicGain(Number(e.target.value)), className: "w-full" })] }),
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Audio Boost ", remoteBoost.toFixed(1), /* @__PURE__ */ jsx("input", { type: "range", min: 1, max: 2, step: 0.1, value: remoteBoost, onChange: (e) => setRemoteBoost(Number(e.target.value)), className: "w-full" })] }),
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Brightness ", remoteBrightness, "%", /* @__PURE__ */ jsx("input", { type: "range", min: 70, max: 150, step: 5, value: remoteBrightness, onChange: (e) => setRemoteBrightness(Number(e.target.value)), className: "w-full" })] }),
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Contrast ", remoteContrast, "%", /* @__PURE__ */ jsx("input", { type: "range", min: 70, max: 170, step: 5, value: remoteContrast, onChange: (e) => setRemoteContrast(Number(e.target.value)), className: "w-full" })] }),
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Saturation ", remoteSaturation, "%", /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 200, step: 5, value: remoteSaturation, onChange: (e) => setRemoteSaturation(Number(e.target.value)), className: "w-full" })] }),
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Local Zoom ", localZoom.toFixed(2), /* @__PURE__ */ jsx("input", { type: "range", min: 1, max: 1.6, step: 0.05, value: localZoom, onChange: (e) => setLocalZoom(Number(e.target.value)), className: "w-full" })] }),
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Remote Zoom ", remoteZoom.toFixed(2), /* @__PURE__ */ jsx("input", { type: "range", min: 1, max: 1.6, step: 0.05, value: remoteZoom, onChange: (e) => setRemoteZoom(Number(e.target.value)), className: "w-full" })] }),
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Snapshot Timer ", snapshotCountdownSec, "s", /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 10, step: 1, value: snapshotCountdownSec, onChange: (e) => setSnapshotCountdownSec(Number(e.target.value)), className: "w-full" })] }),
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Auto Snapshot ", autoSnapshotSec, "s", /* @__PURE__ */ jsx("input", { type: "range", min: 0, max: 60, step: 5, value: autoSnapshotSec, onChange: (e) => setAutoSnapshotSec(Number(e.target.value)), className: "w-full" })] }),
+          /* @__PURE__ */ jsxs("label", { className: "text-[10px] font-bold", children: ["Timestamp ", /* @__PURE__ */ jsx("input", { type: "checkbox", checked: snapshotTimestampEnabled, onChange: (e) => setSnapshotTimestampEnabled(e.target.checked), className: "ml-2" })] })
         ] }),
-        /* @__PURE__ */ jsx("textarea", { value: callNotes, onChange: (e) => setCallNotes(e.target.value), className: "w-full bg-black/50 border border-white/10 rounded-xl p-2 text-xs text-white outline-none", placeholder: "\u901A\u8A71\u30E1\u30E2..." }),
+        /* @__PURE__ */ jsx("textarea", { value: callNotes, onChange: (e) => setCallNotes(e.target.value), className: "w-full bg-black/50 border border-white/10 rounded-xl p-2 text-xs text-white outline-none", placeholder: "Call notes..." }),
         bookmarks.length > 0 && /* @__PURE__ */ jsx("div", { className: "flex flex-wrap gap-2", children: bookmarks.map((b) => /* @__PURE__ */ jsxs("button", { onClick: () => removeBookmark(b.id), className: "px-2 py-1 rounded-full bg-white/10 text-[10px] font-bold", children: [formatCallDuration(b.sec), " x"] }, b.id)) }),
-        /* @__PURE__ */ jsx("button", { onClick: resetAdvancedSettings, className: "w-full bg-red-600/80 hover:bg-red-500 text-white py-2 rounded-xl text-xs font-bold", children: "\u8A2D\u5B9A\u30EA\u30BB\u30C3\u30C8" })
+        /* @__PURE__ */ jsx("button", { onClick: resetAdvancedSettings, className: "w-full bg-red-600/80 hover:bg-red-500 text-white py-2 rounded-xl text-xs font-bold", children: "Reset Settings" })
       ] }),
       isVideoEnabled && /* @__PURE__ */ jsxs("div", { className: "mb-3 flex items-center justify-center gap-2", children: [
-        /* @__PURE__ */ jsx("button", { onClick: switchCameraFacing, disabled: isSwitchingCamera || isScreenSharing, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600 disabled:bg-gray-500", children: isSwitchingCamera ? "\u5207\u66FF\u4E2D..." : "\u30AB\u30E1\u30E9\u5207\u66FF" }),
-        /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: !navigator.mediaDevices?.getDisplayMedia, className: `px-3 py-2 rounded-full text-xs font-bold ${isScreenSharing ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-gray-700 text-white hover:bg-gray-600"} ${!navigator.mediaDevices?.getDisplayMedia ? "opacity-50 cursor-not-allowed" : ""}`, children: isScreenSharing ? "\u5171\u6709\u505C\u6B62" : "\u753B\u9762\u5171\u6709" }),
+        /* @__PURE__ */ jsx("button", { onClick: switchCameraFacing, disabled: isSwitchingCamera || isScreenSharing, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600 disabled:bg-gray-500", children: isSwitchingCamera ? "Switching..." : "Switch Cam" }),
+        /* @__PURE__ */ jsx("button", { onClick: toggleScreenShare, disabled: !navigator.mediaDevices?.getDisplayMedia, className: `px-3 py-2 rounded-full text-xs font-bold ${isScreenSharing ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-gray-700 text-white hover:bg-gray-600"} ${!navigator.mediaDevices?.getDisplayMedia ? "opacity-50 cursor-not-allowed" : ""}`, children: isScreenSharing ? "Stop Share" : "Share Screen" }),
         /* @__PURE__ */ jsxs("button", { onClick: openAdvancedSettingsPanel, className: "px-3 py-2 rounded-full bg-gray-700 text-white text-xs font-bold hover:bg-gray-600 flex items-center gap-1", children: [
           /* @__PURE__ */ jsx(Settings, { className: "w-3.5 h-3.5" }),
-          "\u8A2D\u5B9A"
+          "Settings"
         ] })
-      ] }),      showShortcutHelp && /* @__PURE__ */ jsx("div", { className: "mb-3 rounded-2xl border border-white/10 bg-black/40 p-3 text-white text-xs font-bold", children: "\u30B7\u30E7\u30FC\u30C8\u30AB\u30C3\u30C8: M=\u30DE\u30A4\u30AF / V=\u30AB\u30E1\u30E9 / H=\u4FDD\u7559 / S=\u30B9\u30AF\u30B7\u30E7 / F=\u5168\u753B\u9762 / P=PiP / ?=\u30D8\u30EB\u30D7" }),
+      ] }),      showShortcutHelp && /* @__PURE__ */ jsx("div", { className: "mb-3 rounded-2xl border border-white/10 bg-black/40 p-3 text-white text-xs font-bold", children: "Shortcuts: M=Mic / V=Camera / H=Hold / S=Snapshot / F=Fullscreen / P=PiP / ?=Help" }),
       /* @__PURE__ */ jsxs("div", { className: "flex items-end justify-center gap-6 md:gap-8", children: [
         /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `w-[72px] h-[72px] rounded-full transition-all flex items-center justify-center ${isMuted ? "bg-white text-black" : "bg-[#2f3b53] text-white hover:bg-[#3c4864]"}`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-8 h-8" }) : /* @__PURE__ */ jsx(Mic, { className: "w-8 h-8" }) }),
         /* @__PURE__ */ jsxs("button", { onClick: handleEndCallRequest, className: "w-[96px] h-[96px] rounded-full bg-[#ef2f2f] text-white shadow-lg hover:bg-[#de2424] transition-all flex flex-col items-center justify-center gap-1", children: [
           /* @__PURE__ */ jsx(PhoneOff, { className: "w-10 h-10" }),
-          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u7D42\u4E86" })
+          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "End" })
         ] }),
         isVideoEnabled && /* @__PURE__ */ jsx("button", { onClick: toggleVideo, className: `w-[72px] h-[72px] rounded-full transition-all flex items-center justify-center ${isVideoOff ? "bg-white text-black" : "bg-[#2f3b53] text-white hover:bg-[#3c4864]"}`, children: isVideoOff ? /* @__PURE__ */ jsx(VideoOff, { className: "w-8 h-8" }) : /* @__PURE__ */ jsx(Video, { className: "w-8 h-8" }) })
       ] })
@@ -3096,7 +3119,7 @@ const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, m
         await updateDoc(userRef, { hiddenFriends: arrayRemove(friend.uid) });
         showNotification?.("\u975E\u8868\u793A\u3092\u89E3\u9664\u3057\u307E\u3057\u305F");
       } else {
-        const ok = window.confirm("\u3053\u306E\u53CB\u3060\u3061\u3092\u975E\u8868\u793A\u306B\u3057\u307E\u3059\u304B\uFF1F\n\uFF08\u53CB\u3060\u3061\u95A2\u4FC2\u306F\u89E3\u9664\u3055\u308C\u307E\u305B\u3093\uFF09");
+        const ok = window.confirm("End call?");
         if (!ok) return;
         await updateDoc(userRef, { hiddenFriends: arrayUnion(friend.uid) });
         showNotification?.("\u975E\u8868\u793A\u306B\u3057\u307E\u3057\u305F");
@@ -4754,7 +4777,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       /* @__PURE__ */ jsx("button", { onClick: () => {
         setBanTarget(null);
         setGrantAmount("");
-      }, className: "w-full py-3 bg-gray-100 hover:bg-gray-200 font-bold rounded-2xl text-gray-600 transition-colors", children: "\u9589\u3058\u308B" })
+      }, className: "w-full py-3 bg-gray-100 hover:bg-gray-200 font-bold rounded-2xl text-gray-600 transition-colors", children: "Close" })
     ] }) })
   ] });
 };
@@ -5582,7 +5605,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
                     {
                       onClick: () => setGroupSettingsOpen(false),
                       className: "p-2 rounded-full bg-gray-100 hover:bg-gray-200",
-                      "aria-label": "\u9589\u3058\u308B",
+                      "aria-label": "Close",
                       children: /* @__PURE__ */ jsx(X, { className: "w-5 h-5" })
                     }
                   )
@@ -5952,7 +5975,7 @@ const VoomView = ({ user, allUsers, profile, showNotification, db: db2, appId: a
   const handleDeletePost = async (post) => {
     if (!post?.id || !user?.uid) return;
     if (post.userId !== user.uid) return;
-    const ok = window.confirm("���̓��e���폜���܂����H");
+    const ok = window.confirm("End call?");
     if (!ok) return;
     try {
       const chunksRef = collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks");
@@ -6026,36 +6049,21 @@ const loadChunkedPostMedia = async ({ db: db2, appId: appId2, post }) => {
   const inFlight = postMediaPromiseCache.get(cacheKey);
   if (inFlight) return inFlight;
   const loadPromise = (async () => {
-    const chunkDocsData = [];
-    if (post.chunkCount) {
-      let allFound = true;
-      for (let i = 0; i < post.chunkCount; i++) {
-        const chunkSnap = await getDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks", `${i}`));
-        if (!chunkSnap.exists()) {
-          allFound = false;
-          break;
-        }
-        chunkDocsData.push(chunkSnap.data());
-      }
-      if (!allFound) {
-        chunkDocsData.length = 0;
+    const chunkDocsData = await loadChunkDocsWithParallelReads({
+      chunkCount: post.chunkCount,
+      readByIndex: (i) => getDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks", `${i}`)),
+      readByQuery: async () => {
+        const list = [];
         const snap = await getDocs(
           query(
             collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"),
             orderBy("index", "asc")
           )
         );
-        snap.forEach((d) => chunkDocsData.push(d.data()));
+        snap.forEach((d) => list.push(d.data()));
+        return list;
       }
-    } else {
-      const snap = await getDocs(
-        query(
-          collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks"),
-          orderBy("index", "asc")
-        )
-      );
-      snap.forEach((d) => chunkDocsData.push(d.data()));
-    }
+    });
     if (chunkDocsData.length === 0) return null;
     const fallbackMimeType = post.mimeType || getDefaultMimeTypeByMessageType(post.mediaType === "video" ? "video" : "image");
     const decodeMode = chunkDocsData[0]?.enc === "slice" ? "slice" : "stream";
@@ -6091,9 +6099,11 @@ const loadChunkedPostMedia = async ({ db: db2, appId: appId2, post }) => {
     try {
       const blob = new Blob(byteParts, { type: mimeType });
       const objectUrl = URL.createObjectURL(blob);
-      evictOldestPostMediaCache();
-      postMediaUrlCache.set(cacheKey, objectUrl);
-      postMediaUrlSet.add(objectUrl);
+      if (shouldCacheMediaObjectUrl(mimeType, post.mediaType)) {
+        evictOldestPostMediaCache();
+        postMediaUrlCache.set(cacheKey, objectUrl);
+        postMediaUrlSet.add(objectUrl);
+      }
       return objectUrl;
     } catch (e) {
       console.warn("Post media decode failed:", e);
@@ -6134,7 +6144,7 @@ const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipb
   return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-white", children: [
     /* @__PURE__ */ jsxs("div", { className: "p-4 border-b flex items-center gap-4 sticky top-0 bg-white shrink-0", children: [
       /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("home") }),
-      /* @__PURE__ */ jsx("span", { className: "font-bold", children: "\u8A2D\u5B9A" })
+      /* @__PURE__ */ jsx("span", { className: "font-bold", children: "Settings" })
     ] }),
     /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto pb-8", children: [
       /* @__PURE__ */ jsxs("div", { className: "w-full h-48 relative bg-gray-200", children: [
@@ -7248,7 +7258,7 @@ function App() {
         /* @__PURE__ */ jsx("h2", { className: "text-xl font-bold mb-6", children: "\u691C\u7D22" }),
         /* @__PURE__ */ jsx("input", { className: "w-full bg-gray-50 rounded-2xl py-4 px-6 mb-6 outline-none", placeholder: "ID\u3092\u5165\u529B", value: searchQuery, onChange: (e) => setSearchQuery(e.target.value) }),
         /* @__PURE__ */ jsxs("div", { className: "flex gap-4", children: [
-          /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 text-gray-600 font-bold", onClick: () => setSearchModalOpen(false), children: "\u9589\u3058\u308B" }),
+          /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 text-gray-600 font-bold", onClick: () => setSearchModalOpen(false), children: "Close" }),
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
       ] }) }),
