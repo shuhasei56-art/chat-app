@@ -2507,7 +2507,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       console.warn("PiP toggle failed:", e);
     }
   };
-  const localPreviewClass = "absolute top-5 right-5 w-[126px] sm:w-[156px] h-[210px] sm:h-[250px] rounded-[18px] overflow-hidden border-[3px] border-white/90 shadow-[0_0_0_1px_rgba(255,255,255,0.2)] bg-black";
+  const localPreviewClass = "absolute top-20 right-3 w-[112px] sm:w-[138px] h-[186px] sm:h-[220px] rounded-[16px] overflow-hidden border-[2px] border-white/90 shadow-[0_0_0_1px_rgba(255,255,255,0.2)] bg-black";
   const effectNameAliases = {
     Normal: "Normal",
     "\u901A\u5E38": "Normal",
@@ -2595,14 +2595,14 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
         ),
         (!isVideoEnabled || isVideoOff) && /* @__PURE__ */ jsx("div", { className: "absolute inset-0 w-full h-full text-white flex items-center justify-center bg-black/60 backdrop-blur-sm", children: /* @__PURE__ */ jsx(VideoOff, { className: "w-7 h-7 opacity-80" }) })
       ] }),
-      /* @__PURE__ */ jsx("div", { className: "absolute top-3 inset-x-0 z-20 px-3", children: /* @__PURE__ */ jsx("div", { className: "mx-auto w-full max-w-[92vw] rounded-2xl bg-black/45 border border-white/10 backdrop-blur-md px-2 py-2", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide", children: [
+      /* @__PURE__ */ jsx("div", { className: "absolute top-2 inset-x-0 z-20 px-2.5 sm:px-3", children: /* @__PURE__ */ jsx("div", { className: "ml-0 mr-auto w-full max-w-[82vw] sm:max-w-[78vw] rounded-xl bg-black/45 border border-white/10 backdrop-blur-md px-1.5 py-1.5", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-hide", children: [
         effectChipNames.map((name) => {
           const label = toJapaneseEffectLabel(name);
           const isActiveChip = normalizeEffectName(activeEffect) === name;
-          return /* @__PURE__ */ jsx("button", { className: `shrink-0 px-3 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-black transition-colors ${isActiveChip ? "bg-white text-black" : "bg-white/15 text-white hover:bg-white/25"}`, children: label }, name);
+          return /* @__PURE__ */ jsx("button", { className: `shrink-0 px-2.5 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs font-black transition-colors ${isActiveChip ? "bg-white text-black" : "bg-white/15 text-white hover:bg-white/25"}`, children: label }, name);
         }),
-        /* @__PURE__ */ jsx("div", { className: "shrink-0 bg-black/55 text-white text-xs font-black px-3 py-1.5 rounded-full", children: formatCallDuration(callDurationSec) }),
-        isRecordingCall && /* @__PURE__ */ jsxs("div", { className: "shrink-0 bg-red-600/90 text-white text-xs font-black px-3 py-1.5 rounded-full flex items-center gap-1", children: [
+        /* @__PURE__ */ jsx("div", { className: "shrink-0 bg-black/55 text-white text-[10px] font-black px-2.5 py-1 rounded-full", children: formatCallDuration(callDurationSec) }),
+        isRecordingCall && /* @__PURE__ */ jsxs("div", { className: "shrink-0 bg-red-600/90 text-white text-[10px] font-black px-2.5 py-1 rounded-full flex items-center gap-1", children: [
           /* @__PURE__ */ jsx(Disc, { className: "w-3 h-3 animate-pulse" }),
           "録画 ",
           formatCallDuration(recordingDurationSec)
