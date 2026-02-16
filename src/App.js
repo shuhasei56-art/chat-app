@@ -5391,6 +5391,8 @@ function App() {
   const [postsHasMore, setPostsHasMore] = useState(true);
   const [postsLoadingMore, setPostsLoadingMore] = useState(false);
   const postsCursorRef = useRef(null);
+  const postsTopCursorRef = useRef(null);
+  const postsReachedEndRef = useRef(false);
   const POSTS_PAGE_SIZE = 5;
 
   const [notification, setNotification] = useState(null);
@@ -5512,7 +5514,7 @@ const loadMorePosts = async () => {
       });
       postsCursorRef.current = snap.docs[snap.docs.length - 1];
     }
-    if (snap.docs.length < POSTS_PAGE_SIZE) setPostsHasMore(false);
+    if (snap.docs.length < POSTS_PAGE_SIZE) { postsReachedEndRef.current = true; setPostsHasMore(false); }
   } catch (e) {
     console.error("loadMorePosts failed:", e);
   } finally {
@@ -5589,6 +5591,7 @@ const loadMorePosts = async () => {
     setPosts([]);
     postsCursorRef.current = null;
     setPostsHasMore(true);
+    postsReachedEndRef.current = false;
 
     const firstPostsQuery = query(
       collection(db, "artifacts", appId, "public", "data", "posts"),
@@ -5597,10 +5600,17 @@ const loadMorePosts = async () => {
     );
     const unsubPosts = onSnapshot(firstPostsQuery, (snap) => {
       const first = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      if (!postsCursorRef.current && snap.docs.length > 0) {
-        postsCursorRef.current = snap.docs[snap.docs.length - 1];
+      // 最新ページの末尾カーソル（常に更新）
+      if (snap.docs.length > 0) {
+        postsTopCursorRef.current = snap.docs[snap.docs.length - 1];
+        // まだ「追加読み込み」を始めていない場合は、ページングカーソルも初期化
+        if (!postsCursorRef.current) postsCursorRef.current = postsTopCursorRef.current;
+      } else {
+        postsTopCursorRef.current = null;
+        if (!postsCursorRef.current) postsCursorRef.current = null;
       }
-      setPostsHasMore((prev) => prev && snap.docs.length === POSTS_PAGE_SIZE);
+      // 末尾まで到達済みでなければ、最新ページが満杯かどうかで hasMore を更新（後から投稿が増えた場合も true に戻せる）
+      setPostsHasMore(!postsReachedEndRef.current && snap.docs.length === POSTS_PAGE_SIZE);
       setPosts((prev) => {
         const map = new Map(prev.map((p) => [p.id, p]));
         first.forEach((p) => map.set(p.id, p));
