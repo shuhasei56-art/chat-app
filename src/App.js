@@ -3773,6 +3773,22 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
         /* @__PURE__ */ jsx("div", { className: "font-bold text-sm truncate", children: u.name }),
         /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-400 font-mono", children: u.id })
       ] }),
+      /* @__PURE__ */ jsx("button", { onClick: async () => {
+        try {
+          await addDoc(collection(db, "artifacts", appId, "public", "data", "minigame_invites"), {
+            toUid: u.uid,
+            fromUid: user.uid,
+            gameType: "shooting",
+            durationSec: 60,
+            status: "pending",
+            createdAt: serverTimestamp()
+          });
+          showNotification(`${u.name} にミニゲーム通知を送りました`);
+        } catch (e) {
+          console.error(e);
+          showNotification("通知の送信に失敗しました");
+        }
+      }, className: "px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-green-500 hover:bg-green-600", children: "ミニゲーム" }),
       /* @__PURE__ */ jsx("button", { onClick: () => setBanTarget(u), className: `px-3 py-1.5 rounded-lg text-xs font-bold text-white ${u.isBanned ? "bg-gray-500" : "bg-red-500"}`, children: "\u7BA1\u7406" })
     ] }, u.uid)) }),
     banTarget && /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[600] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl overflow-y-auto max-h-[80vh]", children: [
@@ -5380,6 +5396,388 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
     }
   );
 };
+
+// ===================== MiniGame (Shooting) + Pachinko (Coins) =====================
+const MiniGameInviteModal = ({ invite, fromUser, onAccept, onDecline }) => {
+  if (!invite) return null;
+  const fromName = fromUser?.name || "管理者";
+  return /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[900] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-[32px] p-6 shadow-2xl", children: [
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-4", children: [
+      /* @__PURE__ */ jsx("div", { className: "w-12 h-12 rounded-2xl bg-green-50 flex items-center justify-center", children: /* @__PURE__ */ jsx(Play, { className: "w-6 h-6 text-green-600" }) }),
+      /* @__PURE__ */ jsxs("div", { className: "flex-1", children: [
+        /* @__PURE__ */ jsx("div", { className: "font-black text-lg text-gray-900", children: "ミニゲーム通知" }),
+        /* @__PURE__ */ jsxs("div", { className: "text-xs font-bold text-gray-500", children: [
+          fromName,
+          " からシューティング(1分)の招待"
+        ] })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsx("div", { className: "bg-gray-50 border rounded-2xl p-4 text-sm text-gray-700 font-bold mb-4", children: "獲得したスコアをコインに変換できます（1点 = 1コイン）" }),
+    /* @__PURE__ */ jsxs("div", { className: "flex gap-3", children: [
+      /* @__PURE__ */ jsx("button", { onClick: onDecline, className: "flex-1 py-3 rounded-2xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200", children: "後で" }),
+      /* @__PURE__ */ jsx("button", { onClick: onAccept, className: "flex-1 py-3 rounded-2xl font-bold text-white bg-green-500 hover:bg-green-600 shadow-lg shadow-green-200 flex items-center justify-center gap-2", children: /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx(Play, { className: "w-5 h-5" }),
+        " 今すぐ遊ぶ"
+      ] }) })
+    ] })
+  ] }) });
+};
+
+const ShootingMiniGameView = ({ user, invite, onBack, showNotification }) => {
+  const canvasRef = useRef(null);
+  const rafRef = useRef(null);
+  const lastTsRef = useRef(0);
+  const [timeLeft, setTimeLeft] = useState(60);
+  const [score, setScore] = useState(0);
+  const [phase, setPhase] = useState("ready"); // ready | playing | done
+  const playerRef = useRef({ x: 160, y: 360, w: 34, h: 34 });
+  const bulletsRef = useRef([]);
+  const targetsRef = useRef([]);
+  const spawnAccRef = useRef(0);
+  const fireAccRef = useRef(0);
+
+  const resizeCanvas = () => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const parent = c.parentElement;
+    const w = Math.min(380, parent?.clientWidth || 380);
+    const h = 520;
+    c.width = w * (window.devicePixelRatio || 1);
+    c.height = h * (window.devicePixelRatio || 1);
+    c.style.width = w + "px";
+    c.style.height = h + "px";
+  };
+
+  useEffect(() => {
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+    return () => window.removeEventListener("resize", resizeCanvas);
+  }, []);
+
+  const resetGame = () => {
+    setScore(0);
+    setTimeLeft(60);
+    bulletsRef.current = [];
+    targetsRef.current = [];
+    spawnAccRef.current = 0;
+    fireAccRef.current = 0;
+    lastTsRef.current = 0;
+    setPhase("ready");
+  };
+
+  useEffect(() => {
+    resetGame();
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [invite?.id]);
+
+  const toCanvasPt = (e) => {
+    const c = canvasRef.current;
+    if (!c) return null;
+    const rect = c.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: clientX - rect.left, y: clientY - rect.top, w: rect.width, h: rect.height };
+  };
+
+  const handleMove = (e) => {
+    if (phase !== "playing" && phase !== "ready") return;
+    const pt = toCanvasPt(e);
+    if (!pt) return;
+    const p = playerRef.current;
+    p.x = Math.max(0, Math.min(pt.w - p.w, pt.x - p.w / 2));
+    p.y = Math.max(0, Math.min(pt.h - p.h, pt.y - p.h / 2));
+  };
+
+  const start = () => {
+    if (phase === "playing") return;
+    setPhase("playing");
+    lastTsRef.current = performance.now();
+  };
+
+  useEffect(() => {
+    if (phase !== "playing") return;
+    const t = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(t);
+          setPhase("done");
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [phase]);
+
+  const gameLoop = (ts) => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = c.width / dpr;
+    const h = c.height / dpr;
+    const dt = Math.min(0.05, (ts - (lastTsRef.current || ts)) / 1000);
+    lastTsRef.current = ts;
+
+    if (phase === "playing") {
+      spawnAccRef.current += dt;
+      if (spawnAccRef.current >= 0.65) {
+        spawnAccRef.current = 0;
+        const size = 22 + Math.random() * 18;
+        targetsRef.current.push({ x: Math.random() * (w - size), y: -size, r: size / 2, vy: 70 + Math.random() * 90 });
+      }
+      fireAccRef.current += dt;
+      if (fireAccRef.current >= 0.12) {
+        fireAccRef.current = 0;
+        const p = playerRef.current;
+        bulletsRef.current.push({ x: p.x + p.w / 2, y: p.y, vy: -420, r: 4 });
+      }
+      bulletsRef.current.forEach((b) => b.y += b.vy * dt);
+      bulletsRef.current = bulletsRef.current.filter((b) => b.y > -20);
+      targetsRef.current.forEach((t) => t.y += t.vy * dt);
+      targetsRef.current = targetsRef.current.filter((t) => t.y < h + 40);
+
+      let gained = 0;
+      const bullets = bulletsRef.current;
+      const targets = targetsRef.current;
+      const aliveTargets = [];
+      const aliveBullets = [];
+      for (let bi = 0; bi < bullets.length; bi++) {
+        let hit = false;
+        const b = bullets[bi];
+        for (let ti = 0; ti < targets.length; ti++) {
+          const t = targets[ti];
+          if (!t) continue;
+          const dx = b.x - (t.x + t.r);
+          const dy = b.y - (t.y + t.r);
+          const dist2 = dx * dx + dy * dy;
+          const rr = (b.r + t.r) * (b.r + t.r);
+          if (dist2 <= rr) {
+            targets[ti] = null;
+            hit = true;
+            gained += 1;
+            break;
+          }
+        }
+        if (!hit) aliveBullets.push(b);
+      }
+      for (let ti = 0; ti < targets.length; ti++) {
+        if (targets[ti]) aliveTargets.push(targets[ti]);
+      }
+      bulletsRef.current = aliveBullets;
+      targetsRef.current = aliveTargets;
+      if (gained) setScore((s) => s + gained);
+    }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.fillStyle = "#0b1220";
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    for (let i = 0; i < 40; i++) {
+      const x = (i * 97 + ts / 20) % w;
+      const y = (i * 53 + ts / 35) % h;
+      ctx.fillRect(x, y, 2, 2);
+    }
+
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.fillRect(12, 12, w - 24, 44);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 14px system-ui, -apple-system, Segoe UI, Roboto";
+    ctx.fillText(`残り ${timeLeft}s`, 24, 40);
+    ctx.textAlign = "right";
+    ctx.fillText(`スコア ${score}`, w - 24, 40);
+    ctx.textAlign = "left";
+
+    const p = playerRef.current;
+    ctx.fillStyle = "#22c55e";
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.fillStyle = "#14532d";
+    ctx.fillRect(p.x + 8, p.y + 8, p.w - 16, p.h - 16);
+
+    ctx.fillStyle = "#e5e7eb";
+    bulletsRef.current.forEach((b) => {
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    targetsRef.current.forEach((t) => {
+      ctx.fillStyle = "#ef4444";
+      ctx.beginPath();
+      ctx.arc(t.x + t.r, t.y + t.r, t.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(0,0,0,0.25)";
+      ctx.beginPath();
+      ctx.arc(t.x + t.r + 4, t.y + t.r + 4, t.r * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    if (phase === "ready") {
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.font = "900 20px system-ui";
+      ctx.fillText("タップで開始", w / 2, h / 2 - 8);
+      ctx.font = "700 12px system-ui";
+      ctx.fillText("1分間のシューティング（自動発射）", w / 2, h / 2 + 16);
+      ctx.textAlign = "left";
+    }
+    if (phase === "done") {
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.font = "900 22px system-ui";
+      ctx.fillText("終了！", w / 2, h / 2 - 28);
+      ctx.font = "800 14px system-ui";
+      ctx.fillText(`スコア: ${score}  →  ${score}コイン`, w / 2, h / 2);
+      ctx.font = "700 12px system-ui";
+      ctx.fillText("下のボタンでコインに変換", w / 2, h / 2 + 22);
+      ctx.textAlign = "left";
+    }
+
+    rafRef.current = requestAnimationFrame(gameLoop);
+  };
+
+  useEffect(() => {
+    rafRef.current = requestAnimationFrame(gameLoop);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [phase, timeLeft, score]);
+
+  const convertScoreToCoins = async () => {
+    if (!user?.uid) return;
+    if (score <= 0) {
+      showNotification("スコアが0のため変換できません");
+      onBack?.();
+      return;
+    }
+    try {
+      await runTransaction(db, async (t) => {
+        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+        const uDoc = await t.get(userRef);
+        if (!uDoc.exists()) throw new Error("ユーザーが見つかりません");
+        t.update(userRef, { wallet: increment(score) });
+        if (invite?.id) {
+          const invRef = doc(db, "artifacts", appId, "public", "data", "minigame_invites", invite.id);
+          t.update(invRef, { status: "completed", earnedCoins: score, completedAt: serverTimestamp() });
+        }
+      });
+      showNotification(`${score}コインを獲得しました！`);
+      onBack?.();
+    } catch (e) {
+      console.error(e);
+      showNotification("コイン変換に失敗しました");
+    }
+  };
+
+  return /* @__PURE__ */ jsxs("div", { className: "w-full h-full flex flex-col", children: [
+    /* @__PURE__ */ jsxs("div", { className: "p-4 bg-white border-b flex items-center gap-3", children: [
+      /* @__PURE__ */ jsx("button", { onClick: onBack, className: "p-2 rounded-full hover:bg-gray-100", children: /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6" }) }),
+      /* @__PURE__ */ jsx("div", { className: "font-black text-lg", children: "シューティング（1分）" }),
+      /* @__PURE__ */ jsx("div", { className: "ml-auto flex items-center gap-2 bg-yellow-50 border border-yellow-100 px-3 py-1.5 rounded-full", children: /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx(Coins, { className: "w-4 h-4 text-yellow-600" }),
+        /* @__PURE__ */ jsx("span", { className: "text-xs font-black text-yellow-700", children: score })
+      ] }) })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden flex flex-col items-center justify-center p-4", children: [
+      /* @__PURE__ */ jsx("div", { className: "w-full flex justify-center", children: /* @__PURE__ */ jsx("canvas", { ref: canvasRef, className: "rounded-3xl border shadow-lg touch-none", onMouseMove: handleMove, onTouchMove: handleMove, onClick: () => { if (phase === "ready") start(); } }) }),
+      /* @__PURE__ */ jsx("div", { className: "w-full max-w-sm mt-4", children: phase === "done" ? /* @__PURE__ */ jsx("button", { onClick: convertScoreToCoins, className: "w-full py-4 bg-yellow-500 hover:bg-yellow-600 text-white font-black rounded-2xl shadow-lg shadow-yellow-200 flex items-center justify-center gap-2", children: /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx(Coins, { className: "w-5 h-5" }),
+        `スコアをコインに変換（+${score}）`
+      ] }) }) : /* @__PURE__ */ jsx("div", { className: "text-center text-xs text-gray-500 font-bold", children: "画面をなぞって移動 / 自動発射" }) })
+    ] })
+  ] });
+};
+
+const PachinkoView = ({ user, profile, onBack, showNotification }) => {
+  const [bet, setBet] = useState("10");
+  const [isSpinning, setIsSpinning] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+
+  const playOnce = async () => {
+    const b = parseInt(bet, 10);
+    if (!Number.isFinite(b) || b <= 0) return showNotification("ベットは正の整数にしてください");
+    if ((profile?.wallet || 0) < b) return showNotification("コイン残高が足りません");
+    if (isSpinning) return;
+    setIsSpinning(true);
+    try {
+      const r = Math.random();
+      let mult = 0;
+      if (r < 0.55) mult = 0;
+      else if (r < 0.80) mult = 1;
+      else if (r < 0.93) mult = 2;
+      else if (r < 0.985) mult = 5;
+      else mult = 10;
+      const payout = Math.floor(b * mult);
+      const delta = payout - b;
+      await runTransaction(db, async (t) => {
+        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+        const uDoc = await t.get(userRef);
+        if (!uDoc.exists()) throw new Error("ユーザーが見つかりません");
+        const current = uDoc.data().wallet || 0;
+        if (current < b) throw new Error("残高不足");
+        t.update(userRef, { wallet: increment(delta) });
+        const histRef = doc(collection(db, "artifacts", appId, "public", "data", "pachinko_history"));
+        t.set(histRef, { uid: user.uid, bet: b, mult, payout, delta, createdAt: serverTimestamp() });
+      });
+      setLastResult({ bet: b, mult, payout, delta });
+      showNotification(mult === 0 ? "ハズレ…" : `当たり！ x${mult}（+${delta}）`);
+    } catch (e) {
+      console.error(e);
+      showNotification(typeof e === "string" ? e : "プレイに失敗しました");
+    } finally {
+      setTimeout(() => setIsSpinning(false), 650);
+    }
+  };
+
+  return /* @__PURE__ */ jsxs("div", { className: "w-full h-full flex flex-col", children: [
+    /* @__PURE__ */ jsxs("div", { className: "p-4 bg-white border-b flex items-center gap-3", children: [
+      /* @__PURE__ */ jsx("button", { onClick: onBack, className: "p-2 rounded-full hover:bg-gray-100", children: /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6" }) }),
+      /* @__PURE__ */ jsx("div", { className: "font-black text-lg", children: "オンラインパチンコ（コイン）" }),
+      /* @__PURE__ */ jsx("div", { className: "ml-auto flex items-center gap-2 bg-yellow-50 border border-yellow-100 px-3 py-1.5 rounded-full", children: /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx(Coins, { className: "w-4 h-4 text-yellow-600" }),
+        /* @__PURE__ */ jsx("span", { className: "text-xs font-black text-yellow-700", children: (profile?.wallet || 0).toLocaleString() })
+      ] }) })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto p-6", children: [
+      /* @__PURE__ */ jsx("div", { className: "bg-white rounded-3xl p-6 shadow border", children: /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx("div", { className: "font-black text-base mb-2", children: "ベットして回す" }),
+        /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500 font-bold mb-4", children: "※ これは遊び用（仮想コイン）です。現金や換金はありません。" }),
+        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-4", children: [
+          /* @__PURE__ */ jsx("input", { type: "number", min: 1, step: 1, value: bet, onChange: (e) => setBet(e.target.value), className: "flex-1 bg-gray-50 border rounded-2xl p-4 font-black text-center outline-none focus:ring-2 focus:ring-yellow-400", placeholder: "10" }),
+          /* @__PURE__ */ jsx("button", { onClick: playOnce, disabled: isSpinning, className: "px-5 py-4 rounded-2xl font-black text-white bg-yellow-500 hover:bg-yellow-600 shadow-lg shadow-yellow-200 disabled:bg-gray-300 flex items-center gap-2", children: isSpinning ? /* @__PURE__ */ jsx(Loader2, { className: "w-5 h-5 animate-spin" }) : /* @__PURE__ */ jsxs(Fragment, { children: [
+            /* @__PURE__ */ jsx(Disc, { className: "w-5 h-5" }),
+            "回す"
+          ] }) })
+        ] }),
+        lastResult && /* @__PURE__ */ jsxs("div", { className: "mt-2 bg-gray-50 border rounded-2xl p-4", children: [
+          /* @__PURE__ */ jsx("div", { className: "text-xs font-bold text-gray-500", children: "結果" }),
+          /* @__PURE__ */ jsxs("div", { className: "mt-1 text-sm font-black text-gray-900", children: [
+            "ベット ",
+            lastResult.bet,
+            " / 倍率 x",
+            lastResult.mult,
+            " / 払い出し ",
+            lastResult.payout,
+            " / ",
+            lastResult.delta >= 0 ? "+" : "",
+            lastResult.delta
+          ] })
+        ] })
+      ] }) })
+    ] })
+  ] });
+};
+// ===================== /MiniGame + Pachinko =====================
 function App() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -5396,6 +5794,8 @@ function App() {
   const POSTS_PAGE_SIZE = 5;
 
   const [notification, setNotification] = useState(null);
+  const [miniGameInvite, setMiniGameInvite] = useState(null);
+  const [miniGameInviteFrom, setMiniGameInviteFrom] = useState(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [mutedChats, setMutedChats] = useState(() => {
@@ -5481,6 +5881,39 @@ function App() {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3e3);
   };
+
+  // Listen for mini-game invites sent by admin
+  useEffect(() => {
+    if (!user?.uid) return;
+    const qInv = query(
+      collection(db, "artifacts", appId, "public", "data", "minigame_invites"),
+      where("toUid", "==", user.uid),
+      where("status", "==", "pending"),
+      limit(1)
+    );
+    const unsub = onSnapshot(qInv, (snap) => {
+      if (snap.empty) {
+        setMiniGameInvite(null);
+        setMiniGameInviteFrom(null);
+        return;
+      }
+      const d = snap.docs[0];
+      const inv = { id: d.id, ...d.data() };
+      setMiniGameInvite(inv);
+      const fromUid = inv.fromUid;
+      if (fromUid) {
+        const u = allUsers.find((x) => x.uid === fromUid) || null;
+        setMiniGameInviteFrom(u);
+      } else {
+        setMiniGameInviteFrom(null);
+      }
+      if (!processedMsgIds.current.has("minigame_inv_" + d.id)) {
+        processedMsgIds.current.add("minigame_inv_" + d.id);
+        showNotification("ミニゲームの招待が届きました！");
+      }
+    });
+    return () => unsub();
+  }, [user?.uid, allUsers]);
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
     showNotification("ID\u3092\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F");
@@ -6008,8 +6441,36 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
         view === "group-create" && /* @__PURE__ */ jsx(GroupCreateView, { user, profile, allUsers, chats, setView, showNotification }),
         view === "birthday-cards" && /* @__PURE__ */ jsx(BirthdayCardBox, { user, setView }),
         view === "sticker-create" && /* @__PURE__ */ jsx(StickerEditor, { user, profile, onClose: () => setView("sticker-store"), showNotification }),
-        view === "sticker-store" && /* @__PURE__ */ jsx(StickerStoreView, { user, setView, showNotification, profile, allUsers })
+        view === "sticker-store" && /* @__PURE__ */ jsx(StickerStoreView, { user, setView, showNotification, profile, allUsers }),
+        view === "pachinko" && /* @__PURE__ */ jsx(PachinkoView, { user, profile, onBack: () => setView("home"), showNotification }),
+        view === "minigame" && /* @__PURE__ */ jsx(ShootingMiniGameView, { user, invite: miniGameInvite, onBack: () => { setView("home"); setMiniGameInvite(null); setMiniGameInviteFrom(null); }, showNotification })
       ] }),
+      miniGameInvite && view !== "minigame" && /* @__PURE__ */ jsx(MiniGameInviteModal, {
+        invite: miniGameInvite,
+        fromUser: miniGameInviteFrom,
+        onAccept: async () => {
+          try {
+            if (miniGameInvite?.id) {
+              await updateDoc(doc(db, "artifacts", appId, "public", "data", "minigame_invites", miniGameInvite.id), { status: "accepted", acceptedAt: serverTimestamp() });
+            }
+          } catch (e) {
+            console.error(e);
+          }
+          setView("minigame");
+        },
+        onDecline: async () => {
+          try {
+            if (miniGameInvite?.id) {
+              await updateDoc(doc(db, "artifacts", appId, "public", "data", "minigame_invites", miniGameInvite.id), { status: "dismissed", dismissedAt: serverTimestamp() });
+            }
+          } catch (e) {
+            console.error(e);
+          }
+          setMiniGameInvite(null);
+          setMiniGameInviteFrom(null);
+        }
+      }),
+
       searchModalOpen && /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/60", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-[32px] p-8", children: [
         /* @__PURE__ */ jsx("h2", { className: "text-xl font-bold mb-6", children: "\u691C\u7D22" }),
         /* @__PURE__ */ jsx("input", { className: "w-full bg-gray-50 rounded-2xl py-4 px-6 mb-6 outline-none", placeholder: "ID\u3092\u5165\u529B", value: searchQuery, onChange: (e) => setSearchQuery(e.target.value) }),
@@ -6018,7 +6479,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
       ] }) }),
-      user && !activeCall && ["home", "voom"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0", children: [
+      user && !activeCall && ["home", "voom", "pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0", children: [
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("home"), children: [
           /* @__PURE__ */ jsx(Home, { className: "w-6 h-6" }),
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u30DB\u30FC\u30E0" })
@@ -6026,6 +6487,10 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "voom" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("voom"), children: [
           /* @__PURE__ */ jsx(LayoutGrid, { className: "w-6 h-6" }),
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "VOOM" })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "pachinko" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("pachinko"), children: [
+          /* @__PURE__ */ jsx(Coins, { className: "w-6 h-6" }),
+          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "パチンコ" })
         ] })
       ] })
     ] }),
@@ -6036,3 +6501,4 @@ var App_13_default = App;
 export {
   App_13_default as default
 };
+
