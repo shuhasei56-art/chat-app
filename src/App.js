@@ -4737,16 +4737,29 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
   const rafRef = useRef(0);
   const scanningRef = useRef(false);
   const jsqrRef = useRef(null);
+  const barcodeDetectorRef = useRef(null);
+  const detectBusyRef = useRef(false);
   const [scanning, setScanning] = useState(false);
   const [qrError, setQrError] = useState("");
 
   useEffect(() => {
     let mounted = true;
-    // Prefer module import; fall back to window.jsQR if present.
+
+    // Native QR detection (Chrome/Edge/Android etc.)
+    try {
+      if (typeof window !== "undefined" && "BarcodeDetector" in window) {
+        barcodeDetectorRef.current = new window.BarcodeDetector({ formats: ["qr_code"] });
+      }
+    } catch {
+      barcodeDetectorRef.current = null;
+    }
+
+    // jsQR fallback (requires dependency/bundler to provide it)
     import("jsqr").then((m) => {
       if (!mounted) return;
       jsqrRef.current = m?.default || m;
     }).catch(() => {});
+
     return () => { mounted = false; };
   }, []);
 
@@ -4808,17 +4821,39 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
             const ctx = c.getContext("2d", { willReadFrequently: true });
             if (ctx) {
               ctx.drawImage(video, 0, 0, vw, vh);
-              const imageData = ctx.getImageData(0, 0, vw, vh);
+
+              // 1) Prefer native BarcodeDetector when available (no extra deps)
+              const detector = barcodeDetectorRef.current;
+              if (detector && !detectBusyRef.current) {
+                detectBusyRef.current = true;
+                detector.detect(c).then((codes) => {
+                  detectBusyRef.current = false;
+                  if (!scanningRef.current) return;
+                  const v = codes && codes[0] && (codes[0].rawValue || codes[0].data || codes[0].value);
+                  if (v) {
+                    stopScanner();
+                    addFriendById(v);
+                  }
+                }).catch(() => {
+                  detectBusyRef.current = false;
+                });
+              }
+
+              // 2) Fallback to jsQR (sync) if bundled
               const jsqr = jsqrRef.current || window.jsQR;
               if (jsqr) {
+                const imageData = ctx.getImageData(0, 0, vw, vh);
                 const code = jsqr(imageData.data, vw, vh, { inversionAttempts: "attemptBoth" });
                 if (code?.data) {
                   stopScanner();
                   addFriendById(code.data);
                   return;
                 }
-              } else {
-                setQrError("QR読み取りライブラリの読み込みに失敗しました");
+              }
+
+              // 3) If neither works, show a helpful message once
+              if (!detector && !jsqr) {
+                setQrError("このブラウザはQR読み取りに対応していません（Chrome/Edge推奨）");
               }
             }
           }
@@ -4860,20 +4895,42 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
           ctx.drawImage(bitmap, 0, 0);
         } else {
           const img = new Image();
-          img.onload = () => {
+          img.onload = async () => {
             c.width = img.width;
             c.height = img.height;
             ctx.drawImage(img, 0, 0);
+
+            const detector = barcodeDetectorRef.current;
+            if (detector) {
+              try {
+                const codes = await detector.detect(c);
+                const v = codes && codes[0] && (codes[0].rawValue || codes[0].data || codes[0].value);
+                if (v) { addFriendById(v); return; }
+              } catch { /* ignore */ }
+            }
+
             const jsqr = jsqrRef.current || window.jsQR;
             if (jsqr) {
               const imageData = ctx.getImageData(0, 0, c.width, c.height);
               const code = jsqr(imageData.data, c.width, c.height, { inversionAttempts: "attemptBoth" });
               if (code?.data) addFriendById(code.data);
               else setQrError("QRコードが見つかりませんでした");
+              return;
             }
+
+            setQrError("QR読み取りに対応していないブラウザです（Chrome/Edge推奨）");
           };
           img.src = dataUrl;
           return;
+        }
+
+        const detector = barcodeDetectorRef.current;
+        if (detector) {
+          try {
+            const codes = await detector.detect(c);
+            const v = codes && codes[0] && (codes[0].rawValue || codes[0].data || codes[0].value);
+            if (v) { addFriendById(v); return; }
+          } catch { /* ignore */ }
         }
 
         const jsqr = jsqrRef.current || window.jsQR;
@@ -4883,7 +4940,7 @@ const QRScannerView = ({ user, setView, addFriendById }) => {
           if (code?.data) addFriendById(code.data);
           else setQrError("QRコードが見つかりませんでした");
         } else {
-          setQrError("QR読み取りライブラリの読み込みに失敗しました");
+          setQrError("QR読み取りに対応していないブラウザです（Chrome/Edge推奨）");
         }
       } catch (e) {
         console.error(e);
