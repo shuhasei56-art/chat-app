@@ -1821,7 +1821,7 @@ const GroupAddMemberModal = ({ onClose, currentMembers, chatId, allUsers, profil
     ] }) })
   ] }) });
 };
-const GroupEditModal = ({ onClose, chatId, currentName, currentIcon, currentMembers, allUsers, showNotification, user, profile }) => {
+const GroupEditModal = ({ onClose, chatId, currentName, currentIcon, currentMembers, allUsers, showNotification, user, profile, onShowProfile }) => {
   const [name, setName] = useState(currentName);
   const [icon, setIcon] = useState(currentIcon);
   const [kickTarget, setKickTarget] = useState(null);
@@ -1897,7 +1897,7 @@ const GroupEditModal = ({ onClose, chatId, currentName, currentIcon, currentMemb
             if (!m) return null;
             const isMe = uid === user.uid;
             return /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 border border-transparent hover:border-gray-100", children: [
-              /* @__PURE__ */ jsx("img", { src: m.avatar, className: "w-10 h-10 rounded-full object-cover border" }),
+              /* @__PURE__ */ jsx("img", { src: m.avatar, className: "w-10 h-10 rounded-full object-cover border cursor-pointer", onClick: () => onShowProfile && onShowProfile(m) }),
               /* @__PURE__ */ jsx("div", { className: "flex-1 min-w-0", children: /* @__PURE__ */ jsxs("div", { className: "font-bold text-sm truncate", children: [
                 m.name,
                 " ",
@@ -2019,7 +2019,7 @@ const CallAcceptedOverlay = ({ callData, onJoin }) => /* @__PURE__ */ jsx("div",
     "\u901A\u8A71\u306B\u53C2\u52A0\u3059\u308B"
   ] })
 ] }) });
-const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, myProfile, allUsers, showNotification }) => {
+const FriendProfileModal = ({ friend, onClose, onStartChat, onAddFriend, onTransfer, myUid, myProfile, allUsers, showNotification }) => {
   const myFriends = myProfile?.friends || [];
   const myFriendsSet = useMemo(() => new Set(myFriends), [myFriends]);
   const friendFriends = friend?.friends || [];
@@ -2061,6 +2061,15 @@ const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, m
       showNotification?.("\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F");
     }
   };
+
+  const handleAddFriend = async () => {
+    if (!friend?.uid || friend.uid === myUid) return;
+    try {
+      await onAddFriend?.(friend.uid);
+    } catch (e) {
+      console.error(e);
+    }
+  };
   return /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in zoom-in", children: /* @__PURE__ */ jsxs("div", { className: "bg-white w-full max-w-sm rounded-[40px] overflow-hidden shadow-2xl relative flex flex-col items-center pb-8", children: [
     /* @__PURE__ */ jsx("button", { onClick: onClose, className: "absolute top-4 right-4 z-10 bg-black/20 text-white p-2 rounded-full backdrop-blur-md hover:bg-black/30", children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) }),
     /* @__PURE__ */ jsx("div", { className: "w-full h-48 bg-gray-200", children: /* @__PURE__ */ jsx("img", { src: friend.cover || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80", className: "w-full h-full object-cover" }) }),
@@ -2086,6 +2095,17 @@ const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, m
     ] }),
     /* @__PURE__ */ jsx("div", { className: "w-full px-8 mb-6", children: /* @__PURE__ */ jsx("p", { className: "text-center text-sm text-gray-600 bg-gray-50 py-3 px-4 rounded-2xl border", children: friend.status || "\u30B9\u30C6\u30FC\u30BF\u30B9\u306A\u3057" }) }),
     /* @__PURE__ */ jsxs("div", { className: "flex gap-3 w-full px-8", children: [
+      friend?.uid !== myUid && !isFriend && /* @__PURE__ */ jsxs(
+        "button",
+        {
+          onClick: handleAddFriend,
+          className: "flex-1 py-3 bg-blue-500 text-white rounded-2xl font-bold shadow-lg shadow-blue-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2",
+          children: [
+            /* @__PURE__ */ jsx(UserPlus, { className: "w-5 h-5" }),
+            " \u53CB\u3060\u3061\u8FFD\u52A0"
+          ]
+        }
+      ),
       /* @__PURE__ */ jsxs(
         "button",
         {
@@ -2093,7 +2113,7 @@ const FriendProfileModal = ({ friend, onClose, onStartChat, onTransfer, myUid, m
             onStartChat?.(friend.uid);
             onClose?.();
           },
-          className: "flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2",
+          className: `py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2 ${friend?.uid !== myUid && !isFriend ? "flex-1" : "w-full"}`,
           children: [
             /* @__PURE__ */ jsx(MessageCircle, { className: "w-5 h-5" }),
             " \u30C8\u30FC\u30AF"
@@ -3785,7 +3805,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     ] }) })
   ] });
 };
-const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db: db2, appId: appId2, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }) => {
+const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db: db2, appId: appId2, mutedChats, toggleMuteChat, showNotification, addFriendById, startChatWithUser, startVideoCall }) => {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
@@ -4411,7 +4431,10 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       ] })
     ] }) }),
     addMemberModalOpen && /* @__PURE__ */ jsx(GroupAddMemberModal, { onClose: () => setAddMemberModalOpen(false), currentMembers: chatData?.participants || [], chatId: activeChatId, allUsers, profile, user, chats, showNotification }),
-    groupEditModalOpen && /* @__PURE__ */ jsx(GroupEditModal, { onClose: () => setGroupEditModalOpen(false), chatId: activeChatId, currentName: chatData.name, currentIcon: chatData.icon, currentMembers: chatData.participants, allUsers, showNotification, user, profile }),
+    groupEditModalOpen && /* @__PURE__ */ jsx(GroupEditModal, { onClose: () => setGroupEditModalOpen(false), chatId: activeChatId, currentName: chatData.name, currentIcon: chatData.icon, currentMembers: chatData.participants, allUsers, showNotification, user, profile, onShowProfile: (u) => {
+      setGroupEditModalOpen(false);
+      setViewProfile(u);
+    } }),
     leaveModalOpen && /* @__PURE__ */ jsx(LeaveGroupConfirmModal, { onClose: () => setLeaveModalOpen(false), onLeave: handleLeaveGroup }),
     cardModalOpen && /* @__PURE__ */ jsx(BirthdayCardModal, { onClose: () => setCardModalOpen(false), onSend: sendBirthdayCard, toName: title }),
     contactModalOpen && /* @__PURE__ */ jsx(ContactSelectModal, { onClose: () => setContactModalOpen(false), onSend: (c) => sendMessage("", "contact", { contactId: c.uid, contactName: c.name, contactAvatar: c.avatar }), friends: contactCandidates }),
@@ -4501,7 +4524,13 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         ] }) : /* @__PURE__ */ jsx(Send, { className: "w-5 h-5" }) })
       ] })
     ] }),
-    viewProfile && /* @__PURE__ */ jsx(FriendProfileModal, { friend: viewProfile, onClose: () => setViewProfile(null), onStartChat: (uid) => {
+    viewProfile && /* @__PURE__ */ jsx(FriendProfileModal, { friend: viewProfile, onClose: () => setViewProfile(null), onAddFriend: addFriendById, onStartChat: async (uid) => {
+      // トーク開始時は「友だち追加」も同時に行う
+      try {
+        await addFriendById?.(uid);
+      } catch {
+      }
+      await startChatWithUser?.(uid);
       setViewProfile(null);
     }, onTransfer: () => {
       setCoinModalTarget(viewProfile);
@@ -5963,7 +5992,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
       ] }) : /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden relative", children: [
         view === "home" && /* @__PURE__ */ jsx(HomeView, { user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }),
         view === "voom" && /* @__PURE__ */ jsx(VoomView, { user, allUsers, profile, posts, showNotification, db, appId, onLoadMore: loadMorePosts, hasMore: postsHasMore, loadingMore: postsLoadingMore }),
-        view === "chatroom" && /* @__PURE__ */ jsx(ChatRoomView, { user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startVideoCall }),
+        view === "chatroom" && /* @__PURE__ */ jsx(ChatRoomView, { user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startChatWithUser, startVideoCall }),
         view === "profile" && /* @__PURE__ */ jsx(ProfileEditView, { user, profile, setView, showNotification, copyToClipboard }),
         view === "qr" && /* @__PURE__ */ jsx(QRScannerView, { user, setView, addFriendById }),
         view === "group-create" && /* @__PURE__ */ jsx(GroupCreateView, { user, profile, allUsers, chats, setView, showNotification }),
