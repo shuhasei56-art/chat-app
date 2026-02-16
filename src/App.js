@@ -2094,43 +2094,21 @@ const FriendProfileModal = ({ friend, onClose, onStartChat, onAddFriend, onTrans
       ] })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "w-full px-8 mb-6", children: /* @__PURE__ */ jsx("p", { className: "text-center text-sm text-gray-600 bg-gray-50 py-3 px-4 rounded-2xl border", children: friend.status || "\u30B9\u30C6\u30FC\u30BF\u30B9\u306A\u3057" }) }),
-    /* @__PURE__ */ jsxs("div", { className: "flex gap-3 w-full px-8", children: [
-      friend?.uid !== myUid && !isFriend && /* @__PURE__ */ jsxs(
-        "button",
-        {
-          onClick: handleAddFriend,
-          className: "flex-1 py-3 bg-blue-500 text-white rounded-2xl font-bold shadow-lg shadow-blue-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2",
-          children: [
-            /* @__PURE__ */ jsx(UserPlus, { className: "w-5 h-5" }),
-            " \u53CB\u3060\u3061\u8FFD\u52A0"
-          ]
-        }
-      ),
-      /* @__PURE__ */ jsxs(
-        "button",
-        {
-          onClick: () => {
-            onStartChat?.(friend.uid);
-            onClose?.();
-          },
-          className: `py-3 bg-green-500 text-white rounded-2xl font-bold shadow-lg shadow-green-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2 ${friend?.uid !== myUid && !isFriend ? "flex-1" : "w-full"}`,
-          children: [
-            /* @__PURE__ */ jsx(MessageCircle, { className: "w-5 h-5" }),
-            " \u30C8\u30FC\u30AF"
-          ]
-        }
-      ),
-      /* @__PURE__ */ jsxs(
-        "button",
-        {
-          onClick: onTransfer,
-          className: "flex-1 py-3 bg-yellow-500 text-white rounded-2xl font-bold shadow-lg shadow-yellow-200 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2",
-          children: [
-            /* @__PURE__ */ jsx(Coins, { className: "w-5 h-5" }),
-            " \u9001\u91D1"
-          ]
-        }
-      )
+    /* @__PURE__ */ jsxs("div", { className: "w-full px-8", children: [
+      friend?.uid !== myUid && !isFriend && /* @__PURE__ */ jsxs("button", { onClick: handleAddFriend, className: "w-full py-3 mb-3 bg-blue-50 text-blue-700 rounded-2xl font-black border border-blue-200 shadow-sm flex items-center justify-center gap-2", children: [
+        /* @__PURE__ */ jsx(UserPlus, { className: "w-5 h-5" }),
+        " 友だち追加"
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
+        /* @__PURE__ */ jsxs("button", { onClick: () => { onStartChat?.(friend.uid); onClose?.(); }, className: "col-span-1 py-4 bg-green-500 text-white rounded-3xl font-black shadow-lg shadow-green-200 flex items-center justify-center gap-2 text-base", children: [
+          /* @__PURE__ */ jsx(MessageCircle, { className: "w-6 h-6" }),
+          " トーク"
+        ] }),
+        /* @__PURE__ */ jsxs("button", { onClick: onTransfer, className: "col-span-1 py-4 bg-yellow-500 text-white rounded-3xl font-black shadow-lg shadow-yellow-200 flex items-center justify-center gap-2 text-base", children: [
+          /* @__PURE__ */ jsx(Coins, { className: "w-6 h-6" }),
+          " 送金"
+        ] })
+      ] })
     ] }),
     isFriend && /* @__PURE__ */ jsx("div", { className: "w-full px-8 mt-3", children: /* @__PURE__ */ jsxs(
       "button",
@@ -2185,10 +2163,10 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
           let base64Data = "";
           const loadChunksReliable = async () => {
             const total = m.chunkCount || null;
-            const pathBase = doc(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks");
+            const pathBase = collection(db2, "artifacts", appId2, "public", "data", "chats", chatId, "messages", m.id, "chunks");
             if (!total) {
               // fallback: query orderBy index
-              const snap = await getDocs(query(collection(pathBase), orderBy("index", "asc")));
+              const snap = await getDocs(query(pathBase, orderBy("index", "asc")));
               const parts = [];
               snap.forEach((d) => parts.push(d.data().data || ""));
               return parts.join("");
@@ -2482,21 +2460,26 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
     ] })
   ] });
 });
-const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => {
-  const [commentText, setCommentText] = useState(""), [mediaSrc, setMediaSrc] = useState(post.media), [isLoadingMedia, setIsLoadingMedia] = useState(false);
+const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile, showNotification }) => {
+  const [commentText, setCommentText] = useState("");
+  const [mediaSrc, setMediaSrc] = useState(post.media);
+  const [isLoadingMedia, setIsLoadingMedia] = useState(false);
+  const [mediaError, setMediaError] = useState(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [postPreview, setPostPreview] = useState(null);
   const u = allUsers.find((x) => x.uid === post.userId), isLiked = post.likes?.includes(user?.uid);
   const isMe = post.userId === user.uid;
   useEffect(() => {
-    if (post.hasChunks && !mediaSrc) {
+    if (post.hasChunks && (!mediaSrc || mediaError)) {
       setIsLoadingMedia(true);
+      setMediaError(false);
       (async () => {
         let mergedData = "";
         const loadPostChunksReliable = async () => {
           const total = post.chunkCount || null;
-          const pathBase = doc(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks");
+          const pathBase = collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks");
           if (!total) {
-            const snap = await getDocs(query(collection(pathBase), orderBy("index", "asc")));
+            const snap = await getDocs(query(pathBase, orderBy("index", "asc")));
             const parts = [];
             snap.forEach((d) => parts.push(d.data().data || ""));
             return parts.join("");
@@ -2547,29 +2530,85 @@ const PostItem = ({ post, user, allUsers, db: db2, appId: appId2, profile }) => 
         setIsLoadingMedia(false);
       })();
     }
-  }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, mediaSrc]);
+  }, [post.id, post.chunkCount, post.hasChunks, post.mediaType, post.mimeType, mediaSrc, mediaError, reloadNonce]);
   useEffect(() => {
+    // Convert large dataURL media to blob URL for better reliability (especially videos)
+    if (!post.hasChunks && post.media && typeof post.media === "string" && post.media.startsWith("data:")) {
+      const isVideo = post.mediaType === "video" || post.mimeType?.startsWith("video");
+      const isLarge = post.media.length > 2_000_000;
+      if ((isVideo || isLarge) && !mediaSrc?.startsWith("blob:")) {
+        (async () => {
+          try {
+            const res = await fetch(post.media);
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            setMediaSrc(url);
+          } catch (e) {
+            console.warn("Failed to convert dataURL to blob:", e);
+          }
+        })();
+      }
+    }
+  }, [post.id]);
+
+useEffect(() => {
     return () => {
       if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe) URL.revokeObjectURL(mediaSrc);
     };
   }, [mediaSrc, isMe]);
+  const reloadMedia = () => {
+    setMediaError(false);
+    try { if (mediaSrc && mediaSrc.startsWith("blob:") && !isMe) URL.revokeObjectURL(mediaSrc); } catch {}
+    setMediaSrc(null);
+    setReloadNonce((n) => n + 1);
+  };
   const toggleLike = async () => await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { likes: isLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
   const submitComment = async () => {
     if (!commentText.trim()) return;
     await updateDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id), { comments: arrayUnion({ userId: user.uid, userName: profile.name, text: commentText, createdAt: (/* @__PURE__ */ new Date()).toISOString() }) });
     setCommentText("");
   };
+  const deletePost = async () => {
+    if (!isMe) return;
+    const ok = window.confirm("この投稿を削除しますか？");
+    if (!ok) return;
+    try {
+      // Delete chunks first (if any)
+      if (post.hasChunks) {
+        const chunksCol = collection(db2, "artifacts", appId2, "public", "data", "posts", post.id, "chunks");
+        const snap = await getDocs(chunksCol);
+        const batcher = writeBatch(db2);
+        snap.forEach((d) => batcher.delete(d.ref));
+        await batcher.commit();
+      }
+      await deleteDoc(doc(db2, "artifacts", appId2, "public", "data", "posts", post.id));
+    } catch (e) {
+      console.error("deletePost failed:", e);
+      showNotification?.("削除に失敗しました");
+    }
+  };
+
   return /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2 border-b", children: [
-    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-3", children: [
-      /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-3", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+        /* @__PURE__ */ jsxs("div", { className: "relative", children: [
         /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
         isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
       ] }),
       /* @__PURE__ */ jsx("div", { className: "font-bold text-sm", children: u?.name })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ jsx("div", { className: "text-[10px] text-gray-400 font-bold", children: formatDateTime(post.createdAt) }),
+        isMe && /* @__PURE__ */ jsx("button", { onClick: deletePost, className: "p-2 rounded-full hover:bg-red-50 text-red-500", title: "削除", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) })
+      ] }),
     ] }),
     /* @__PURE__ */ jsx("div", { className: "text-sm mb-3 whitespace-pre-wrap", children: post.content }),
     (mediaSrc || isLoadingMedia) && /* @__PURE__ */ jsxs("div", { className: "mb-3 bg-gray-50 rounded-2xl flex items-center justify-center min-h-[100px] relative overflow-hidden", children: [
-      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : post.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
+      isLoadingMedia ? /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-5 h-5" }) : post.mediaType === "video" ? /* @__PURE__ */ jsx("video", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 bg-black cursor-zoom-in", controls: true, playsInline: true, preload: "metadata", onError: () => setMediaError(true), onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "video" }) }) : /* @__PURE__ */ jsx("img", { src: mediaSrc || "", className: "w-full rounded-2xl max-h-96 object-cover cursor-zoom-in", loading: "lazy", onError: () => setMediaError(true), onClick: () => mediaSrc && setPostPreview({ src: mediaSrc, type: "image" }) }),
+      mediaError && /* @__PURE__ */ jsxs("div", { className: "absolute inset-0 bg-black/40 flex flex-col items-center justify-center gap-3", children: [
+        /* @__PURE__ */ jsx("div", { className: "text-white text-xs font-black", children: "読み込みに失敗しました" }),
+        /* @__PURE__ */ jsxs("button", { onClick: (e) => { e.stopPropagation(); reloadMedia(); }, className: "px-4 py-2 rounded-full bg-white text-gray-900 text-xs font-black shadow", children: [/* @__PURE__ */ jsx(RefreshCcw, { className: "w-4 h-4 inline mr-1" }), "再読み込み"] })
+      ] }),
       !isLoadingMedia && mediaSrc && /* @__PURE__ */ jsxs("button", { onClick: () => setPostPreview({ src: mediaSrc, type: post.mediaType === "video" ? "video" : "image" }), className: "absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded-full", children: [
         /* @__PURE__ */ jsx(Maximize, { className: "w-3 h-3 inline mr-1" }),
         "\u62E1\u5927"
@@ -4712,7 +4751,7 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
           /* @__PURE__ */ jsx("button", { onClick: postMessage, disabled: isUploading, className: `text-xs font-bold px-4 py-2 rounded-full ${content || mediaFile ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`, children: "投稿" })
         ] })
       ] }),
-      posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile }, p.id)),
+      posts.map((p) => /* @__PURE__ */ jsx(PostItem, { post: p, user, allUsers, db: db2, appId: appId2, profile, showNotification }, p.id)),
       /* @__PURE__ */ jsx("div", { ref: sentinelRef, className: "h-8" })
     ] })
   ] });
@@ -6501,4 +6540,3 @@ var App_13_default = App;
 export {
   App_13_default as default
 };
-
