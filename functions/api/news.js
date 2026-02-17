@@ -14,9 +14,10 @@ export async function onRequest(context) {
     if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
     const text = await res.text();
 
-    // RSS (XML) の解析モード
+    // RSS (XML) 解析モード: URLにxmlが含まれる場合
     if (targetUrl.includes(".xml")) {
       const items = [];
+      // 正規表現でitemタグ内を抽出（DOMParserを使わないので高速・確実）
       const itemMatches = text.matchAll(/<item>([\s\S]*?)<\/item>/g);
 
       for (const match of itemMatches) {
@@ -24,10 +25,13 @@ export async function onRequest(context) {
         const title = content.match(/<title>([\s\S]*?)<\/title>/)?.[1]?.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/, "$1") || "";
         const link = content.match(/<link>([\s\S]*?)<\/link>/)?.[1] || "";
         const pubDate = content.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || "";
-        const desc = content.match(/<description>([\s\S]*?)<\/description>/)?.[1]?.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/, "$1") || "";
 
         if (title && link) {
-          items.push({ title: title.trim(), link: link.trim(), pubDate: pubDate.trim(), desc: desc.trim() });
+          items.push({ 
+            title: title.trim(), 
+            link: link.trim(), 
+            pubDate: pubDate.trim() 
+          });
         }
       }
       return new Response(JSON.stringify(items), {
@@ -35,7 +39,7 @@ export async function onRequest(context) {
       });
     }
 
-    // 記事本文 (HTML) の簡易抽出モード（Jina Reader風）
+    // 記事本文 (HTML) 解析モード: 不要なタグを除去してテキストのみ返す
     const cleanText = text
       .replace(/<script[\s\S]*?<\/script>/gi, "")
       .replace(/<style[\s\S]*?<\/style>/gi, "")
@@ -48,6 +52,9 @@ export async function onRequest(context) {
     });
 
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: error.message }), { 
+      status: 500,
+      headers: { "Content-Type": "application/json" }
+    });
   }
 }
