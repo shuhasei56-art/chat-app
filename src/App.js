@@ -5933,24 +5933,21 @@ const NewsView = ({ showNotification }) => {
   const [articleText, setArticleText] = useState("");
 
   const loadYahooRss = useCallback(async () => {
-    setLoading(true);
-    setErr("");
-    setSelected(null);
-    setArticleText("");
-    try {
-      const rssUrl = "https://news.yahoo.co.jp/rss/topics/top-picks.xml";
-      const text = await fetchTextWithProxies(rssUrl, { timeoutMs: 8000 });
-      const xmlText = extractXml(text);
-      const parsed = parseRssItems(xmlText);
-      setItems(parsed);
-      if (!parsed.length) setErr("記事が見つかりませんでした");
-    } catch (e) {
-      setErr(e?.message || "Yahooニュースの取得に失敗しました");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  setLoading(true);
+  setErr("");
+  try {
+    // 自作のAPIからJSONを直接受け取る
+    const res = await fetch("/api/news");
+    if (!res.ok) throw new Error("APIレスポンスが異常です");
+    const data = await res.json();
+    setItems(data);
+  } catch (e) {
+    console.error(e);
+    setErr("ニュースの取得に失敗しました。");
+  } finally {
+    setLoading(false);
+  }
+}, []);
   const openArticle = useCallback(async (item) => {
     setSelected(item);
     setArticleLoading(true);
