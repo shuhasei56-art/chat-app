@@ -5499,6 +5499,7 @@ const DiceMiniGameView = ({ user, invite, onBack, showNotification, profile }) =
   const [lastGain, setLastGain] = useState(0);
   const [totalGain, setTotalGain] = useState(0);
   const [rolling, setRolling] = useState(false);
+  const endNotifiedRef = useRef(false);
 
   // timer
   useEffect(() => {
@@ -5514,6 +5515,19 @@ const DiceMiniGameView = ({ user, invite, onBack, showNotification, profile }) =
     }, 1000);
     return () => clearInterval(t);
   }, [phase]);
+
+  // Ensure the game ends when time reaches 0 and notify once.
+  useEffect(() => {
+    if (phase === "playing") {
+      endNotifiedRef.current = false;
+      return;
+    }
+    if (phase === "done" && !endNotifiedRef.current) {
+      endNotifiedRef.current = true;
+      setRolling(false);
+      showNotification?.("時間切れ！ゲーム終了");
+    }
+  }, [phase, showNotification]);
 
   const reset = () => {
     setPhase("ready");
