@@ -5875,13 +5875,9 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
 // NOTE: Some proxies (e.g. r.jina.ai) may return 4xx depending on their rules.
 // We try multiple lightweight proxies to improve reliability without needing a custom backend.
 const _newsProxyBuilders = [
-  // Same-origin proxy (Cloudflare Workers / Pages Functions)
-  // Works even when external proxies are blocked by CORS / 403.
-  (url) => `/api/news?url=${encodeURIComponent(url)}`,
-  // Fallbacks (may be blocked depending on hosting)
-  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  (url) => `https://r.jina.ai/${url}`,
-  (url) => `https://cors.isomorphic-git.org/${url}`
+  // Same-origin proxy (Cloudflare Pages Functions)
+  // Put functions/api/news.js to enable /api/news
+  (url) => `/api/news?url=${encodeURIComponent(url)}`
 ];
 const fetchTextWithProxies = async (url, { timeoutMs = 8000 } = {}) => {
   const errors = [];
@@ -5893,7 +5889,7 @@ const fetchTextWithProxies = async (url, { timeoutMs = 8000 } = {}) => {
       const res = await fetch(proxied, { method: "GET", signal: controller?.signal });
       clearTimeout(t);
       if (res.ok) return await res.text();
-      errors.push(`${new URL(proxied).host}:${res.status}`);
+      errors.push(`${(() => { try { return new URL(proxied, window.location.href).host; } catch { return "proxy"; } })()}:${res.status}`);
     } catch (e) {
       clearTimeout(t);
       const host = (() => { try { return new URL(proxied).host; } catch { return "proxy"; } })();
@@ -6735,7 +6731,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
       ] }) }),
-      user && !activeCall && ["home","news","voom","pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "fixed bottom-0 left-0 right-0 h-20 bg-white border-t shadow-[0_-2px_10px_rgba(0,0,0,0.06)] flex items-center justify-around z-50 pt-2", style: { paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }, children: [
+      user && !activeCall && ["home","news","voom","pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-0 left-0 right-0 h-20 bg-white border-t shadow-[0_-2px_10px_rgba(0,0,0,0.06)] flex items-center justify-around z-50 pt-2", style: { paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }, children: [
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("home"), children: [
           /* @__PURE__ */ jsx(Home, { className: "w-6 h-6" }),
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u30DB\u30FC\u30E0" })
