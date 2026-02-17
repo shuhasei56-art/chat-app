@@ -5607,7 +5607,7 @@ const DiceMiniGameView = ({ user, invite, onBack, showNotification, profile }) =
     return /* @__PURE__ */ jsx("div", { className: "relative w-40 h-40 rounded-3xl bg-white shadow-inner border-4 border-gray-200", children: pips });
   };
 
-  return /* @__PURE__ */ jsxs("div", { className: "min-h-screen bg-gradient-to-b from-indigo-50 to-white p-4", children: [
+  return /* @__PURE__ */ jsxs("div", { className: "min-h-screen bg-gradient-to-b from-indigo-50 to-white p-4 pb-28", children: [
     /* @__PURE__ */ jsxs("div", { className: "max-w-md mx-auto", children: [
       /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-4", children: [
         /* @__PURE__ */ jsx("button", { onClick: onBack, className: "px-3 py-2 rounded-xl bg-white shadow border text-sm font-bold", children: "← 戻る" }),
@@ -6734,7 +6734,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
       ] }) }),
-      user && !activeCall && ["home", "voom", "pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0", children: [
+      user && !activeCall && ["home","news","voom","pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "fixed bottom-0 left-0 right-0 h-20 bg-white border-t flex items-center justify-around z-50 pb-4", children: [
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("home"), children: [
           /* @__PURE__ */ jsx(Home, { className: "w-6 h-6" }),
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u30DB\u30FC\u30E0" })
