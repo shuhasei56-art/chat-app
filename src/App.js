@@ -3835,7 +3835,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
           await addDoc(collection(db, "artifacts", appId, "public", "data", "minigame_invites"), {
             toUid: u.uid,
             fromUid: user.uid,
-            gameType: "pull_pachinko",
+            gameType: "dice",
             durationSec: 60,
             status: "pending",
             createdAt: serverTimestamp()
@@ -5480,453 +5480,165 @@ const MiniGameInviteModal = ({ invite, fromUser, onAccept, onDecline }) => {
   ] }) });
 };
 
-const ShootingMiniGameView = ({ user, invite, onBack, showNotification, profile }) => {
-  const canvasRef = useRef(null);
-  const rafRef = useRef(null);
-  const lastTsRef = useRef(0);
+const DiceMiniGameView = ({ user, invite, onBack, showNotification, profile }) => {
+  // Dice rules
+  const DURATION_SEC = 60;
+  const ROLL_COST = 10; // per roll (requested: one ball=10 coins -> here one roll)
+  const FACE_REWARDS = {
+    1: 0,
+    2: 10,
+    3: 20,
+    4: 30, // requested 30 coins exists
+    5: 40,
+    6: 60
+  };
 
-  // Game state
-  const [timeLeft, setTimeLeft] = useState(60);
   const [phase, setPhase] = useState("ready"); // ready | playing | paused | done
-  const [shotCoins, setShotCoins] = useState(0);
-  const [lastHole, setLastHole] = useState(null);
+  const [timeLeft, setTimeLeft] = useState(DURATION_SEC);
+  const [lastFace, setLastFace] = useState(null);
+  const [lastGain, setLastGain] = useState(0);
+  const [totalGain, setTotalGain] = useState(0);
+  const [rolling, setRolling] = useState(false);
 
-  // Physics refs
-  const ballRef = useRef(null); // {x,y,vx,vy,r,alive}
-  const pegsRef = useRef([]);
-  const holesRef = useRef([]);
-  const dragRef = useRef({ dragging: false, startX: 0, startY: 0, curX: 0, curY: 0 });
-
-  const W = 360;
-  const H = 520;
-  const launcher = { x: W * 0.5, y: H - 80, maxPull: 80 };
-
-  const HOLE_REWARDS = [
-    { label: "10", coins: 10 },
-    { label: "20", coins: 20 },
-    { label: "30", coins: 30 }, // requested
-    { label: "50", coins: 50 },
-    { label: "100", coins: 100 }
-  ];
-
-  const resizeCanvas = () => {
-    const c = canvasRef.current;
-    if (!c) return;
-    const parent = c.parentElement;
-    const w = Math.min(390, parent?.clientWidth || 390);
-    const h = 520;
-    const dpr = window.devicePixelRatio || 1;
-    c.width = Math.floor(w * dpr);
-    c.height = Math.floor(h * dpr);
-    c.style.width = w + "px";
-    c.style.height = h + "px";
-  };
-
-  const initBoard = () => {
-    // Pegs (simple grid)
-    const pegs = [];
-    const cols = 9;
-    const rows = 9;
-    const top = 80;
-    const left = 40;
-    const dx = (W - left * 2) / (cols - 1);
-    const dy = 36;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const jitter = r % 2 ? dx * 0.5 : 0;
-        const x = left + c * dx + jitter - (r % 2 ? dx * 0.5 : 0);
-        if (x < 22 || x > W - 22) continue;
-        pegs.push({ x, y: top + r * dy, r: 6 });
-      }
-    }
-    pegsRef.current = pegs;
-
-    // Holes at bottom
-    const holes = [];
-    const n = HOLE_REWARDS.length;
-    const pad = 24;
-    const holeW = (W - pad * 2) / n;
-    for (let i = 0; i < n; i++) {
-      holes.push({
-        x: pad + holeW * i,
-        y: H - 26,
-        w: holeW,
-        h: 26,
-        coins: HOLE_REWARDS[i].coins,
-        label: HOLE_REWARDS[i].label
-      });
-    }
-    holesRef.current = holes;
-  };
-
-  const spawnBall = () => {
-    ballRef.current = { x: launcher.x, y: launcher.y, vx: 0, vy: 0, r: 10, alive: true };
-    setLastHole(null);
-  };
-
-  const stopLoop = () => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
-  };
-
-  const startLoop = () => {
-    stopLoop();
-    lastTsRef.current = 0;
-    const step = (ts) => {
-      if (!lastTsRef.current) lastTsRef.current = ts;
-      const dt = Math.min(0.033, (ts - lastTsRef.current) / 1000);
-      lastTsRef.current = ts;
-      if (phase === "playing") {
-        setTimeLeft((t) => {
-          const nt = t - dt;
-          if (nt <= 0) {
-            setPhase("done");
-            return 0;
-          }
-          return nt;
-        });
-        updatePhysics(dt);
-      }
-      draw();
-      rafRef.current = requestAnimationFrame(step);
-    };
-    rafRef.current = requestAnimationFrame(step);
-  };
-
-  const updatePhysics = (dt) => {
-    const b = ballRef.current;
-    if (!b || !b.alive) return;
-
-    // gravity
-    b.vy += 850 * dt;
-
-    // integrate
-    b.x += b.vx * dt;
-    b.y += b.vy * dt;
-
-    // walls
-    if (b.x - b.r < 10) { b.x = 10 + b.r; b.vx *= -0.75; }
-    if (b.x + b.r > W - 10) { b.x = W - 10 - b.r; b.vx *= -0.75; }
-    if (b.y - b.r < 10) { b.y = 10 + b.r; b.vy *= -0.75; }
-
-    // pegs collisions (circle-circle)
-    const pegs = pegsRef.current;
-    for (let i = 0; i < pegs.length; i++) {
-      const p = pegs[i];
-      const dx = b.x - p.x;
-      const dy = b.y - p.y;
-      const dist = Math.hypot(dx, dy);
-      const minDist = b.r + p.r;
-      if (dist > 0 && dist < minDist) {
-        const nx = dx / dist;
-        const ny = dy / dist;
-        // push out
-        const overlap = minDist - dist;
-        b.x += nx * overlap;
-        b.y += ny * overlap;
-        // reflect velocity
-        const vn = b.vx * nx + b.vy * ny;
-        b.vx -= (1.65 * vn) * nx;
-        b.vy -= (1.65 * vn) * ny;
-        // damping
-        b.vx *= 0.985;
-        b.vy *= 0.985;
-      }
-    }
-
-    // floor / holes detection
-    if (b.y + b.r >= H - 28) {
-      const holes = holesRef.current;
-      for (const h of holes) {
-        if (b.x >= h.x && b.x <= h.x + h.w) {
-          // landed in hole area
-          b.alive = false;
-          setLastHole({ coins: h.coins, label: h.label });
-          awardCoins(h.coins);
-          return;
+  // timer
+  useEffect(() => {
+    if (phase !== "playing") return;
+    const t = setInterval(() => {
+      setTimeLeft((s) => {
+        if (s <= 1) {
+          setPhase("done");
+          return 0;
         }
-      }
-      // bounce on floor if not in hole area
-      b.y = H - 28 - b.r;
-      b.vy *= -0.55;
-      b.vx *= 0.9;
-      // if very slow, kill
-      if (Math.abs(b.vy) < 80 && Math.abs(b.vx) < 40) {
-        b.alive = false;
-      }
-    }
-  };
-
-  const awardCoins = async (coins) => {
-    try {
-      await runTransaction(db, async (t) => {
-        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-        const uDoc = await t.get(userRef);
-        if (!uDoc.exists()) {
-          // 初回利用などでユーザードキュメントが未作成の場合はここで初期化
-          t.set(userRef, {
-            uid: user.uid,
-            displayName: user.displayName || "",
-            photoURL: user.photoURL || "",
-            wallet: 0,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }, { merge: true });
-        }
-        t.update(userRef, { wallet: increment(coins) });
-        const histRef = doc(collection(db, "artifacts", appId, "public", "data", "minigame_history"));
-        t.set(histRef, { uid: user.uid, type: "pull_pachinko", coins, createdAt: serverTimestamp() });
+        return s - 1;
       });
-      showNotification(`+${coins} コイン獲得！`);
-    } catch (e) {
-      console.error(e);
-      showNotification("コイン付与に失敗しました");
-    }
-  };
+    }, 1000);
+    return () => clearInterval(t);
+  }, [phase]);
 
-  const spendBallCost = async () => {
-    // 1 ball = 10 coins
-    try {
-      await runTransaction(db, async (t) => {
-        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-        const uDoc = await t.get(userRef);
-        if (!uDoc.exists()) {
-          // 初回利用などでユーザードキュメントが未作成の場合はここで初期化
-          t.set(userRef, {
-            uid: user.uid,
-            displayName: user.displayName || "",
-            photoURL: user.photoURL || "",
-            wallet: 0,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }, { merge: true });
-        }
-        const current = (uDoc.exists() ? (uDoc.data().wallet || 0) : 0);
-        if (current < 10) throw new Error("コイン残高が足りません（球1つ=10コイン）");
-        t.update(userRef, { wallet: increment(-10) });
-      });
-      setShotCoins((c) => c + 10);
-      return true;
-    } catch (e) {
-      console.error(e);
-      showNotification(typeof e === "string" ? e : "コイン消費に失敗しました");
-      return false;
-    }
-  };
-
-  const draw = () => {
-    const c = canvasRef.current;
-    if (!c) return;
-    const ctx = c.getContext("2d");
-    if (!ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    const vw = c.width / dpr;
-    const vh = c.height / dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    // background
-    ctx.clearRect(0, 0, vw, vh);
-    ctx.fillStyle = "#0b1220";
-    ctx.fillRect(0, 0, vw, vh);
-
-    // frame
-    ctx.strokeStyle = "rgba(255,255,255,0.15)";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(10, 10, W - 20, H - 20);
-
-    // title
-    ctx.fillStyle = "rgba(255,255,255,0.9)";
-    ctx.font = "800 14px system-ui";
-    ctx.fillText("ミニパチンコ（引いて発射）", 18, 34);
-
-    // pegs
-    for (const p of pegsRef.current) {
-      ctx.beginPath();
-      ctx.fillStyle = "rgba(255,255,255,0.75)";
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // holes
-    for (const h of holesRef.current) {
-      ctx.fillStyle = "rgba(255,255,255,0.08)";
-      ctx.fillRect(h.x, h.y, h.w, h.h);
-      ctx.strokeStyle = "rgba(255,255,255,0.18)";
-      ctx.strokeRect(h.x, h.y, h.w, h.h);
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.font = "900 14px system-ui";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(`${h.coins}`, h.x + h.w / 2, h.y + h.h / 2);
-      ctx.textAlign = "left";
-      ctx.textBaseline = "alphabetic";
-    }
-
-    // launcher
-    ctx.beginPath();
-    ctx.fillStyle = "rgba(255,255,255,0.12)";
-    ctx.arc(launcher.x, launcher.y, 18, 0, Math.PI * 2);
-    ctx.fill();
-
-    // drag line
-    const dr = dragRef.current;
-    if (dr.dragging) {
-      ctx.strokeStyle = "rgba(255,255,255,0.35)";
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(launcher.x, launcher.y);
-      ctx.lineTo(dr.curX, dr.curY);
-      ctx.stroke();
-    }
-
-    // ball
-    const b = ballRef.current;
-    if (b && b.alive) {
-      ctx.beginPath();
-      ctx.fillStyle = "#ffffff";
-      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(0,0,0,0.15)";
-      ctx.stroke();
-    } else {
-      // draw ready ball at launcher
-      if (phase !== "done") {
-        ctx.beginPath();
-        ctx.fillStyle = "rgba(255,255,255,0.8)";
-        ctx.arc(launcher.x, launcher.y, 10, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
+  const reset = () => {
+    setPhase("ready");
+    setTimeLeft(DURATION_SEC);
+    setLastFace(null);
+    setLastGain(0);
+    setTotalGain(0);
+    setRolling(false);
   };
 
   const startGame = () => {
-    setTimeLeft(60);
-    setShotCoins(0);
     setPhase("playing");
-    initBoard();
-    spawnBall();
+    setTimeLeft(DURATION_SEC);
+    setLastFace(null);
+    setLastGain(0);
+    setTotalGain(0);
   };
 
   const pauseGame = () => setPhase((p) => (p === "playing" ? "paused" : p));
   const resumeGame = () => setPhase((p) => (p === "paused" ? "playing" : p));
-  const endGame = () => setPhase("done");
-
-  const handlePointerDown = (e) => {
-    if (phase !== "playing") return;
-    const c = canvasRef.current;
-    if (!c) return;
-    const rect = c.getBoundingClientRect();
-    const x = ((e.clientX ?? e.touches?.[0]?.clientX) - rect.left) * (W / rect.width);
-    const y = ((e.clientY ?? e.touches?.[0]?.clientY) - rect.top) * (H / rect.height);
-    // Only allow pull near launcher
-    const dist = Math.hypot(x - launcher.x, y - launcher.y);
-    if (dist > 42) return;
-    dragRef.current = { dragging: true, startX: x, startY: y, curX: x, curY: y };
+  const stopGame = () => {
+    setPhase("done");
+    onBack?.();
   };
 
-  const handlePointerMove = (e) => {
-    const dr = dragRef.current;
-    if (!dr.dragging) return;
-    const c = canvasRef.current;
-    if (!c) return;
-    const rect = c.getBoundingClientRect();
-    const x = ((e.clientX ?? e.touches?.[0]?.clientX) - rect.left) * (W / rect.width);
-    const y = ((e.clientY ?? e.touches?.[0]?.clientY) - rect.top) * (H / rect.height);
-    // clamp pull
-    const dx = x - launcher.x;
-    const dy = y - launcher.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist > launcher.maxPull) {
-      const s = launcher.maxPull / dist;
-      dr.curX = launcher.x + dx * s;
-      dr.curY = launcher.y + dy * s;
-    } else {
-      dr.curX = x;
-      dr.curY = y;
+  const rollDice = async () => {
+    if (phase !== "playing") return;
+    if (rolling) return;
+    setRolling(true);
+
+    const face = 1 + Math.floor(Math.random() * 6);
+    const reward = FACE_REWARDS[face] ?? 0;
+
+    try {
+      // Wallet update (atomic)
+      const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(userRef);
+        const cur = snap.exists() ? (snap.data()?.wallet || 0) : 0;
+        if (cur < ROLL_COST) {
+          throw new Error("コインが足りません");
+        }
+        const next = cur - ROLL_COST + reward;
+        tx.set(userRef, { wallet: next, updatedAt: serverTimestamp() }, { merge: true });
+      });
+
+      setLastFace(face);
+      setLastGain(reward);
+      setTotalGain((g) => g + reward);
+      if (reward > 0) showNotification(`${face} の目！ +${reward}コイン`);
+      else showNotification(`${face} の目… +0コイン`);
+    } catch (e) {
+      console.error(e);
+      const msg = (e && typeof e === "object" && "message" in e) ? e.message : "プレイに失敗しました";
+      showNotification(msg);
+    } finally {
+      setRolling(false);
     }
   };
 
-  const handlePointerUp = async () => {
-    const dr = dragRef.current;
-    if (!dr.dragging) return;
-    dr.dragging = false;
-
-    if (phase !== "playing") return;
-    // if current ball is still alive, don't fire another
-    const b = ballRef.current;
-    if (b && b.alive) return;
-
-    const ok = await spendBallCost();
-    if (!ok) return;
-
-    spawnBall();
-    const nb = ballRef.current;
-    const dx = launcher.x - dr.curX;
-    const dy = launcher.y - dr.curY;
-    // velocity opposite pull
-    const power = 10;
-    nb.vx = dx * power;
-    nb.vy = dy * power;
+  const DiceFace = ({ n }) => {
+    const pip = (x, y) => /* @__PURE__ */ jsx("span", { className: "absolute w-3 h-3 rounded-full bg-black", style: { left: x, top: y, transform: "translate(-50%, -50%)" } });
+    const c = "50%";
+    const l = "25%";
+    const r = "75%";
+    const t = "25%";
+    const b = "75%";
+    const m = "50%";
+    const pips = [];
+    if (!n) return /* @__PURE__ */ jsx("div", { className: "w-40 h-40 rounded-3xl bg-white shadow-inner border-4 border-gray-200 flex items-center justify-center text-4xl font-black text-gray-400", children: "?" });
+    if (n === 1) pips.push(pip(c, m));
+    if (n === 2) pips.push(pip(l, t), pip(r, b));
+    if (n === 3) pips.push(pip(l, t), pip(c, m), pip(r, b));
+    if (n === 4) pips.push(pip(l, t), pip(r, t), pip(l, b), pip(r, b));
+    if (n === 5) pips.push(pip(l, t), pip(r, t), pip(c, m), pip(l, b), pip(r, b));
+    if (n === 6) pips.push(pip(l, t), pip(r, t), pip(l, m), pip(r, m), pip(l, b), pip(r, b));
+    return /* @__PURE__ */ jsx("div", { className: "relative w-40 h-40 rounded-3xl bg-white shadow-inner border-4 border-gray-200", children: pips });
   };
 
-  useEffect(() => {
-    resizeCanvas();
-    initBoard();
-    startLoop();
-    window.addEventListener("resize", resizeCanvas);
-    return () => {
-      window.removeEventListener("resize", resizeCanvas);
-      stopLoop();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  return /* @__PURE__ */ jsxs("div", { className: "min-h-screen bg-gradient-to-b from-indigo-50 to-white p-4", children: [
+    /* @__PURE__ */ jsxs("div", { className: "max-w-md mx-auto", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-4", children: [
+        /* @__PURE__ */ jsx("button", { onClick: onBack, className: "px-3 py-2 rounded-xl bg-white shadow border text-sm font-bold", children: "← 戻る" }),
+        /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-gray-700", children: `残り ${timeLeft}s` })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "bg-white rounded-[28px] shadow-lg border p-5", children: [
+        /* @__PURE__ */ jsx("div", { className: "text-lg font-black text-gray-800 mb-1", children: "ミニゲーム：サイコロ" }),
+        /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500 mb-4", children: `1回 ${ROLL_COST}コイン / 制限時間 ${DURATION_SEC}秒` }),
 
-  useEffect(() => {
-    // ensure loop continues drawing even when phase changes
-    if (!rafRef.current) startLoop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
+        /* @__PURE__ */ jsx("div", { className: "flex items-center justify-center mb-4", children: /* @__PURE__ */ jsx(DiceFace, { n: lastFace }) }),
 
-  return /* @__PURE__ */ jsxs("div", { className: "w-full h-full flex flex-col", children: [
-    /* @__PURE__ */ jsxs("div", { className: "p-4 bg-white border-b flex items-center gap-3", children: [
-      /* @__PURE__ */ jsx("button", { onClick: onBack, className: "p-2 rounded-full hover:bg-gray-100", children: /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6" }) }),
-      /* @__PURE__ */ jsx("div", { className: "font-black text-lg", children: "ミニパチンコ" }),
-      /* @__PURE__ */ jsx("div", { className: "ml-auto flex items-center gap-2 bg-yellow-50 border border-yellow-100 px-3 py-1.5 rounded-full", children: /* @__PURE__ */ jsxs(Fragment, { children: [
-        /* @__PURE__ */ jsx(Coins, { className: "w-4 h-4 text-yellow-600" }),
-        /* @__PURE__ */ jsx("span", { className: "text-xs font-black text-yellow-700", children: "球=10 / 1分" })
-      ] }) })
-    ] }),
-    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto p-6 flex flex-col items-center", children: [
-      /* @__PURE__ */ jsxs("div", { className: "w-full max-w-md bg-white rounded-3xl p-5 shadow border mb-4", children: [
-        /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between", children: [
-          /* @__PURE__ */ jsxs("div", { className: "text-sm font-black text-gray-900", children: ["残り ", Math.ceil(timeLeft), " 秒"] }),
-          /* @__PURE__ */ jsx("div", { className: "text-xs font-black text-gray-500", children: `消費: ${shotCoins} コイン` })
+        /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-3 gap-2 text-center mb-4", children: [
+          /* @__PURE__ */ jsxs("div", { className: "rounded-2xl bg-gray-50 border p-3", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500", children: "直近獲得" }),
+            /* @__PURE__ */ jsx("div", { className: "text-xl font-black", children: `+${lastGain}` })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { className: "rounded-2xl bg-gray-50 border p-3", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500", children: "合計獲得" }),
+            /* @__PURE__ */ jsx("div", { className: "text-xl font-black", children: `+${totalGain}` })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { className: "rounded-2xl bg-gray-50 border p-3", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500", children: "所持コイン" }),
+            /* @__PURE__ */ jsx("div", { className: "text-xl font-black", children: `${profile?.wallet ?? 0}` })
+          ] })
         ] }),
-        lastHole && /* @__PURE__ */ jsx("div", { className: "mt-2 text-xs font-black text-green-600", children: `穴 ${lastHole.label}: +${lastHole.coins} コイン` })
-      ] }),
-      /* @__PURE__ */ jsx("div", { className: "bg-white rounded-3xl p-4 shadow border w-full max-w-md", children: /* @__PURE__ */ jsx("div", { className: "flex flex-col items-center", children: /* @__PURE__ */ jsx("canvas", {
-        ref: canvasRef,
-        className: "rounded-3xl touch-none select-none",
-        onPointerDown: handlePointerDown,
-        onPointerMove: handlePointerMove,
-        onPointerUp: handlePointerUp,
-        onPointerCancel: handlePointerUp,
-        onTouchStart: (e) => { e.preventDefault(); handlePointerDown(e.touches[0]); },
-        onTouchMove: (e) => { e.preventDefault(); handlePointerMove(e.touches[0]); },
-        onTouchEnd: (e) => { e.preventDefault(); handlePointerUp(); }
-      }) }) }),
-      /* @__PURE__ */ jsxs("div", { className: "w-full max-w-md mt-4 flex gap-3", children: [
-        phase === "ready" && /* @__PURE__ */ jsx("button", { onClick: startGame, className: "flex-1 py-3 rounded-2xl font-black text-white bg-green-500 hover:bg-green-600 shadow-lg shadow-green-200", children: "スタート" }),
-        phase === "playing" && /* @__PURE__ */ jsx("button", { onClick: pauseGame, className: "flex-1 py-3 rounded-2xl font-black text-white bg-gray-800 hover:bg-black", children: "一時停止" }),
-        phase === "paused" && /* @__PURE__ */ jsx("button", { onClick: resumeGame, className: "flex-1 py-3 rounded-2xl font-black text-white bg-green-500 hover:bg-green-600", children: "再開" }),
-        (phase === "playing" || phase === "paused") && /* @__PURE__ */ jsx("button", { onClick: endGame, className: "flex-1 py-3 rounded-2xl font-black text-white bg-red-500 hover:bg-red-600", children: "中断して終了" }),
-        phase === "done" && /* @__PURE__ */ jsx("button", { onClick: onBack, className: "flex-1 py-3 rounded-2xl font-black text-white bg-gray-800 hover:bg-black", children: "戻る" })
-      ] }),
-      /* @__PURE__ */ jsx("div", { className: "mt-3 text-center text-xs text-gray-500 font-bold", children: "白い球を引っ張って離すと発射します。球1つ=10コイン。穴の数字分のコインが獲得できます。" })
+
+        /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
+          phase === "ready" && /* @__PURE__ */ jsx("button", { onClick: startGame, className: "flex-1 py-3 rounded-2xl font-black text-white bg-indigo-600 shadow-lg shadow-indigo-200", children: "スタート" }),
+          phase === "playing" && /* @__PURE__ */ jsx("button", { onClick: rollDice, disabled: rolling, className: `flex-1 py-3 rounded-2xl font-black text-white ${rolling ? "bg-gray-300" : "bg-green-600 hover:bg-green-700"} shadow-lg`, children: rolling ? "..." : "振る" }),
+          phase === "playing" && /* @__PURE__ */ jsx("button", { onClick: pauseGame, className: "px-4 py-3 rounded-2xl font-black bg-white border shadow", children: "一時停止" }),
+          phase === "paused" && /* @__PURE__ */ jsx("button", { onClick: resumeGame, className: "flex-1 py-3 rounded-2xl font-black text-white bg-green-600 shadow-lg shadow-green-200", children: "再開" }),
+          phase === "paused" && /* @__PURE__ */ jsx("button", { onClick: stopGame, className: "px-4 py-3 rounded-2xl font-black bg-white border shadow", children: "中断" }),
+          phase === "done" && /* @__PURE__ */ jsx("button", { onClick: reset, className: "flex-1 py-3 rounded-2xl font-black text-white bg-indigo-600 shadow-lg shadow-indigo-200", children: "もう一度" }),
+          phase === "done" && /* @__PURE__ */ jsx("button", { onClick: stopGame, className: "px-4 py-3 rounded-2xl font-black bg-white border shadow", children: "戻る" })
+        ] }),
+
+        /* @__PURE__ */ jsx("div", { className: "mt-4 rounded-2xl bg-gray-50 border p-4", children: /* @__PURE__ */ jsxs("div", { className: "text-xs text-gray-600 space-y-1", children: [
+          /* @__PURE__ */ jsx("div", { className: "font-bold text-gray-700", children: "目ごとの獲得コイン" }),
+          /* @__PURE__ */ jsx("div", { children: `1 → ${FACE_REWARDS[1]} / 2 → ${FACE_REWARDS[2]} / 3 → ${FACE_REWARDS[3]}` }),
+          /* @__PURE__ */ jsx("div", { children: `4 → ${FACE_REWARDS[4]} / 5 → ${FACE_REWARDS[5]} / 6 → ${FACE_REWARDS[6]}` })
+        ] }) })
+      ] })
     ] })
   ] });
 };
-
 const PachinkoView = ({ user, profile, onBack, showNotification }) => {
   const [isSpinning, setIsSpinning] = useState(false);
   const [lastResult, setLastResult] = useState(null);
@@ -6840,7 +6552,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
         view === "sticker-create" && /* @__PURE__ */ jsx(StickerEditor, { user, profile, onClose: () => setView("sticker-store"), showNotification }),
         view === "sticker-store" && /* @__PURE__ */ jsx(StickerStoreView, { user, setView, showNotification, profile, allUsers }),
         view === "pachinko" && /* @__PURE__ */ jsx(PachinkoView, { user, profile, onBack: () => setView("home"), showNotification }),
-        view === "minigame" && /* @__PURE__ */ jsx(ShootingMiniGameView, { user, invite: miniGameInvite, onBack: () => { setView("home"); setMiniGameInvite(null); setMiniGameInviteFrom(null); }, showNotification })
+        view === "minigame" && /* @__PURE__ */ jsx(DiceMiniGameView, { user, invite: miniGameInvite, onBack: () => { setView("home"); setMiniGameInvite(null); setMiniGameInviteFrom(null); }, showNotification, profile })
       ] }),
       miniGameInvite && view !== "minigame" && /* @__PURE__ */ jsx(MiniGameInviteModal, {
         invite: miniGameInvite,
