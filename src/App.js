@@ -5872,7 +5872,30 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
 // ===================== /MiniGame + Pachinko =====================
 
 // ===== Yahoo News (RSS) + in-app article reader =====
-const toJina = (url) => `https://r.jina.ai/${url}`;
+// NOTE: Some proxies (e.g. r.jina.ai) may return 4xx depending on their rules.
+// We try multiple lightweight proxies to improve reliability without needing a custom backend.
+const _newsProxyBuilders = [
+  // AllOrigins (raw)
+  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  // r.jina.ai (sometimes blocked -> 4xx)
+  (url) => `https://r.jina.ai/${url}`,
+  // cors.isomorphic-git (best-effort)
+  (url) => `https://cors.isomorphic-git.org/${url}`
+];
+const fetchTextWithProxies = async (url) => {
+  const errors = [];
+  for (const build of _newsProxyBuilders) {
+    const proxied = build(url);
+    try {
+      const res = await fetch(proxied, { method: "GET" });
+      if (res.ok) return await res.text();
+      errors.push(`${new URL(proxied).host}:${res.status}`);
+    } catch (e) {
+      errors.push(`${new URL(proxied).host}:${e?.message || "fetch failed"}`);
+    }
+  }
+  throw new Error(`ニュースの取得に失敗しました (${errors.join(", ")})`);
+};
 const extractXml = (text) => {
   const idx = text.indexOf("<");
   return idx >= 0 ? text.slice(idx) : text;
@@ -5914,9 +5937,7 @@ const NewsView = ({ showNotification }) => {
     setArticleText("");
     try {
       const rssUrl = "https://news.yahoo.co.jp/rss/topics/top-picks.xml";
-      const res = await fetch(toJina(rssUrl));
-      if (!res.ok) throw new Error(`Yahoo RSSの取得に失敗しました (${res.status})`);
-      const text = await res.text();
+      const text = await fetchTextWithProxies(rssUrl);
       const xmlText = extractXml(text);
       const parsed = parseRssItems(xmlText);
       setItems(parsed);
@@ -5933,9 +5954,7 @@ const NewsView = ({ showNotification }) => {
     setArticleLoading(true);
     setArticleText("");
     try {
-      const res = await fetch(toJina(item.link));
-      if (!res.ok) throw new Error(`記事の取得に失敗しました (${res.status})`);
-      const htmlText = await res.text();
+      const htmlText = await fetchTextWithProxies(item.link);
       const html = extractXml(htmlText);
       const text = extractArticleTextFromHtml(html);
       setArticleText(text);
@@ -5956,13 +5975,13 @@ const NewsView = ({ showNotification }) => {
       /* @__PURE__ */ jsx("button", { onClick: () => loadYahooRss(), disabled: loading, className: "text-green-600 font-black text-sm", children: "更新" })
     ] }),
     err ? /* @__PURE__ */ jsx("div", { className: "mx-5 mt-2 p-4 rounded-2xl bg-red-50 text-red-600 font-bold text-sm", children: err }) : null,
-    !selected ? /* @__PURE__ */ jsxs("div", { className: "px-5 pb-24 overflow-y-auto h-[calc(100vh-140px)]", children: [
+    !selected ? /* @__PURE__ */ jsxs("div", { className: "px-5 pb-24", children: [
       loading ? /* @__PURE__ */ jsx("div", { className: "mt-4 text-gray-500 font-bold", children: "読み込み中..." }) : null,
       items.map((it, idx) => /* @__PURE__ */ jsxs("div", { onClick: () => openArticle(it), className: "mt-3 p-4 rounded-2xl bg-white shadow-sm border border-gray-100 cursor-pointer active:scale-[0.99] transition-transform", children: [
         /* @__PURE__ */ jsx("div", { className: "font-black text-gray-900", children: it.title }),
         /* @__PURE__ */ jsx("div", { className: "mt-1 text-[11px] font-bold text-gray-500", children: it.pubDate })
       ] }, idx))
-    ] }) : /* @__PURE__ */ jsxs("div", { className: "px-5 pb-24 overflow-y-auto h-[calc(100vh-140px)]", children: [
+    ] }) : /* @__PURE__ */ jsxs("div", { className: "px-5 pb-24", children: [
       /* @__PURE__ */ jsxs("div", { className: "flex gap-3 mt-2", children: [
         /* @__PURE__ */ jsx("button", { onClick: () => { setSelected(null); setArticleText(""); }, className: "px-4 py-2 rounded-2xl bg-gray-100 text-gray-700 font-bold", children: "← 戻る" }),
         /* @__PURE__ */ jsx("button", { onClick: () => window.open(selected.link, "_blank"), className: "px-4 py-2 rounded-2xl bg-white border border-gray-200 text-gray-800 font-bold", children: "ブラウザで開く" })
