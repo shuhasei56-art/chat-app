@@ -5662,7 +5662,17 @@ const ShootingMiniGameView = ({ user, invite, onBack, showNotification, profile 
       await runTransaction(db, async (t) => {
         const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
         const uDoc = await t.get(userRef);
-        if (!uDoc.exists()) throw new Error("ユーザーが見つかりません");
+        if (!uDoc.exists()) {
+          // 初回利用などでユーザードキュメントが未作成の場合はここで初期化
+          t.set(userRef, {
+            uid: user.uid,
+            displayName: user.displayName || "",
+            photoURL: user.photoURL || "",
+            wallet: 0,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+        }
         t.update(userRef, { wallet: increment(coins) });
         const histRef = doc(collection(db, "artifacts", appId, "public", "data", "minigame_history"));
         t.set(histRef, { uid: user.uid, type: "pull_pachinko", coins, createdAt: serverTimestamp() });
@@ -5680,8 +5690,18 @@ const ShootingMiniGameView = ({ user, invite, onBack, showNotification, profile 
       await runTransaction(db, async (t) => {
         const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
         const uDoc = await t.get(userRef);
-        if (!uDoc.exists()) throw new Error("ユーザーが見つかりません");
-        const current = uDoc.data().wallet || 0;
+        if (!uDoc.exists()) {
+          // 初回利用などでユーザードキュメントが未作成の場合はここで初期化
+          t.set(userRef, {
+            uid: user.uid,
+            displayName: user.displayName || "",
+            photoURL: user.photoURL || "",
+            wallet: 0,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+        }
+        const current = (uDoc.exists() ? (uDoc.data().wallet || 0) : 0);
         if (current < 10) throw new Error("コイン残高が足りません（球1つ=10コイン）");
         t.update(userRef, { wallet: increment(-10) });
       });
@@ -5915,7 +5935,8 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
 
   const COST = 100;
   const WIN = 500;
-  const PROB = 1 / 50;
+  const PROB_MIN = 1 / 80;
+  const PROB_MAX = 1 / 30;
 
   const SYMBOLS = useMemo(() => ["🍒", "🍋", "🔔", "💎", "BAR", "7"], []);
 
@@ -5959,19 +5980,30 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
     startSpinAnimation();
 
     try {
-      const win = Math.random() < PROB;
+      const prob = PROB_MIN + Math.random() * (PROB_MAX - PROB_MIN);
+      const win = Math.random() < prob;
       const payout = win ? WIN : 0;
       const delta = payout - COST; // net
 
       await runTransaction(db, async (t) => {
         const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
         const uDoc = await t.get(userRef);
-        if (!uDoc.exists()) throw new Error("ユーザーが見つかりません");
-        const current = uDoc.data().wallet || 0;
+        if (!uDoc.exists()) {
+          // 初回利用などでユーザードキュメントが未作成の場合はここで初期化
+          t.set(userRef, {
+            uid: user.uid,
+            displayName: user.displayName || "",
+            photoURL: user.photoURL || "",
+            wallet: 0,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+        }
+        const current = (uDoc.exists() ? (uDoc.data().wallet || 0) : 0);
         if (current < COST) throw new Error("残高不足");
-        t.update(userRef, { wallet: increment(delta) });
+        t.update(userRef, { wallet: increment(delta), updatedAt: serverTimestamp() });
         const histRef = doc(collection(db, "artifacts", appId, "public", "data", "pachinko_history"));
-        t.set(histRef, { uid: user.uid, cost: COST, win, payout, delta, createdAt: serverTimestamp() });
+        t.set(histRef, { uid: user.uid, cost: COST, win, payout, delta, prob, createdAt: serverTimestamp() });
       });
 
       // settle reels after a short delay (feel like a slot machine)
@@ -5983,7 +6015,10 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
       showNotification(win ? `当たり！ +${payout}（差分 ${delta >= 0 ? "+" : ""}${delta}）` : "ハズレ…（-100）");
     } catch (e) {
       console.error(e);
-      showNotification(typeof e === "string" ? e : "プレイに失敗しました");
+      {
+        const msg = (e && typeof e === "object" && "message" in e) ? e.message : (typeof e === "string" ? e : String(e));
+        showNotification(msg || "プレイに失敗しました");
+      }
       stopSpinAnimation();
     } finally {
       setTimeout(() => setIsSpinning(false), 250);
@@ -6029,7 +6064,7 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
               COST,
               " / 当たり ",
               WIN,
-              "（1/50）"
+              "（確率: ランダム）"
             ] }) }),
 
             /* @__PURE__ */ jsxs("div", { className: "rounded-2xl bg-gradient-to-b from-gray-200 to-gray-50 p-4 border border-gray-300 shadow-inner", children: [
