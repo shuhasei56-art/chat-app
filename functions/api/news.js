@@ -7,7 +7,10 @@ export async function onRequest(context) {
 
   try {
     const res = await fetch(rssUrl, {
-      headers: { "User-Agent": ua },
+      headers: { 
+        "User-Agent": ua,
+        "Accept": "application/xml"
+      },
       redirect: "follow",
     });
 
@@ -27,7 +30,12 @@ export async function onRequest(context) {
       const description = content.match(/<description>([\s\S]*?)<\/description>/)?.[1]?.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/, "$1") || "";
 
       if (title && link) {
-        items.push({ title, link, pubDate, desc: description });
+        items.push({ 
+          title: title.trim(), 
+          link: link.trim(), 
+          pubDate: pubDate.trim(), 
+          desc: description.trim() 
+        });
       }
     }
 
