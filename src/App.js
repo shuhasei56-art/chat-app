@@ -5932,6 +5932,9 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
   const [lastResult, setLastResult] = useState(null);
   const [reels, setReels] = useState(["🍒", "🔔", "7"]);
   const spinTimerRef = useRef(null);
+  const slotCooldownUntilRef = useRef(0);
+  const SLOT_MIN_INTERVAL_MS = 1200; // 連打/多重実行防止
+  const QUOTA_BACKOFF_MS = 30_000; // クォータ超過時の待機
 
   const COST = 100;
   const WIN = 500;
@@ -5973,8 +5976,15 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
   }, []);
 
   const playOnce = async () => {
+    const now = Date.now();
+    if (now < slotCooldownUntilRef.current) {
+      const sec = Math.ceil((slotCooldownUntilRef.current - now) / 1000);
+      return showNotification(`しばらく待ってから再試行してください（あと${sec}秒）`);
+    }
     if ((profile?.wallet || 0) < COST) return showNotification("コイン残高が足りません（1回=100コイン）");
     if (isSpinning) return;
+    // 連打対策
+    slotCooldownUntilRef.current = now + SLOT_MIN_INTERVAL_MS;
 
     setIsSpinning(true);
     startSpinAnimation();
@@ -6001,9 +6011,18 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
         }
         const current = (uDoc.exists() ? (uDoc.data().wallet || 0) : 0);
         if (current < COST) throw new Error("残高不足");
-        t.update(userRef, { wallet: increment(delta), updatedAt: serverTimestamp() });
-        const histRef = doc(collection(db, "artifacts", appId, "public", "data", "pachinko_history"));
-        t.set(histRef, { uid: user.uid, cost: COST, win, payout, delta, prob, createdAt: serverTimestamp() });
+        const lastMs = uDoc.exists() ? (uDoc.data().slotLastPlayedMs || 0) : 0;
+        const nowMs = Date.now();
+        if (nowMs - lastMs < SLOT_MIN_INTERVAL_MS) throw new Error("操作が早すぎます");
+        t.update(userRef, { slotLastPlayedMs: nowMs });
+        t.update(userRef, { wallet: increment(delta) });
+        // 履歴の毎回書き込みはクォータ超過の原因になりやすいため、集計はユーザードキュメント側に寄せます
+        t.update(userRef, {
+          slotPlays: increment(1),
+          slotWins: increment(win ? 1 : 0),
+          slotLastProb: prob,
+          updatedAt: serverTimestamp()
+        });
       });
 
       // settle reels after a short delay (feel like a slot machine)
@@ -6017,7 +6036,14 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
       console.error(e);
       {
         const msg = (e && typeof e === "object" && "message" in e) ? e.message : (typeof e === "string" ? e : String(e));
-        showNotification(msg || "プレイに失敗しました");
+        const lower = (msg || "").toLowerCase();
+        // Firestore の RESOURCE_EXHAUSTED（Quota exceeded）対策
+        if (lower.includes("quota") || lower.includes("resource_exhausted") || lower.includes("resource-exhausted") || lower.includes("exceeded")) {
+          slotCooldownUntilRef.current = Date.now() + QUOTA_BACKOFF_MS;
+          showNotification("混雑しています。30秒ほど待ってからもう一度お試しください（Quota exceeded）");
+        } else {
+          showNotification(msg || "プレイに失敗しました");
+        }
       }
       stopSpinAnimation();
     } finally {
