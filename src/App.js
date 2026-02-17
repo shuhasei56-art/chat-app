@@ -5882,16 +5882,21 @@ const _newsProxyBuilders = [
   // cors.isomorphic-git (best-effort)
   (url) => `https://cors.isomorphic-git.org/${url}`
 ];
-const fetchTextWithProxies = async (url) => {
+const fetchTextWithProxies = async (url, { timeoutMs = 8000 } = {}) => {
   const errors = [];
   for (const build of _newsProxyBuilders) {
     const proxied = build(url);
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const t = setTimeout(() => controller?.abort?.(), timeoutMs);
     try {
-      const res = await fetch(proxied, { method: "GET" });
+      const res = await fetch(proxied, { method: "GET", signal: controller?.signal });
+      clearTimeout(t);
       if (res.ok) return await res.text();
       errors.push(`${new URL(proxied).host}:${res.status}`);
     } catch (e) {
-      errors.push(`${new URL(proxied).host}:${e?.message || "fetch failed"}`);
+      clearTimeout(t);
+      const host = (() => { try { return new URL(proxied).host; } catch { return "proxy"; } })();
+      errors.push(`${host}:${e?.name === "AbortError" ? "timeout" : e?.message || "fetch failed"}`);
     }
   }
   throw new Error(`ニュースの取得に失敗しました (${errors.join(", ")})`);
@@ -5937,7 +5942,7 @@ const NewsView = ({ showNotification }) => {
     setArticleText("");
     try {
       const rssUrl = "https://news.yahoo.co.jp/rss/topics/top-picks.xml";
-      const text = await fetchTextWithProxies(rssUrl);
+      const text = await fetchTextWithProxies(rssUrl, { timeoutMs: 8000 });
       const xmlText = extractXml(text);
       const parsed = parseRssItems(xmlText);
       setItems(parsed);
@@ -5954,7 +5959,7 @@ const NewsView = ({ showNotification }) => {
     setArticleLoading(true);
     setArticleText("");
     try {
-      const htmlText = await fetchTextWithProxies(item.link);
+      const htmlText = await fetchTextWithProxies(item.link, { timeoutMs: 10000 });
       const html = extractXml(htmlText);
       const text = extractArticleTextFromHtml(html);
       setArticleText(text);
@@ -5969,19 +5974,19 @@ const NewsView = ({ showNotification }) => {
     loadYahooRss();
   }, [loadYahooRss]);
 
-  return /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden relative", children: [
+  return /* @__PURE__ */ jsxs("div", { className: "h-full flex flex-col bg-gray-50", children: [
     /* @__PURE__ */ jsxs("div", { className: "px-5 pt-6 pb-3 flex items-center justify-between", children: [
       /* @__PURE__ */ jsx("div", { className: "text-2xl font-black text-gray-900", children: "ニュース" }),
       /* @__PURE__ */ jsx("button", { onClick: () => loadYahooRss(), disabled: loading, className: "text-green-600 font-black text-sm", children: "更新" })
     ] }),
     err ? /* @__PURE__ */ jsx("div", { className: "mx-5 mt-2 p-4 rounded-2xl bg-red-50 text-red-600 font-bold text-sm", children: err }) : null,
-    !selected ? /* @__PURE__ */ jsxs("div", { className: "px-5 pb-24", children: [
+    !selected ? /* @__PURE__ */ jsxs("div", { className: "px-5 pb-28 flex-1 overflow-y-auto scrollbar-hide", children: [
       loading ? /* @__PURE__ */ jsx("div", { className: "mt-4 text-gray-500 font-bold", children: "読み込み中..." }) : null,
       items.map((it, idx) => /* @__PURE__ */ jsxs("div", { onClick: () => openArticle(it), className: "mt-3 p-4 rounded-2xl bg-white shadow-sm border border-gray-100 cursor-pointer active:scale-[0.99] transition-transform", children: [
         /* @__PURE__ */ jsx("div", { className: "font-black text-gray-900", children: it.title }),
         /* @__PURE__ */ jsx("div", { className: "mt-1 text-[11px] font-bold text-gray-500", children: it.pubDate })
       ] }, idx))
-    ] }) : /* @__PURE__ */ jsxs("div", { className: "px-5 pb-24", children: [
+    ] }) : /* @__PURE__ */ jsxs("div", { className: "px-5 pb-28 flex-1 overflow-y-auto scrollbar-hide", children: [
       /* @__PURE__ */ jsxs("div", { className: "flex gap-3 mt-2", children: [
         /* @__PURE__ */ jsx("button", { onClick: () => { setSelected(null); setArticleText(""); }, className: "px-4 py-2 rounded-2xl bg-gray-100 text-gray-700 font-bold", children: "← 戻る" }),
         /* @__PURE__ */ jsx("button", { onClick: () => window.open(selected.link, "_blank"), className: "px-4 py-2 rounded-2xl bg-white border border-gray-200 text-gray-800 font-bold", children: "ブラウザで開く" })
