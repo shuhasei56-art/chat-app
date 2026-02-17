@@ -5936,14 +5936,13 @@ const NewsView = ({ showNotification }) => {
   setLoading(true);
   setErr("");
   try {
-    // 自作のAPIからJSONを直接受け取る
+    // news.js が JSON を返すので、fetch するだけでOK
     const res = await fetch("/api/news");
-    if (!res.ok) throw new Error("APIレスポンスが異常です");
+    if (!res.ok) throw new Error();
     const data = await res.json();
     setItems(data);
   } catch (e) {
-    console.error(e);
-    setErr("ニュースの取得に失敗しました。");
+    setErr("ニュースを取得できません。サーバー設定を確認してください。");
   } finally {
     setLoading(false);
   }
