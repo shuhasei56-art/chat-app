@@ -106,6 +106,8 @@ import {
   ScreenShare,
   ScreenShareOff,
   AlertCircle
+,
+  Newspaper
 } from "lucide-react";
 const firebaseConfig = {
   apiKey: "AIzaSyAGd-_Gg6yMwcKv6lvjC3r8_4LL0-tJn10",
@@ -4774,6 +4776,75 @@ const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, a
     ] })
   ] });
 };
+
+const NewsView = ({ setView }) => {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+
+  const sources = useMemo(() => [
+    { id: "nhk", name: "NHK", url: "https://www3.nhk.or.jp/rss/news/cat0.xml" },
+    { id: "itmedia", name: "ITmedia", url: "https://rss.itmedia.co.jp/rss/2.0/news_bursts.xml" }
+  ], []);
+
+  const fetchNews = useCallback(async () => {
+    try {
+      setErr("");
+      setLoading(true);
+      // CORS回避のために jina.ai のプロキシを利用（RSSの中身をそのまま取得してDOMParserで解析）
+      const fetched = await Promise.all(
+        sources.map(async (s) => {
+          const proxied = `https://r.jina.ai/http(s)://${s.url.replace(/^https?:\/\//, "")}`;
+          const res = await fetch(proxied);
+          if (!res.ok) throw new Error(`${s.name} の取得に失敗しました (${res.status})`);
+          const text = await res.text();
+          const xmlText = text.replace(/^[\s\S]*?<\?xml/, "<?xml"); // 念のため先頭の余計な文字を除去
+          const doc = new DOMParser().parseFromString(xmlText, "text/xml");
+          const nodes = Array.from(doc.querySelectorAll("item")).slice(0, 20);
+          return nodes.map((n) => ({
+            title: (n.querySelector("title")?.textContent || "").trim(),
+            link: (n.querySelector("link")?.textContent || "").trim(),
+            pubDate: (n.querySelector("pubDate")?.textContent || "").trim(),
+            source: s.name
+          })).filter((x) => x.title && x.link);
+        })
+      );
+      const merged = fetched.flat().map((x) => ({
+        ...x,
+        ts: Date.parse(x.pubDate) || Date.now()
+      })).sort((a, b) => b.ts - a.ts);
+      setItems(merged.slice(0, 50));
+    } catch (e) {
+      setErr(e?.message || "ニュースの取得に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  }, [sources]);
+
+  useEffect(() => {
+    fetchNews();
+  }, [fetchNews]);
+
+  return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-gray-50", children: [
+    /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 border-b shrink-0 flex items-center gap-3", children: [
+      /* @__PURE__ */ jsx("h1", { className: "text-xl font-bold flex-1", children: "ニュース" }),
+      /* @__PURE__ */ jsx("button", { onClick: fetchNews, className: "text-sm font-bold text-green-600", children: "更新" })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto scrollbar-hide pb-20", children: [
+      loading && /* @__PURE__ */ jsx("div", { className: "p-6 text-center text-gray-500", children: "読み込み中..." }),
+      err && /* @__PURE__ */ jsx("div", { className: "p-4 m-4 bg-red-50 text-red-700 rounded-2xl text-sm", children: err }),
+      !loading && !err && items.length === 0 && /* @__PURE__ */ jsx("div", { className: "p-6 text-center text-gray-500", children: "ニュースがありません" }),
+      /* @__PURE__ */ jsx("div", { className: "p-4 space-y-3", children: items.map((it, i) => /* @__PURE__ */ jsxs("button", { className: "w-full text-left bg-white rounded-2xl p-4 shadow-sm border hover:bg-gray-50 transition", onClick: () => window.open(it.link, "_blank", "noopener,noreferrer"), children: [
+        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 mb-1", children: [
+          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-700", children: it.source }),
+          it.pubDate && /* @__PURE__ */ jsx("span", { className: "text-[10px] text-gray-400", children: it.pubDate })
+        ] }),
+        /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-gray-900 leading-snug", children: it.title })
+      ] }, i)) })
+    ] })
+  ] });
+};
+
 const ProfileEditView = ({ user, profile, setView, showNotification, copyToClipboard }) => {
   const [edit, setEdit] = useState(profile || {});
   useEffect(() => {
@@ -6557,6 +6628,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
         ] })
       ] }) : /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden relative", children: [
         view === "home" && /* @__PURE__ */ jsx(HomeView, { user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }),
+        view === "news" && /* @__PURE__ */ jsx(NewsView, { setView }),
         view === "voom" && /* @__PURE__ */ jsx(VoomView, { user, allUsers, profile, posts, showNotification, db, appId, onLoadMore: loadMorePosts, hasMore: postsHasMore, loadingMore: postsLoadingMore }),
         view === "chatroom" && /* @__PURE__ */ jsx(ChatRoomView, { user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startChatWithUser, startVideoCall }),
         view === "profile" && /* @__PURE__ */ jsx(ProfileEditView, { user, profile, setView, showNotification, copyToClipboard }),
@@ -6602,10 +6674,14 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
       ] }) }),
-      user && !activeCall && ["home", "voom", "pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0", children: [
+      user && !activeCall && ["home", "news", "voom", "pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0", children: [
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("home"), children: [
           /* @__PURE__ */ jsx(Home, { className: "w-6 h-6" }),
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u30DB\u30FC\u30E0" })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "news" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("news"), children: [
+          /* @__PURE__ */ jsx(Newspaper, { className: "w-6 h-6" }),
+          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "ニュース" })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "voom" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("voom"), children: [
           /* @__PURE__ */ jsx(LayoutGrid, { className: "w-6 h-6" }),
