@@ -1,44 +1,46 @@
-// functions/api/news.js  (Cloudflare Pages Functions)
-//
-// これをリポジトリの「functions/api/news.js」に置いてください。
-// デプロイ後、 /api/news?url=... が使えるようになります。
+// functions/api/news.js (Cloudflare Pages Functions)
+// YahooニュースのRSSをJSONに変換して返すAPI
 
 export async function onRequest(context) {
-  const u = new URL(context.request.url);
-  const target = u.searchParams.get("url");
-  if (!target) return new Response("missing url", { status: 400 });
+  const rssUrl = "https://news.yahoo.co.jp/rss/topics/top-picks.xml";
+  const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36";
 
-  let targetUrl;
   try {
-    targetUrl = new URL(target);
-  } catch {
-    return new Response("bad url", { status: 400 });
+    const res = await fetch(rssUrl, {
+      headers: { "User-Agent": ua },
+      redirect: "follow",
+    });
+
+    if (!res.ok) throw new Error(`Yahoo RSS error: ${res.status}`);
+
+    const xmlText = await res.text();
+
+    // シンプルな正規表現によるXML -> JSON変換（ライブラリ不要）
+    const items = [];
+    const itemMatches = xmlText.matchAll(/<item>([\s\S]*?)<\/item>/g);
+
+    for (const match of itemMatches) {
+      const content = match[1];
+      const title = content.match(/<title>([\s\S]*?)<\/title>/)?.[1]?.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/, "$1") || "";
+      const link = content.match(/<link>([\s\S]*?)<\/link>/)?.[1] || "";
+      const pubDate = content.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || "";
+      const description = content.match(/<description>([\s\S]*?)<\/description>/)?.[1]?.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/, "$1") || "";
+
+      if (title && link) {
+        items.push({ title, link, pubDate, desc: description });
+      }
+    }
+
+    return new Response(JSON.stringify(items), {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
-
-  // SSRF対策：Yahooのみ許可（必要なら追加）
-  const allow = new Set(["news.yahoo.co.jp", "headlines.yahoo.co.jp"]);
-  if (!allow.has(targetUrl.hostname)) return new Response("blocked host", { status: 403 });
-
-  const ua =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36";
-
-  const res = await fetch(target, {
-    headers: {
-      "User-Agent": ua,
-      Accept: "text/html,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-    },
-    redirect: "follow",
-  });
-
-  const contentType = res.headers.get("content-type") || "text/plain";
-  const body = await res.arrayBuffer();
-
-  return new Response(body, {
-    status: res.status,
-    headers: {
-      "content-type": contentType,
-      "cache-control": "public, max-age=60",
-    },
-  });
 }
