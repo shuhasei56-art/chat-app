@@ -4781,10 +4781,13 @@ const NewsView = ({ setView }) => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [openArticle, setOpenArticle] = useState(null);
+  const [articleLoading, setArticleLoading] = useState(false);
+  const [articleErr, setArticleErr] = useState("");
+  const [articleBody, setArticleBody] = useState("");
 
   const sources = useMemo(() => [
-    { id: "nhk", name: "NHK", url: "https://www3.nhk.or.jp/rss/news/cat0.xml" },
-    { id: "itmedia", name: "ITmedia", url: "https://rss.itmedia.co.jp/rss/2.0/news_bursts.xml" }
+    { id: "yahoo", name: "Yahoo!ニュース", url: "https://news.yahoo.co.jp/rss/topics/top-picks.xml" }
   ], []);
 
   const fetchNews = useCallback(async () => {
@@ -4825,7 +4828,54 @@ const NewsView = ({ setView }) => {
     fetchNews();
   }, [fetchNews]);
 
-  return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-gray-50", children: [
+  
+useEffect(() => {
+  let cancelled = false;
+  const run = async () => {
+    if (!openArticle) return;
+    try {
+      setArticleErr("");
+      setArticleBody("");
+      setArticleLoading(true);
+      // Yahoo記事本文は iframe 埋め込みがブロックされることが多いため、jina.ai 経由でHTMLを取得して簡易リーダー表示します。
+      const url = openArticle.link;
+      const proxied = `https://r.jina.ai/http(s)://${url.replace(/^https?:\/\//, "")}`;
+      const res = await fetch(proxied);
+      if (!res.ok) throw new Error(`記事の取得に失敗しました (${res.status})`);
+      const text = await res.text();
+      const html = text.replace(/^[\s\S]*?<(!doctype|html|\?xml)/i, "<$1");
+      const doc = new DOMParser().parseFromString(html, "text/html");
+
+      const title = (doc.querySelector("meta[property='og:title']")?.getAttribute("content") || openArticle.title || "").trim();
+      const site = (doc.querySelector("meta[property='og:site_name']")?.getAttribute("content") || "").trim();
+
+      // 本文っぽい箇所を優先的に拾う（article内のp → それ以外のp）
+      const pickParagraphs = (root) => Array.from(root.querySelectorAll("p"))
+        .map(p => (p.textContent || "").replace(/\s+/g, " ").trim())
+        .filter(t => t.length >= 20)
+        .slice(0, 60);
+
+      let paras = [];
+      const articleEl = doc.querySelector("article");
+      if (articleEl) paras = pickParagraphs(articleEl);
+      if (paras.length < 3) paras = pickParagraphs(doc);
+
+      const bodyText = paras.join("\n\n");
+      if (!bodyText) throw new Error("記事本文を取得できませんでした（外部表示に切り替えてください）");
+
+      if (!cancelled) {
+        setArticleBody([title && `# ${title}`, site && `_${site}_`, bodyText].filter(Boolean).join("\n\n"));
+      }
+    } catch (e) {
+      if (!cancelled) setArticleErr(e?.message || "記事の取得に失敗しました");
+    } finally {
+      if (!cancelled) setArticleLoading(false);
+    }
+  };
+  run();
+  return () => { cancelled = true; };
+}, [openArticle]);
+return /* @__PURE__ */ jsxs("div", { className: "flex flex-col h-full bg-gray-50", children: [
     /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 border-b shrink-0 flex items-center gap-3", children: [
       /* @__PURE__ */ jsx("h1", { className: "text-xl font-bold flex-1", children: "ニュース" }),
       /* @__PURE__ */ jsx("button", { onClick: fetchNews, className: "text-sm font-bold text-green-600", children: "更新" })
@@ -4834,7 +4884,7 @@ const NewsView = ({ setView }) => {
       loading && /* @__PURE__ */ jsx("div", { className: "p-6 text-center text-gray-500", children: "読み込み中..." }),
       err && /* @__PURE__ */ jsx("div", { className: "p-4 m-4 bg-red-50 text-red-700 rounded-2xl text-sm", children: err }),
       !loading && !err && items.length === 0 && /* @__PURE__ */ jsx("div", { className: "p-6 text-center text-gray-500", children: "ニュースがありません" }),
-      /* @__PURE__ */ jsx("div", { className: "p-4 space-y-3", children: items.map((it, i) => /* @__PURE__ */ jsxs("button", { className: "w-full text-left bg-white rounded-2xl p-4 shadow-sm border hover:bg-gray-50 transition", onClick: () => window.open(it.link, "_blank", "noopener,noreferrer"), children: [
+      /* @__PURE__ */ jsx("div", { className: "p-4 space-y-3", children: items.map((it, i) => /* @__PURE__ */ jsxs("button", { className: "w-full text-left bg-white rounded-2xl p-4 shadow-sm border hover:bg-gray-50 transition", onClick: () => setOpenArticle(it), children: [
         /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 mb-1", children: [
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-700", children: it.source }),
           it.pubDate && /* @__PURE__ */ jsx("span", { className: "text-[10px] text-gray-400", children: it.pubDate })
@@ -4842,6 +4892,23 @@ const NewsView = ({ setView }) => {
         /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-gray-900 leading-snug", children: it.title })
       ] }, i)) })
     ] })
+
+,
+openArticle && /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center", children:
+  /* @__PURE__ */ jsxs("div", { className: "w-full sm:max-w-3xl bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl max-h-[92vh] flex flex-col", children: [
+    /* @__PURE__ */ jsxs("div", { className: "p-4 border-b flex items-center gap-3", children: [
+      /* @__PURE__ */ jsx("button", { onClick: () => setOpenArticle(null), className: "text-sm font-bold text-gray-700", children: "戻る" }),
+      /* @__PURE__ */ jsx("div", { className: "font-bold text-gray-900 truncate flex-1", children: openArticle.title }),
+      /* @__PURE__ */ jsx("button", { onClick: () => window.open(openArticle.link, "_blank", "noopener,noreferrer"), className: "text-sm font-bold text-blue-600", children: "ブラウザで開く" })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto p-4", children: [
+      articleLoading && /* @__PURE__ */ jsx("div", { className: "text-center text-gray-500 py-10", children: "記事を読み込み中..." }),
+      articleErr && /* @__PURE__ */ jsx("div", { className: "p-4 bg-red-50 text-red-700 rounded-2xl text-sm", children: articleErr }),
+      !articleLoading && !articleErr && articleBody && /* @__PURE__ */ jsx("div", { className: "prose max-w-none", children: articleBody.split(/\n\n/).map((blk, idx2) => blk.startsWith("# ") ? /* @__PURE__ */ jsx("h2", { className: "text-lg font-black mb-3", children: blk.replace(/^#\s*/, "") }, idx2) : blk.startsWith("_") && blk.endsWith("_") ? /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500 mb-4", children: blk.replace(/^_+|_+$/g, "") }, idx2) : /* @__PURE__ */ jsx("p", { className: "text-sm text-gray-900 leading-relaxed mb-3 whitespace-pre-wrap", children: blk }, idx2)) })
+    ] })
+  ] })
+})
+
   ] });
 };
 
