@@ -594,6 +594,16 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const hasRemoteVideoTrackRef = useRef(false);
   const sessionId = callData?.sessionId || "";
   const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData?.callerId === user.uid;
+  const remoteUid = useMemo(() => {
+    if (!callData) return null;
+    if (isCaller) return callData?.acceptedBy || callData?.answererId || null;
+    return callData?.callerId || null;
+  }, [callData, isCaller]);
+  const remoteEffectName = useMemo(() => {
+    if (!remoteUid) return "Normal";
+    const map = callData?.effects || {};
+    return map?.[remoteUid] || "Normal";
+  }, [callData, remoteUid]);
   const getFilterStyle = (effectName) => {
     if (!effectName || effectName === "Normal") return "none";
     const sanitizeFilter = (filterValue) => {
@@ -1146,7 +1156,10 @@ const toggleScreenShare = async () => {
       /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true }),
     /* @__PURE__ */ jsxs("div", { className: "relative flex-1 flex items-center justify-center backdrop-blur-md bg-black/30", children: [
       /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "hidden" }),
-      remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover" }) : /* @__PURE__ */ jsxs("div", { className: "text-white flex flex-col items-center gap-4", children: [
+      remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover", style: { filter: getFilterStyle(remoteEffectName) } }),
+        remoteEffectName && remoteEffectName !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute top-3 left-3 bg-black/50 text-white text-[10px] px-2 py-1 rounded-full", children: `相手: ${remoteEffectName}` })
+      ] }) : /* @__PURE__ */ jsxs("div", { className: "text-white flex flex-col items-center gap-4", children: [
         /* @__PURE__ */ jsx("div", { className: "w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center animate-pulse", children: /* @__PURE__ */ jsx(User, { className: "w-10 h-10" }) }),
         /* @__PURE__ */ jsx("p", { className: "font-bold text-lg drop-shadow-md", children: remoteStream ? isVideoEnabled ? "\u30D3\u30C7\u30AA\u3092\u53D7\u4FE1\u4E2D..." : "\u97F3\u58F0\u901A\u8A71\u4E2D..." : "\u63A5\u7D9A\u4E2D..." })
       ] }),
@@ -1275,7 +1288,8 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
           name: user.displayName || "",
           joinedAt: serverTimestamp(),
           videoEnabled: !!isVideoEnabled,
-          screenSharing: false
+          screenSharing: false,
+          effect: activeEffect || "Normal"
         }, { merge: true });
 
         const unsubParts = onSnapshot(collection(sessionRef, "participants"), (snap) => {
@@ -1545,7 +1559,8 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
       /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true }),
     /* @__PURE__ */ jsx("div", { className: "flex-1 relative overflow-hidden", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : void 0, backgroundSize: "cover", backgroundPosition: "center" }, children: /* @__PURE__ */ jsx("div", { className: "w-full h-full p-2", style: { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: "8px" }, children: tiles.map((t) => {
       const isLocal = t.isLocal;
-      const filter = isLocal ? getFilterStyle(activeEffect) : "none";
+      const remoteEf = participants.find((p) => p.uid === t.uid)?.effect || "Normal";
+      const filter = isLocal ? getFilterStyle(activeEffect) : getFilterStyle(remoteEf);
       return /* @__PURE__ */ jsxs("div", { className: "relative bg-black rounded-xl overflow-hidden border border-white/10", children: [
         /* @__PURE__ */ jsx("video", { ref: (el) => {
           if (!el) return;
@@ -1555,7 +1570,10 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
           el.autoplay = true;
           try { el.play(); } catch { }
         }, className: "w-full h-full object-cover", style: { filter, transform: isLocal ? "scaleX(-1)" : void 0 }, autoPlay: true, playsInline: true }),
-        /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/40 text-white text-[10px] px-2 py-0.5 rounded-full", children: isLocal ? "You" : (participants.find((p) => p.uid === t.uid)?.name || t.uid.slice(0, 6)) })
+        /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/40 text-white text-[10px] px-2 py-0.5 rounded-full", children: isLocal ? "You" : (participants.find((p) => p.uid === t.uid)?.name || t.uid.slice(0, 6)) }),
+        !isLocal && remoteEf && remoteEf !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute top-2 left-2 bg-black/50 text-white text-[10px] px-2 py-0.5 rounded-full", children: remoteEf })
+      ] })
       ] }, t.uid);
     }) }) }),
     /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-6 pb-6 backdrop-blur-lg", children: [
@@ -6512,7 +6530,8 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           name: profile?.name || user.displayName || "",
           joinedAt: serverTimestamp(),
           videoEnabled: !!isVideo,
-          screenSharing: false
+          screenSharing: false,
+          effect: activeEffect || "Normal"
         }, { merge: true });
       } catch (e) {
         console.warn("Failed to join group call presence (non-fatal):", e);
@@ -6542,7 +6561,8 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           callerId: user.uid,
           callType,
           sessionId,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          effects: { [user.uid]: activeEffect || "Normal" }
         }
       });
 
@@ -6588,7 +6608,8 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           callerId: user.uid,
           callType,
           sessionId,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          effects: { [user.uid]: activeEffect || "Normal" }
         }
       });
       setActiveCall({
@@ -6630,6 +6651,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
       const callData = activeCallChat?.callStatus || activeCall.callData || {};
       const nextCallData = {
         ...callData,
+        effects: { ...(callData?.effects || {}), [user.uid]: activeEffect || "Normal" },
         status: "accepted",
         callerId: callData.callerId,
         callType: callData.callType || (activeCall?.isVideo ? "video" : "audio"),
@@ -6666,6 +6688,33 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
     }
     return activeCall.phase || null;
   }, [activeCall, syncedCallData, user?.uid]);
+
+  // Sync video effect to the other side (so the effect is visible on both clients)
+  useEffect(() => {
+    if (!user?.uid) return;
+    if (!activeCall) return;
+    if (effectiveCallPhase !== "inCall") return;
+    const chatId = activeCall.chatId;
+    const sessionId = syncedCallData?.sessionId || activeCall?.callData?.sessionId || null;
+
+    const timer = setTimeout(async () => {
+      try {
+        if (activeCall.isGroupCall) {
+          if (!sessionId) return;
+          const pRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "group_calls", sessionId, "participants", user.uid);
+          await setDoc(pRef, { effect: activeEffect || "Normal", updatedAt: serverTimestamp() }, { merge: true });
+        } else {
+          const chatRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId);
+          await updateDoc(chatRef, { [`callStatus.effects.${user.uid}`]: activeEffect || "Normal", "callStatus.updatedAt": Date.now() });
+        }
+      } catch (e) {
+        console.warn("Failed to sync effect (non-fatal):", e);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [activeEffect, activeCall?.chatId, activeCall?.isGroupCall, syncedCallData?.sessionId, effectiveCallPhase, user?.uid]);
+
   return /* @__PURE__ */ jsx("div", { className: "w-full h-[100dvh] bg-[#d7dbe1] flex justify-center overflow-hidden", children: /* @__PURE__ */ jsxs("div", { className: "w-[430px] max-w-full h-[100dvh] bg-[#f3f4f6] border-x border-gray-300 flex flex-col relative overflow-hidden", children: [
     notification && /* @__PURE__ */ jsx("div", { className: "fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce", children: notification }),
     !user ? /* @__PURE__ */ jsx(AuthView, { onLogin: setUser, showNotification }) : /* @__PURE__ */ jsxs(Fragment, { children: [
