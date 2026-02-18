@@ -1,8 +1,3 @@
-// functions/api/news.js  (Cloudflare Pages Functions)
-//
-// これをリポジトリの「functions/api/news.js」に置いてください。
-// デプロイ後、 /api/news?url=... が使えるようになります。
-
 export async function onRequest(context) {
   const u = new URL(context.request.url);
   const target = u.searchParams.get("url");
@@ -15,7 +10,6 @@ export async function onRequest(context) {
     return new Response("bad url", { status: 400 });
   }
 
-  // SSRF対策：Yahooのみ許可（必要なら追加）
   const allow = new Set(["news.yahoo.co.jp", "headlines.yahoo.co.jp"]);
   if (!allow.has(targetUrl.hostname)) return new Response("blocked host", { status: 403 });
 
