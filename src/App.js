@@ -1,4 +1,5 @@
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
+import News from "./news";
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import {
@@ -538,21 +539,21 @@ const handleGuestLogin = async () => {
       !isLoginMode && /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
         /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-gray-400 ml-2", children: "\u8868\u793A\u540D" }),
         /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border", children: [
-          /* @__PURE__ */ jsx(User, { className: "w-3 h-3 text-gray-400" }),
+          /* @__PURE__ */ jsx(User, { className: "w-4 h-4 text-gray-400" }),
           /* @__PURE__ */ jsx("input", { className: "bg-transparent w-full outline-none text-sm font-bold", placeholder: "\u5C71\u7530 \u592A\u90CE", value: displayName, onChange: (e) => setDisplayName(e.target.value) })
         ] })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
         /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-gray-400 ml-2", children: "\u30E6\u30FC\u30B6\u30FCID" }),
         /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border", children: [
-          /* @__PURE__ */ jsx(AtSign, { className: "w-3 h-3 text-gray-400" }),
+          /* @__PURE__ */ jsx(AtSign, { className: "w-4 h-4 text-gray-400" }),
           /* @__PURE__ */ jsx("input", { className: "bg-transparent w-full outline-none text-sm font-bold", placeholder: "user_id", value: userId, onChange: (e) => setUserId(e.target.value) })
         ] })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
         /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-gray-400 ml-2", children: "\u30D1\u30B9\u30EF\u30FC\u30C9" }),
         /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border", children: [
-          /* @__PURE__ */ jsx(KeyRound, { className: "w-3 h-3 text-gray-400" }),
+          /* @__PURE__ */ jsx(KeyRound, { className: "w-4 h-4 text-gray-400" }),
           /* @__PURE__ */ jsx("input", { className: "bg-transparent w-full outline-none text-sm font-bold", type: "password", placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022", value: password, onChange: (e) => setPassword(e.target.value) })
         ] })
       ] }),
@@ -2406,7 +2407,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
         ] }),
         m.type === "contact" && /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2 min-w-[150px] p-1", children: [
           /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-400 mb-1 border-b border-gray-100 pb-1", children: "\u9023\u7D61\u5148" }),
-          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
             /* @__PURE__ */ jsx("img", { src: m.contactAvatar, className: "w-10 h-10 rounded-full border shadow-sm", loading: "lazy" }),
             /* @__PURE__ */ jsx("span", { className: "font-bold text-sm truncate", children: m.contactName })
           ] }),
@@ -2608,7 +2609,7 @@ useEffect(() => {
 
   return /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2 border-b", children: [
     /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-3", children: [
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
         /* @__PURE__ */ jsxs("div", { className: "relative", children: [
         /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
         isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
@@ -3575,18 +3576,6 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       setPurchasing(null);
     }
   };
-const handleDeletePack = async (pack) => {
-  if (!pack || pack.authorId !== user.uid) return;
-  const ok = window.confirm("このスタンプを削除しますか？（購入済みの人は使えなくなります）");
-  if (!ok) return;
-  try {
-    await deleteDoc(doc(db, "artifacts", appId, "public", "data", "sticker_packs", pack.id));
-    showNotification("スタンプを削除しました");
-  } catch (e) {
-    console.error(e);
-    showNotification("削除に失敗しました");
-  }
-};
   const handleApprove = async (packId, authorId, approve) => {
     try {
       await runTransaction(db, async (transaction) => {
@@ -3804,7 +3793,7 @@ const handleDeletePack = async (pack) => {
               pack.description && /* @__PURE__ */ jsx("p", { className: "text-xs text-gray-400 bg-gray-50 p-2 rounded-lg mb-2", children: pack.description })
             ] }),
             !isOwned && activeTab === "shop" && /* @__PURE__ */ jsx("button", { onClick: () => handleBuy(pack), disabled: purchasing === pack.id, className: "bg-green-500 text-white px-4 py-2 rounded-full font-bold text-xs shadow-md hover:bg-green-600 disabled:bg-gray-300 shrink-0 ml-2", children: purchasing === pack.id ? /* @__PURE__ */ jsx(Loader2, { className: "w-4 h-4 animate-spin" }) : `\xA5${pack.price}` }),
-            isOwned && activeTab === "shop" && /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 shrink-0 ml-2", children: [/* @__PURE__ */ jsx("span", { className: "bg-gray-100 text-gray-500 px-3 py-1 rounded-full text-xs font-bold", children: "入手済み" }), pack.authorId === user.uid && /* @__PURE__ */ jsx("button", { onClick: () => handleDeletePack(pack), className: "bg-red-50 text-red-600 px-3 py-1 rounded-full text-xs font-bold", children: "削除" })] })
+            isOwned && activeTab === "shop" && /* @__PURE__ */ jsx("span", { className: "bg-gray-100 text-gray-500 px-3 py-1 rounded-full text-xs font-bold shrink-0 ml-2", children: "\u5165\u624B\u6E08\u307F" })
           ] }),
           /* @__PURE__ */ jsx("div", { className: "flex gap-2 overflow-x-auto pb-2 scrollbar-hide", children: pack.stickers.map((s, i) => /* @__PURE__ */ jsxs("div", { className: "relative flex-shrink-0", children: [
             /* @__PURE__ */ jsx(
@@ -4564,7 +4553,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u9001\u91D1" })
       ] })
     ] }),
-    !groupSettingsOpen && /* @__PURE__ */ jsxs("div", { className: "px-2 py-1.5 bg-[#f1f2f4] border-t border-gray-300 flex flex-col gap-1 relative z-10", children: [
+    !groupSettingsOpen && /* @__PURE__ */ jsxs("div", { className: "px-3 py-2 bg-[#f1f2f4] border-t border-gray-300 flex flex-col gap-1.5 relative z-10", children: [
       stickerMenuOpen && myStickerPacks.length > 0 && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-full left-0 right-0 bg-gray-50 border-t h-72 flex flex-col shadow-2xl rounded-t-3xl overflow-hidden animate-in slide-in-from-bottom-2 z-20", children: [
         /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-4 content-start", children: myStickerPacks.find((p) => p.id === selectedPackId)?.stickers.map((s, i) => /* @__PURE__ */ jsxs("div", { className: "relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm", onClick: () => sendMessage(s, "sticker", { packId: selectedPackId }), children: [
           /* @__PURE__ */ jsx("img", { src: typeof s === "string" ? s : s.image, className: "w-full aspect-square object-contain" }),
@@ -4586,19 +4575,19 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         ] }),
         /* @__PURE__ */ jsx("button", { onClick: () => setReplyTo(null), className: "p-1 hover:bg-gray-200 rounded-full", children: /* @__PURE__ */ jsx(X, { className: "w-4 h-4 text-gray-500" }) })
       ] }),
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-        /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: "p-0.5", children: /* @__PURE__ */ jsx(Plus, { className: "w-3 h-3 text-gray-400" }) }),
-        !isRecording ? /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-3 py-1 text-[13px] leading-none focus:outline-none placeholder:text-[#9ca3af]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-full px-3 py-1 flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-[11px]", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+        /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: "p-1", children: /* @__PURE__ */ jsx(Plus, { className: "w-6 h-6 text-gray-400" }) }),
+        !isRecording ? /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-4 py-2 text-sm leading-none focus:outline-none placeholder:text-[#9ca3af]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-full px-4 py-2 flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-[11px]", children: [
           /* @__PURE__ */ jsx("div", { className: "w-2 h-2 rounded-full bg-red-500 animate-ping" }),
           "\u9332\u97F3\u4E2D... ",
           Math.floor(recordingTime / 60),
           ":",
           (recordingTime % 60).toString().padStart(2, "0")
         ] }) }),
-        /* @__PURE__ */ jsx("button", { onClick: () => setStickerMenuOpen(!stickerMenuOpen), className: `p-1 rounded-full bg-[#e6e6ea] hover:bg-gray-300 ${stickerMenuOpen ? "text-green-500" : "text-gray-500"}`, children: /* @__PURE__ */ jsx(Smile, { className: "w-4 h-4" }) }),
-        !isRecording ? /* @__PURE__ */ jsx("button", { onClick: startRecording, className: "p-1.5 rounded-full bg-[#e6e6ea] text-gray-500 hover:bg-gray-300", children: /* @__PURE__ */ jsx(Mic, { className: "w-4 h-4" }) }) : /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
-          /* @__PURE__ */ jsx("button", { onClick: cancelRecording, className: "p-1.5 rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300", title: "\u30AD\u30E3\u30F3\u30BB\u30EB", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) }),
-          /* @__PURE__ */ jsx("button", { onClick: stopRecording, className: "p-1.5 rounded-full bg-red-500 text-white hover:bg-red-600 animate-bounce", title: "\u505C\u6B62\u3057\u3066\u9001\u4FE1", children: /* @__PURE__ */ jsx(StopCircle, { className: "w-4 h-4 fill-current" }) })
+        /* @__PURE__ */ jsx("button", { onClick: () => setStickerMenuOpen(!stickerMenuOpen), className: `p-2 rounded-full bg-[#e6e6ea] hover:bg-gray-300 ${stickerMenuOpen ? "text-green-500" : "text-gray-500"}`, children: /* @__PURE__ */ jsx(Smile, { className: "w-4 h-4" }) }),
+        !isRecording ? /* @__PURE__ */ jsx("button", { onClick: startRecording, className: "p-2 rounded-full bg-[#e6e6ea] text-gray-500 hover:bg-gray-300", children: /* @__PURE__ */ jsx(Mic, { className: "w-4 h-4" }) }) : /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
+          /* @__PURE__ */ jsx("button", { onClick: cancelRecording, className: "p-2 rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300", title: "\u30AD\u30E3\u30F3\u30BB\u30EB", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) }),
+          /* @__PURE__ */ jsx("button", { onClick: stopRecording, className: "p-2 rounded-full bg-red-500 text-white hover:bg-red-600 animate-bounce", title: "\u505C\u6B62\u3057\u3066\u9001\u4FE1", children: /* @__PURE__ */ jsx(StopCircle, { className: "w-4 h-4 fill-current" }) })
         ] }),
         (text || isUploading) && /* @__PURE__ */ jsx("button", { onClick: () => sendMessage(text), disabled: !text && !isUploading, className: `p-2 rounded-full ${text ? "text-green-500" : "text-gray-300"}`, children: isUploading ? /* @__PURE__ */ jsxs("div", { className: "relative", children: [
           /* @__PURE__ */ jsx(Loader2, { className: "w-5 h-5 animate-spin text-green-500" }),
@@ -5666,217 +5655,220 @@ const DiceMiniGameView = ({ user, invite, onBack, showNotification, profile }) =
   ] });
 };
 const PachinkoView = ({ user, profile, onBack, showNotification }) => {
-  // ===== Slot (manual stop) =====
-  const COST = 100;      // 1回まわすのに必要なコイン
-  const WIN = 1000;      // 当たり時の付与コイン
+  const [isSpinning, setIsSpinning] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+  const [reels, setReels] = useState(["🍒", "🔔", "7"]);
+  const spinTimerRef = useRef(null);
+  const slotCooldownUntilRef = useRef(0);
+  const SLOT_MIN_INTERVAL_MS = 1200; // 連打/多重実行防止
+  const QUOTA_BACKOFF_MS = 30_000; // クォータ超過時の待機
+
+  const COST = 100;
+  const WIN = 1000;
+  const PROB_MIN = 1 / 80;
+  const PROB_MAX = 1 / 30;
+
   const SYMBOLS = useMemo(() => ["🍒", "🍋", "🔔", "💎", "BAR", "7"], []);
 
-  const [spinning, setSpinning] = useState(false);
-  const [reelIdx, setReelIdx] = useState([0, 1, 2]);
-  const [stopped, setStopped] = useState([true, true, true]); // 初期は停止状態
-  const [message, setMessage] = useState("");
+  const randSymbol = useCallback(() => {
+    return SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
+  }, [SYMBOLS]);
 
-  const timersRef = useRef([null, null, null]);
-  const startedAtRef = useRef(0);
+  const randReelsNotJackpot = useCallback(() => {
+    let a = randSymbol();
+    let b = randSymbol();
+    let c = randSymbol();
+    // avoid jackpot "7 7 7"
+    if (a === "7" && b === "7" && c === "7") c = "BAR";
+    return [a, b, c];
+  }, [randSymbol]);
 
-  const stopAllTimers = useCallback(() => {
-    timersRef.current.forEach((t) => t && clearInterval(t));
-    timersRef.current = [null, null, null];
+  const stopSpinAnimation = () => {
+    if (spinTimerRef.current) {
+      clearInterval(spinTimerRef.current);
+      spinTimerRef.current = null;
+    }
+  };
+
+  const startSpinAnimation = () => {
+    stopSpinAnimation();
+    spinTimerRef.current = setInterval(() => {
+      setReels([randSymbol(), randSymbol(), randSymbol()]);
+    }, 70);
+  };
+
+  useEffect(() => {
+    return () => stopSpinAnimation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    return () => stopAllTimers();
-  }, [stopAllTimers]);
+  const playOnce = async () => {
+    const now = Date.now();
+    if (now < slotCooldownUntilRef.current) {
+      const sec = Math.ceil((slotCooldownUntilRef.current - now) / 1000);
+      return showNotification(`しばらく待ってから再試行してください（あと${sec}秒）`);
+    }
+    if ((profile?.wallet || 0) < COST) return showNotification("コイン残高が足りません（1回=100コイン）");
+    if (isSpinning) return;
+    // 連打対策
+    slotCooldownUntilRef.current = now + SLOT_MIN_INTERVAL_MS;
 
-  const ensureUserDocAndCharge = useCallback(async () => {
-    // 1回分のコインを先に引く（スピン開始時点）
-    await runTransaction(db, async (t) => {
-      const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-      const uDoc = await t.get(userRef);
-      const wallet = (uDoc.exists() ? uDoc.data().wallet : profile?.wallet) || 0;
-
-      if (!uDoc.exists()) {
-        // 初回の場合は最低限作成
-        t.set(userRef, {
-          uid: user.uid,
-          displayName: user.displayName || "",
-          photoURL: user.photoURL || "",
-          wallet: wallet,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        }, { merge: true });
-      }
-
-      if (wallet < COST) {
-        throw new Error("コイン残高が足りません（1回=100コイン）");
-      }
-
-      t.update(userRef, {
-        wallet: wallet - COST,
-        slotPlays: increment(1),
-        updatedAt: serverTimestamp()
-      });
-    });
-  }, [user?.uid, profile?.wallet]);
-
-  const payoutIfWin = useCallback(async () => {
-    await runTransaction(db, async (t) => {
-      const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-      const uDoc = await t.get(userRef);
-      const wallet = (uDoc.exists() ? uDoc.data().wallet : profile?.wallet) || 0;
-      t.set(userRef, { updatedAt: serverTimestamp() }, { merge: true });
-      t.update(userRef, {
-        wallet: wallet + WIN,
-        slotWins: increment(1),
-        updatedAt: serverTimestamp()
-      });
-    });
-  }, [user?.uid, profile?.wallet]);
-
-  const startSpin = useCallback(async () => {
-    if (spinning) return;
+    setIsSpinning(true);
+    startSpinAnimation();
 
     try {
-      await ensureUserDocAndCharge();
-    } catch (e) {
-      showNotification(e?.message || "プレイに失敗しました");
-      return;
-    }
+      const prob = PROB_MIN + Math.random() * (PROB_MAX - PROB_MIN);
+      const win = Math.random() < prob;
+      const payout = win ? WIN : 0;
+      const delta = payout - COST; // net
 
-    setMessage("");
-    setSpinning(true);
-    setStopped([false, false, false]);
-    startedAtRef.current = Date.now();
-
-    // 各リールを別速度で回す（タイミングで止めて当てられるように）
-    const speeds = [90, 110, 130];
-    stopAllTimers();
-    timersRef.current = speeds.map((ms, i) =>
-      setInterval(() => {
-        setReelIdx((prev) => {
-          const next = [...prev];
-          next[i] = (next[i] + 1) % SYMBOLS.length;
-          return next;
-        });
-      }, ms)
-    );
-  }, [spinning, ensureUserDocAndCharge, stopAllTimers, SYMBOLS.length, showNotification]);
-
-  const stopReel = useCallback(async (i) => {
-    if (!spinning) return;
-    if (stopped[i]) return;
-
-    // このリールの回転を止める
-    const t = timersRef.current[i];
-    if (t) clearInterval(t);
-    timersRef.current[i] = null;
-
-    setStopped((prev) => {
-      const next = [...prev];
-      next[i] = true;
-      return next;
-    });
-  }, [spinning, stopped]);
-
-  // 全部止まったら判定
-  useEffect(() => {
-    const allStopped = stopped[0] && stopped[1] && stopped[2];
-    if (!spinning) return;
-    if (!allStopped) return;
-
-    stopAllTimers();
-    setSpinning(false);
-
-    const symbols = reelIdx.map((idx) => SYMBOLS[idx]);
-    const win = symbols[0] === symbols[1] && symbols[1] === symbols[2];
-
-    (async () => {
-      if (win) {
-        try {
-          await payoutIfWin();
-          setMessage(`🎉 当たり！ +${WIN}コイン`);
-          showNotification(`🎉 当たり！ +${WIN}コイン`);
-        } catch (e) {
-          setMessage("当たりの反映に失敗しました");
-          showNotification(e?.message || "当たりの反映に失敗しました");
+      await runTransaction(db, async (t) => {
+        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+        const uDoc = await t.get(userRef);
+        if (!uDoc.exists()) {
+          // 初回利用などでユーザードキュメントが未作成の場合はここで初期化
+          t.set(userRef, {
+            uid: user.uid,
+            displayName: user.displayName || "",
+            photoURL: user.photoURL || "",
+            wallet: 0,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true });
         }
-      } else {
-        setMessage("はずれ…（もう一回！）");
+        const current = (uDoc.exists() ? (uDoc.data().wallet || 0) : 0);
+        if (current < COST) throw new Error("残高不足");
+        const lastMs = uDoc.exists() ? (uDoc.data().slotLastPlayedMs || 0) : 0;
+        const nowMs = Date.now();
+        if (nowMs - lastMs < SLOT_MIN_INTERVAL_MS) throw new Error("操作が早すぎます");
+        t.update(userRef, { slotLastPlayedMs: nowMs });
+        t.update(userRef, { wallet: increment(delta) });
+        // 履歴の毎回書き込みはクォータ超過の原因になりやすいため、集計はユーザードキュメント側に寄せます
+        t.update(userRef, {
+          slotPlays: increment(1),
+          slotWins: increment(win ? 1 : 0),
+          slotLastProb: prob,
+          updatedAt: serverTimestamp()
+        });
+      });
+
+      // settle reels after a short delay (feel like a slot machine)
+      await new Promise((r) => setTimeout(r, 650));
+      stopSpinAnimation();
+      setReels(win ? ["7", "7", "7"] : randReelsNotJackpot());
+
+      setLastResult({ cost: COST, win, payout, delta });
+      showNotification(win ? `当たり！ +${payout}（差分 ${delta >= 0 ? "+" : ""}${delta}）` : "ハズレ…（-100）");
+    } catch (e) {
+      console.error(e);
+      {
+        const msg = (e && typeof e === "object" && "message" in e) ? e.message : (typeof e === "string" ? e : String(e));
+        const lower = (msg || "").toLowerCase();
+        // Firestore の RESOURCE_EXHAUSTED（Quota exceeded）対策
+        if (lower.includes("quota") || lower.includes("resource_exhausted") || lower.includes("resource-exhausted") || lower.includes("exceeded")) {
+          slotCooldownUntilRef.current = Date.now() + QUOTA_BACKOFF_MS;
+          showNotification("混雑しています。30秒ほど待ってからもう一度お試しください（Quota exceeded）");
+        } else {
+          showNotification(msg || "プレイに失敗しました");
+        }
       }
-    })();
-  }, [stopped, spinning, reelIdx, SYMBOLS, payoutIfWin, stopAllTimers, showNotification]);
+      stopSpinAnimation();
+    } finally {
+      setTimeout(() => setIsSpinning(false), 250);
+    }
+  };
 
-  const symbols = reelIdx.map((i) => SYMBOLS[i]);
+  const Lever = ({ onPull, disabled }) => /* @__PURE__ */ jsxs("button", {
+    onClick: onPull,
+    disabled,
+    className: "relative w-16 shrink-0 flex flex-col items-center select-none disabled:opacity-60",
+    children: [
+      /* @__PURE__ */ jsx("div", { className: "w-3 h-24 rounded-full bg-gradient-to-b from-gray-200 to-gray-400 shadow-inner border border-gray-300" }),
+      /* @__PURE__ */ jsx("div", { className: `mt-2 w-10 h-10 rounded-full bg-red-500 shadow-lg border-4 border-white ${disabled ? "" : "active:scale-95"}` })
+    ]
+  });
 
-  return (
-    <div className="h-full flex flex-col">
-      <div className="px-4 pt-4 flex items-center justify-between">
-        <button onClick={onBack} className="text-slate-700 font-extrabold">←</button>
-        <div className="text-lg font-extrabold">オンラインパチンコ（スロット）</div>
-        <div className="px-3 py-1 rounded-full bg-yellow-50 border text-yellow-700 font-extrabold">
-          🪙 {profile?.wallet ?? 0}
-        </div>
-      </div>
+  const ReelCell = ({ value }) => /* @__PURE__ */ jsx("div", {
+    className: "w-20 h-20 bg-white rounded-xl border-2 border-gray-300 shadow-inner flex items-center justify-center text-2xl font-black",
+    children: value
+  });
 
-      <div className="flex-1 overflow-y-auto px-4 pb-28">
-        <div className="mt-4 rounded-[28px] bg-gradient-to-b from-slate-900 to-slate-950 p-5 shadow-lg">
-          <div className="rounded-2xl bg-yellow-400 text-slate-900 px-4 py-3 font-extrabold text-center">
-            BIG BONUS / BAR&7<br />
-            <span className="text-sm font-bold">「スピン」後に、各リールを1つずつ止めてね</span>
-          </div>
+  return /* @__PURE__ */ jsxs("div", { className: "w-full h-full flex flex-col", children: [
+    /* @__PURE__ */ jsxs("div", { className: "p-4 bg-white border-b flex items-center gap-3", children: [
+      /* @__PURE__ */ jsx("button", { onClick: onBack, className: "p-2 rounded-full hover:bg-gray-100", children: /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6" }) }),
+      /* @__PURE__ */ jsx("div", { className: "font-black text-lg", children: "オンラインパチンコ（スロット）" }),
+      /* @__PURE__ */ jsx("div", { className: "ml-auto flex items-center gap-2 bg-yellow-50 border border-yellow-100 px-3 py-1.5 rounded-full", children: /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx(Coins, { className: "w-4 h-4 text-yellow-600" }),
+        /* @__PURE__ */ jsx("span", { className: "text-xs font-black text-yellow-700", children: (profile?.wallet || 0).toLocaleString() })
+      ] }) })
+    ] }),
 
-          <div className="mt-4 rounded-2xl bg-white/95 p-4">
-            <div className="text-sm font-extrabold text-slate-700">
-              1回 {COST} / 当たり {WIN}
-            </div>
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto p-6", children: [
+      /* @__PURE__ */ jsx("div", { className: "max-w-md mx-auto", children: /* @__PURE__ */ jsxs("div", { className: "bg-gradient-to-b from-gray-900 to-black rounded-[2rem] p-4 shadow-2xl border border-white/10", children: [
+        /* @__PURE__ */ jsxs("div", { className: "rounded-2xl bg-gradient-to-r from-yellow-400 via-yellow-200 to-yellow-400 p-3 border border-yellow-100 shadow", children: [
+          /* @__PURE__ */ jsx("div", { className: "text-center font-black text-sm text-gray-900 tracking-wide", children: "BIG BONUS / BAR&7" }),
+          /* @__PURE__ */ jsx("div", { className: "text-center text-[11px] font-bold text-gray-700 mt-1", children: "レバーを引いて回してね" })
+        ] }),
 
-            <div className="mt-3 flex items-center justify-center gap-3">
-              {symbols.map((s, idx) => (
-                <div key={idx} className="w-[92px] h-[92px] bg-white rounded-2xl border-2 border-slate-200 flex items-center justify-center shadow-inner">
-                  <div className="text-3xl font-black">{s}</div>
-                </div>
-              ))}
-            </div>
+        /* @__PURE__ */ jsxs("div", { className: "mt-4 flex gap-4 items-stretch", children: [
+          /* @__PURE__ */ jsxs("div", { className: "flex-1 rounded-2xl bg-gray-800/70 border border-white/10 p-4", children: [
+            /* @__PURE__ */ jsx("div", { className: "flex items-center justify-between mb-3", children: /* @__PURE__ */ jsxs("div", { className: "text-xs font-black text-yellow-100/90", children: [
+              "1回 ",
+              COST,
+              " / 当たり ",
+              WIN,
+              "（確率: ランダム）"
+            ] }) }),
 
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              {[0,1,2].map((i) => (
-                <button
-                  key={i}
-                  onClick={() => stopReel(i)}
-                  disabled={!spinning || stopped[i]}
-                  className={`py-3 rounded-xl font-extrabold border ${
-                    (!spinning || stopped[i]) ? "bg-slate-100 text-slate-400" : "bg-slate-900 text-white hover:bg-slate-800"
-                  }`}
-                >
-                  STOP
-                </button>
-              ))}
-            </div>
+            /* @__PURE__ */ jsxs("div", { className: "rounded-2xl bg-gradient-to-b from-gray-200 to-gray-50 p-4 border border-gray-300 shadow-inner", children: [
+              /* @__PURE__ */ jsxs("div", { className: "flex justify-center gap-3", children: [
+                /* @__PURE__ */ jsx(ReelCell, { value: reels[0] }),
+                /* @__PURE__ */ jsx(ReelCell, { value: reels[1] }),
+                /* @__PURE__ */ jsx(ReelCell, { value: reels[2] })
+              ] }),
+              /* @__PURE__ */ jsx("div", { className: "mt-3 flex items-center justify-between", children: /* @__PURE__ */ jsxs(Fragment, { children: [
+                /* @__PURE__ */ jsxs("div", { className: "text-[11px] font-bold text-gray-600", children: [
+                  "コイン投入 → レバー",
+                  /* @__PURE__ */ jsx("span", { className: "ml-1 text-gray-400", children: "（タップでもOK）" })
+                ] }),
+                /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+                  /* @__PURE__ */ jsx("div", { className: "w-10 h-7 rounded-lg bg-gray-900 border border-white/10 shadow-inner flex items-center justify-center", children: /* @__PURE__ */ jsx("div", { className: "w-6 h-1.5 rounded-full bg-gray-600" }) }),
+                  /* @__PURE__ */ jsx("div", { className: "w-10 h-7 rounded-lg bg-gray-900 border border-white/10 shadow-inner flex items-center justify-center", children: /* @__PURE__ */ jsx("div", { className: "w-2.5 h-2.5 rounded-full bg-gray-600" }) })
+                ] })
+              ] }) })
+            ] }),
 
-            <button
-              onClick={startSpin}
-              disabled={spinning}
-              className={`mt-3 w-full py-4 rounded-2xl font-extrabold text-lg ${
-                spinning ? "bg-slate-200 text-slate-500" : "bg-yellow-400 hover:bg-yellow-300 text-slate-900"
-              }`}
-            >
-              スピン（-{COST}）
-            </button>
+            /* @__PURE__ */ jsxs("div", { className: "mt-4 grid grid-cols-1 gap-3", children: [
+              /* @__PURE__ */ jsx("button", { onClick: playOnce, disabled: isSpinning, className: "w-full py-4 bg-yellow-500 hover:bg-yellow-600 text-white font-black rounded-2xl shadow-lg shadow-yellow-500/30 disabled:bg-gray-400 flex items-center justify-center gap-2", children: isSpinning ? /* @__PURE__ */ jsx(Loader2, { className: "w-5 h-5 animate-spin" }) : /* @__PURE__ */ jsxs(Fragment, { children: [
+                /* @__PURE__ */ jsx(Disc, { className: "w-5 h-5" }),
+                "スピン（-100）"
+              ] }) }),
+              lastResult && /* @__PURE__ */ jsxs("div", { className: "bg-black/40 border border-white/10 rounded-2xl p-4", children: [
+                /* @__PURE__ */ jsx("div", { className: "text-[11px] font-bold text-white/70", children: "結果" }),
+                /* @__PURE__ */ jsxs("div", { className: "mt-1 text-sm font-black text-white", children: [
+                  lastResult.win ? "🎉 当たり！" : "😢 ハズレ",
+                  " / 払い出し ",
+                  lastResult.payout,
+                  " / 差分 ",
+                  lastResult.delta >= 0 ? "+" : "",
+                  lastResult.delta
+                ] })
+              ] })
+            ] })
+          ] }),
 
-            {message ? (
-              <div className="mt-3 text-center font-extrabold text-slate-700">{message}</div>
-            ) : null}
-          </div>
+          /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center justify-between py-2", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-[10px] font-black text-white/70", children: "レバー" }),
+            /* @__PURE__ */ jsx(Lever, { onPull: playOnce, disabled: isSpinning }),
+            /* @__PURE__ */ jsx("div", { className: "text-[10px] font-black text-white/70", children: "PULL" })
+          ] })
+        ] }),
 
-          <div className="mt-4 text-[11px] text-white/70 font-bold">
-            ※ 遊び用（仮想コイン）です。現金や換金はありません。
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+        /* @__PURE__ */ jsx("div", { className: "mt-4 text-[11px] text-white/70 font-bold", children: "※ 遊び用（仮想コイン）です。現金や換金はありません。" })
+      ] }) })
+    ] })
+  ] });
 };
-
 
 // ===================== /MiniGame + Pachinko =====================
 
@@ -5902,12 +5894,7 @@ const fetchTextWithProxies = async (url, { timeoutMs = 8000 } = {}) => {
       const res = await fetch(proxied, { method: "GET", signal: controller?.signal });
       clearTimeout(t);
       if (res.ok) return await res.text();
-      try {
-        const host = proxied.startsWith("/") ? "self" : new URL(proxied).host;
-        errors.push(`${host}:${res.status}`);
-      } catch {
-        errors.push(`proxy:${res.status}`);
-      }
+      errors.push(`${new URL(proxied).host}:${res.status}`);
     } catch (e) {
       clearTimeout(t);
       const host = (() => { try { return new URL(proxied).host; } catch { return "proxy"; } })();
@@ -6749,7 +6736,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
       ] }) }),
-      user && !activeCall && ["home","news","voom","pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-0 left-0 right-0 h-16 bg-white border-t shadow-[0_-2px_10px_rgba(0,0,0,0.06)] flex items-center justify-around z-50", style: { paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }, children: [
+      user && !activeCall && ["home","news","voom","pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "fixed bottom-0 left-0 right-0 h-20 bg-white border-t shadow-[0_-2px_10px_rgba(0,0,0,0.06)] flex items-center justify-around z-50 pt-2", style: { paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }, children: [
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("home"), children: [
           /* @__PURE__ */ jsx(Home, { className: "w-6 h-6" }),
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u30DB\u30FC\u30E0" })
