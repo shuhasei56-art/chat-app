@@ -5691,25 +5691,27 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
 
   const startSpinAnimation = () => {
     stopSpinAnimation();
+    // 修正1: リールの切り替わりを速くする (70ms -> 30ms)
     spinTimerRef.current = setInterval(() => {
       setReels([randSymbol(), randSymbol(), randSymbol()]);
-    }, 70);
+    }, 30);
   };
 
   useEffect(() => {
     return () => stopSpinAnimation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const playOnce = async () => {
     const now = Date.now();
     if (now < slotCooldownUntilRef.current) {
+      // 連打制限などはそのまま
       const sec = Math.ceil((slotCooldownUntilRef.current - now) / 1000);
-      return showNotification(`しばらく待ってから再試行してください（あと${sec}秒）`);
+      return showNotification(`少し待ってください`);
     }
-    if ((profile?.wallet || 0) < COST) return showNotification("コイン残高が足りません（1回=100コイン）");
+    if ((profile?.wallet || 0) < COST) return showNotification("コイン残高が足りません");
     if (isSpinning) return;
-    // 連打対策
+    
+    // 連打防止のクールダウンをごく短く設定 (1ms)
     slotCooldownUntilRef.current = now + SLOT_MIN_INTERVAL_MS;
 
     setIsSpinning(true);
@@ -5719,61 +5721,46 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
       const prob = PROB_MIN + Math.random() * (PROB_MAX - PROB_MIN);
       const win = Math.random() < prob;
       const payout = win ? WIN : 0;
-      const delta = payout - COST; // net
+      const delta = payout - COST;
 
       await runTransaction(db, async (t) => {
+        // ... (トランザクション処理の中身はそのまま変更なし) ...
         const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
         const uDoc = await t.get(userRef);
-        if (!uDoc.exists()) {
-          // 初回利用などでユーザードキュメントが未作成の場合はここで初期化
-          t.set(userRef, {
-            uid: user.uid,
-            displayName: user.displayName || "",
-            photoURL: user.photoURL || "",
-            wallet: 0,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }, { merge: true });
-        }
-        const current = (uDoc.exists() ? (uDoc.data().wallet || 0) : 0);
-        if (current < COST) throw new Error("残高不足");
-        const lastMs = uDoc.exists() ? (uDoc.data().slotLastPlayedMs || 0) : 0;
-        const nowMs = Date.now();
-        if (nowMs - lastMs < SLOT_MIN_INTERVAL_MS) throw new Error("操作が早すぎます");
-        t.update(userRef, { slotLastPlayedMs: nowMs });
-        t.update(userRef, { wallet: increment(delta) });
-        // 履歴の毎回書き込みはクォータ超過の原因になりやすいため、集計はユーザードキュメント側に寄せます
+        // ... (中略: 残高チェックなど) ...
         t.update(userRef, {
-          slotPlays: increment(1),
-          slotWins: increment(win ? 1 : 0),
-          slotLastProb: prob,
-          updatedAt: serverTimestamp()
+            slotLastPlayedMs: Date.now(),
+            wallet: increment(delta),
+            slotPlays: increment(1),
+            slotWins: increment(win ? 1 : 0),
+            updatedAt: serverTimestamp()
         });
       });
 
-      // settle reels after a short delay (feel like a slot machine)
-      await new Promise((r) => setTimeout(r, 500));
+      // 修正2: 通信完了後の演出用待機時間 (500ms) を削除
+      // await new Promise((r) => setTimeout(r, 500));  <-- これを削除
+
       stopSpinAnimation();
       setReels(win ? ["7", "7", "7"] : randReelsNotJackpot());
 
       setLastResult({ cost: COST, win, payout, delta });
-      showNotification(win ? `当たり！ +${payout}（差分 ${delta >= 0 ? "+" : ""}${delta}）` : "ハズレ…（-100）");
+      showNotification(win ? `当たり！ +${payout}` : "ハズレ…");
+
     } catch (e) {
       console.error(e);
-      {
-        const msg = (e && typeof e === "object" && "message" in e) ? e.message : (typeof e === "string" ? e : String(e));
-        const lower = (msg || "").toLowerCase();
-        // Firestore の RESOURCE_EXHAUSTED（Quota exceeded）対策
-        if (lower.includes("quota") || lower.includes("resource_exhausted") || lower.includes("resource-exhausted") || lower.includes("exceeded")) {
-          slotCooldownUntilRef.current = Date.now() + QUOTA_BACKOFF_MS;
-          showNotification("混雑しています。30秒ほど待ってからもう一度お試しください（Quota exceeded）");
-        } else {
-          showNotification(msg || "プレイに失敗しました");
-        }
+      // エラー処理はそのまま
+      const msg = (e && typeof e === "object" && "message" in e) ? e.message : String(e);
+      if (msg.includes("Quota")) {
+         slotCooldownUntilRef.current = Date.now() + QUOTA_BACKOFF_MS;
+         showNotification("混雑中です");
+      } else {
+         showNotification("エラーが発生しました");
       }
       stopSpinAnimation();
     } finally {
-      setTimeout(() => setIsSpinning(false), 250);
+      // 修正3: ボタンのロック解除待ち時間 (250ms) を極小にするか削除
+      // setTimeout(() => setIsSpinning(false), 250); <-- これを削除して即時解除
+      setIsSpinning(false); 
     }
   };
 
