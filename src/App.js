@@ -2382,7 +2382,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
             /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-8 h-8 text-green-500" }),
             /* @__PURE__ */ jsx("span", { className: "text-[10px] text-gray-500 font-bold", children: m.type === "video" ? "\u52D5\u753B\u3092\u53D7\u4FE1\u4E2D..." : "\u753B\u50CF\u3092\u53D7\u4FE1\u4E2D..." })
           ] }) : /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-            m.type === "video" ? /* @__PURE__ */ jsx("video", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md bg-black ${showMenu ? "brightness-50 transition-all" : ""}`, controls: true, playsInline: true, preload: "metadata" }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy" }),
+            m.type === "video" ? /* @__PURE__ */ jsx("video", { src: finalSrc || "", className: `w-[260px] max-w-[70vw] max-h-72 rounded-xl border border-white/50 shadow-md bg-black object-contain ${showMenu ? "brightness-50 transition-all" : ""}`, controls: true, playsInline: true, preload: "metadata" }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `w-[260px] max-w-[70vw] max-h-72 rounded-xl border border-white/50 shadow-md object-contain bg-white/60 ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy" }),
             m.type === "video" && !isShowingPreview && !finalSrc && /* @__PURE__ */ jsx("div", { className: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none", children: /* @__PURE__ */ jsx("div", { className: "bg-black/30 rounded-full p-2 backdrop-blur-sm", children: /* @__PURE__ */ jsx(Play, { className: "w-8 h-8 text-white fill-white opacity-90" }) }) }),
             isShowingPreview && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-2 right-2 bg-black/60 text-white text-[9px] px-2 py-0.5 rounded-full backdrop-blur-md flex items-center gap-1", children: [
               /* @__PURE__ */ jsx(Loader2, { className: "w-3 h-3 animate-spin" }),
@@ -5659,14 +5659,14 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
   const [reels, setReels] = useState(["🍒", "🔔", "7"]);
   const spinTimerRef = useRef(null);
   const slotCooldownUntilRef = useRef(0);
-  const SLOT_MIN_INTERVAL_MS = 1; // 連打/多重実行防止
+  const SLOT_MIN_INTERVAL_MS = 1200; // 連打/多重実行防止
   const QUOTA_BACKOFF_MS = 30_000; // クォータ超過時の待機
 
   const COST = 100;
-  const WIN = 20000;
-  const PROB_MIN = 1 / 69;
+  const WIN = 1000;
+  const PROB_MIN = 1 / 80;
   const PROB_MAX = 1 / 30;
-  
+
   const SYMBOLS = useMemo(() => ["🍒", "🍋", "🔔", "💎", "BAR", "7"], []);
 
   const randSymbol = useCallback(() => {
@@ -5691,27 +5691,25 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
 
   const startSpinAnimation = () => {
     stopSpinAnimation();
-    // 修正1: リールの切り替わりを速くする (70ms -> 30ms)
     spinTimerRef.current = setInterval(() => {
       setReels([randSymbol(), randSymbol(), randSymbol()]);
-    }, 30);
+    }, 70);
   };
 
   useEffect(() => {
     return () => stopSpinAnimation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const playOnce = async () => {
     const now = Date.now();
     if (now < slotCooldownUntilRef.current) {
-      // 連打制限などはそのまま
       const sec = Math.ceil((slotCooldownUntilRef.current - now) / 1000);
-      return showNotification(`少し待ってください`);
+      return showNotification(`しばらく待ってから再試行してください（あと${sec}秒）`);
     }
-    if ((profile?.wallet || 0) < COST) return showNotification("コイン残高が足りません");
+    if ((profile?.wallet || 0) < COST) return showNotification("コイン残高が足りません（1回=100コイン）");
     if (isSpinning) return;
-    
-    // 連打防止のクールダウンをごく短く設定 (1ms)
+    // 連打対策
     slotCooldownUntilRef.current = now + SLOT_MIN_INTERVAL_MS;
 
     setIsSpinning(true);
@@ -5721,46 +5719,61 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
       const prob = PROB_MIN + Math.random() * (PROB_MAX - PROB_MIN);
       const win = Math.random() < prob;
       const payout = win ? WIN : 0;
-      const delta = payout - COST;
+      const delta = payout - COST; // net
 
       await runTransaction(db, async (t) => {
-        // ... (トランザクション処理の中身はそのまま変更なし) ...
         const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
         const uDoc = await t.get(userRef);
-        // ... (中略: 残高チェックなど) ...
-        t.update(userRef, {
-            slotLastPlayedMs: Date.now(),
-            wallet: increment(delta),
-            slotPlays: increment(1),
-            slotWins: increment(win ? 1 : 0),
+        if (!uDoc.exists()) {
+          // 初回利用などでユーザードキュメントが未作成の場合はここで初期化
+          t.set(userRef, {
+            uid: user.uid,
+            displayName: user.displayName || "",
+            photoURL: user.photoURL || "",
+            wallet: 0,
+            createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()
+          }, { merge: true });
+        }
+        const current = (uDoc.exists() ? (uDoc.data().wallet || 0) : 0);
+        if (current < COST) throw new Error("残高不足");
+        const lastMs = uDoc.exists() ? (uDoc.data().slotLastPlayedMs || 0) : 0;
+        const nowMs = Date.now();
+        if (nowMs - lastMs < SLOT_MIN_INTERVAL_MS) throw new Error("操作が早すぎます");
+        t.update(userRef, { slotLastPlayedMs: nowMs });
+        t.update(userRef, { wallet: increment(delta) });
+        // 履歴の毎回書き込みはクォータ超過の原因になりやすいため、集計はユーザードキュメント側に寄せます
+        t.update(userRef, {
+          slotPlays: increment(1),
+          slotWins: increment(win ? 1 : 0),
+          slotLastProb: prob,
+          updatedAt: serverTimestamp()
         });
       });
 
-      // 修正2: 通信完了後の演出用待機時間 (500ms) を削除
-      // await new Promise((r) => setTimeout(r, 500));  <-- これを削除
-
+      // settle reels after a short delay (feel like a slot machine)
+      await new Promise((r) => setTimeout(r, 650));
       stopSpinAnimation();
       setReels(win ? ["7", "7", "7"] : randReelsNotJackpot());
 
       setLastResult({ cost: COST, win, payout, delta });
-      showNotification(win ? `当たり！ +${payout}` : "ハズレ…");
-
+      showNotification(win ? `当たり！ +${payout}（差分 ${delta >= 0 ? "+" : ""}${delta}）` : "ハズレ…（-100）");
     } catch (e) {
       console.error(e);
-      // エラー処理はそのまま
-      const msg = (e && typeof e === "object" && "message" in e) ? e.message : String(e);
-      if (msg.includes("Quota")) {
-         slotCooldownUntilRef.current = Date.now() + QUOTA_BACKOFF_MS;
-         showNotification("混雑中です");
-      } else {
-         showNotification("エラーが発生しました");
+      {
+        const msg = (e && typeof e === "object" && "message" in e) ? e.message : (typeof e === "string" ? e : String(e));
+        const lower = (msg || "").toLowerCase();
+        // Firestore の RESOURCE_EXHAUSTED（Quota exceeded）対策
+        if (lower.includes("quota") || lower.includes("resource_exhausted") || lower.includes("resource-exhausted") || lower.includes("exceeded")) {
+          slotCooldownUntilRef.current = Date.now() + QUOTA_BACKOFF_MS;
+          showNotification("混雑しています。30秒ほど待ってからもう一度お試しください（Quota exceeded）");
+        } else {
+          showNotification(msg || "プレイに失敗しました");
+        }
       }
       stopSpinAnimation();
     } finally {
-      // 修正3: ボタンのロック解除待ち時間 (250ms) を極小にするか削除
-      
-      setIsSpinning(false); 
+      setTimeout(() => setIsSpinning(false), 250);
     }
   };
 
@@ -5862,9 +5875,13 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
 // NOTE: Some proxies (e.g. r.jina.ai) may return 4xx depending on their rules.
 // We try multiple lightweight proxies to improve reliability without needing a custom backend.
 const _newsProxyBuilders = [
-  // Same-origin proxy (Cloudflare Pages Functions)
-  // Put functions/api/news.js to enable /api/news
-  (url) => `/api/news?url=${encodeURIComponent(url)}`
+  // Same-origin proxy (Cloudflare Workers / Pages Functions)
+  // Works even when external proxies are blocked by CORS / 403.
+  (url) => `/api/news?url=${encodeURIComponent(url)}`,
+  // Fallbacks (may be blocked depending on hosting)
+  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  (url) => `https://r.jina.ai/${url}`,
+  (url) => `https://cors.isomorphic-git.org/${url}`
 ];
 const fetchTextWithProxies = async (url, { timeoutMs = 8000 } = {}) => {
   const errors = [];
@@ -5876,7 +5893,7 @@ const fetchTextWithProxies = async (url, { timeoutMs = 8000 } = {}) => {
       const res = await fetch(proxied, { method: "GET", signal: controller?.signal });
       clearTimeout(t);
       if (res.ok) return await res.text();
-      errors.push(`${(() => { try { return new URL(proxied, window.location.href).host; } catch { return "proxy"; } })()}:${res.status}`);
+      errors.push(`${new URL(proxied).host}:${res.status}`);
     } catch (e) {
       clearTimeout(t);
       const host = (() => { try { return new URL(proxied).host; } catch { return "proxy"; } })();
@@ -5920,20 +5937,24 @@ const NewsView = ({ showNotification }) => {
   const [articleText, setArticleText] = useState("");
 
   const loadYahooRss = useCallback(async () => {
-  setLoading(true);
-  setErr("");
-  try {
-    // news.js が JSON を返すので、fetch するだけでOK
-    const res = await fetch("/api/news");
-    if (!res.ok) throw new Error();
-    const data = await res.json();
-    setItems(data);
-  } catch (e) {
-    setErr("ニュースを取得できません。サーバー設定を確認してください。");
-  } finally {
-    setLoading(false);
-  }
-}, []);
+    setLoading(true);
+    setErr("");
+    setSelected(null);
+    setArticleText("");
+    try {
+      const rssUrl = "https://news.yahoo.co.jp/rss/topics/top-picks.xml";
+      const text = await fetchTextWithProxies(rssUrl, { timeoutMs: 8000 });
+      const xmlText = extractXml(text);
+      const parsed = parseRssItems(xmlText);
+      setItems(parsed);
+      if (!parsed.length) setErr("記事が見つかりませんでした");
+    } catch (e) {
+      setErr(e?.message || "Yahooニュースの取得に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   const openArticle = useCallback(async (item) => {
     setSelected(item);
     setArticleLoading(true);
@@ -6714,7 +6735,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
       ] }) }),
-      user && !activeCall && ["home","news","voom","pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-0 left-0 right-0 h-20 bg-white border-t shadow-[0_-2px_10px_rgba(0,0,0,0.06)] flex items-center justify-around z-50 pt-2", style: { paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }, children: [
+      user && !activeCall && ["home","news","voom","pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "fixed bottom-0 left-0 right-0 h-20 bg-white border-t shadow-[0_-2px_10px_rgba(0,0,0,0.06)] flex items-center justify-around z-50 pt-2", style: { paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }, children: [
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("home"), children: [
           /* @__PURE__ */ jsx(Home, { className: "w-6 h-6" }),
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u30DB\u30FC\u30E0" })
