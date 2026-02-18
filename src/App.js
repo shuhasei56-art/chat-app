@@ -5752,7 +5752,7 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
       });
 
       // settle reels after a short delay (feel like a slot machine)
-      await new Promise((r) => setTimeout(r, 650));
+      await new Promise((r) => setTimeout(r, 500));
       stopSpinAnimation();
       setReels(win ? ["7", "7", "7"] : randReelsNotJackpot());
 
