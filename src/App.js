@@ -2382,7 +2382,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
             /* @__PURE__ */ jsx(Loader2, { className: "animate-spin w-8 h-8 text-green-500" }),
             /* @__PURE__ */ jsx("span", { className: "text-[10px] text-gray-500 font-bold", children: m.type === "video" ? "\u52D5\u753B\u3092\u53D7\u4FE1\u4E2D..." : "\u753B\u50CF\u3092\u53D7\u4FE1\u4E2D..." })
           ] }) : /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-            m.type === "video" ? /* @__PURE__ */ jsx("video", { src: finalSrc || "", className: `w-[260px] max-w-[70vw] max-h-72 rounded-xl border border-white/50 shadow-md bg-black object-contain ${showMenu ? "brightness-50 transition-all" : ""}`, controls: true, playsInline: true, preload: "metadata" }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `w-[260px] max-w-[70vw] max-h-72 rounded-xl border border-white/50 shadow-md object-contain bg-white/60 ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy" }),
+            m.type === "video" ? /* @__PURE__ */ jsx("video", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md bg-black ${showMenu ? "brightness-50 transition-all" : ""}`, controls: true, playsInline: true, preload: "metadata" }) : /* @__PURE__ */ jsx("img", { src: finalSrc || "", className: `max-w-full rounded-xl border border-white/50 shadow-md ${showMenu ? "brightness-50 transition-all" : ""} ${isShowingPreview ? "opacity-80 blur-[1px]" : ""}`, loading: "lazy" }),
             m.type === "video" && !isShowingPreview && !finalSrc && /* @__PURE__ */ jsx("div", { className: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none", children: /* @__PURE__ */ jsx("div", { className: "bg-black/30 rounded-full p-2 backdrop-blur-sm", children: /* @__PURE__ */ jsx(Play, { className: "w-8 h-8 text-white fill-white opacity-90" }) }) }),
             isShowingPreview && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-2 right-2 bg-black/60 text-white text-[9px] px-2 py-0.5 rounded-full backdrop-blur-md flex items-center gap-1", children: [
               /* @__PURE__ */ jsx(Loader2, { className: "w-3 h-3 animate-spin" }),
@@ -3575,6 +3575,18 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
       setPurchasing(null);
     }
   };
+const handleDeletePack = async (pack) => {
+  if (!pack || pack.authorId !== user.uid) return;
+  const ok = window.confirm("このスタンプを削除しますか？（購入済みの人は使えなくなります）");
+  if (!ok) return;
+  try {
+    await deleteDoc(doc(db, "artifacts", appId, "public", "data", "sticker_packs", pack.id));
+    showNotification("スタンプを削除しました");
+  } catch (e) {
+    console.error(e);
+    showNotification("削除に失敗しました");
+  }
+};
   const handleApprove = async (packId, authorId, approve) => {
     try {
       await runTransaction(db, async (transaction) => {
@@ -3792,7 +3804,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
               pack.description && /* @__PURE__ */ jsx("p", { className: "text-xs text-gray-400 bg-gray-50 p-2 rounded-lg mb-2", children: pack.description })
             ] }),
             !isOwned && activeTab === "shop" && /* @__PURE__ */ jsx("button", { onClick: () => handleBuy(pack), disabled: purchasing === pack.id, className: "bg-green-500 text-white px-4 py-2 rounded-full font-bold text-xs shadow-md hover:bg-green-600 disabled:bg-gray-300 shrink-0 ml-2", children: purchasing === pack.id ? /* @__PURE__ */ jsx(Loader2, { className: "w-4 h-4 animate-spin" }) : `\xA5${pack.price}` }),
-            isOwned && activeTab === "shop" && /* @__PURE__ */ jsx("span", { className: "bg-gray-100 text-gray-500 px-3 py-1 rounded-full text-xs font-bold shrink-0 ml-2", children: "\u5165\u624B\u6E08\u307F" })
+            isOwned && activeTab === "shop" && /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 shrink-0 ml-2", children: [/* @__PURE__ */ jsx("span", { className: "bg-gray-100 text-gray-500 px-3 py-1 rounded-full text-xs font-bold", children: "入手済み" }), pack.authorId === user.uid && /* @__PURE__ */ jsx("button", { onClick: () => handleDeletePack(pack), className: "bg-red-50 text-red-600 px-3 py-1 rounded-full text-xs font-bold", children: "削除" })] })
           ] }),
           /* @__PURE__ */ jsx("div", { className: "flex gap-2 overflow-x-auto pb-2 scrollbar-hide", children: pack.stickers.map((s, i) => /* @__PURE__ */ jsxs("div", { className: "relative flex-shrink-0", children: [
             /* @__PURE__ */ jsx(
@@ -4575,8 +4587,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         /* @__PURE__ */ jsx("button", { onClick: () => setReplyTo(null), className: "p-1 hover:bg-gray-200 rounded-full", children: /* @__PURE__ */ jsx(X, { className: "w-4 h-4 text-gray-500" }) })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
-        /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: "p-1", children: /* @__PURE__ */ jsx(Plus, { className: "w-6 h-6 text-gray-400" }) }),
-        !isRecording ? /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-4 py-2 text-sm leading-none focus:outline-none placeholder:text-[#9ca3af]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-full px-4 py-2 flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-[11px]", children: [
+        /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: "p-0.5", children: /* @__PURE__ */ jsx(Plus, { className: "w-5 h-5 text-gray-400" }) }),
+        !isRecording ? /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-3 py-1.5 text-[13px] leading-none focus:outline-none placeholder:text-[#9ca3af]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-full px-4 py-2 flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-[11px]", children: [
           /* @__PURE__ */ jsx("div", { className: "w-2 h-2 rounded-full bg-red-500 animate-ping" }),
           "\u9332\u97F3\u4E2D... ",
           Math.floor(recordingTime / 60),
@@ -5657,6 +5669,7 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
   const [isSpinning, setIsSpinning] = useState(false);
   const [lastResult, setLastResult] = useState(null);
   const [reels, setReels] = useState(["🍒", "🔔", "7"]);
+  const [isSpinning, setIsSpinning] = useState(false);
   const spinTimerRef = useRef(null);
   const slotCooldownUntilRef = useRef(0);
   const SLOT_MIN_INTERVAL_MS = 1200; // 連打/多重実行防止
@@ -5683,6 +5696,7 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
   }, [randSymbol]);
 
   const stopSpinAnimation = () => {
+    setIsSpinning(false);
     if (spinTimerRef.current) {
       clearInterval(spinTimerRef.current);
       spinTimerRef.current = null;
@@ -5690,10 +5704,11 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
   };
 
   const startSpinAnimation = () => {
+    setIsSpinning(true);
     stopSpinAnimation();
     spinTimerRef.current = setInterval(() => {
       setReels([randSymbol(), randSymbol(), randSymbol()]);
-    }, 70);
+    }, 100);
   };
 
   useEffect(() => {
@@ -5787,8 +5802,8 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
     ]
   });
 
-  const ReelCell = ({ value }) => /* @__PURE__ */ jsx("div", {
-    className: "w-20 h-20 bg-white rounded-xl border-2 border-gray-300 shadow-inner flex items-center justify-center text-2xl font-black",
+  const ReelCell = ({ value, spinning }) => /* @__PURE__ */ jsx("div", {
+    className: `w-20 h-20 bg-white rounded-xl border-2 border-gray-300 shadow-inner flex items-center justify-center text-2xl font-black transition-transform duration-100 ${spinning ? "animate-pulse scale-[0.98]" : ""}`,
     children: value
   });
 
@@ -5821,9 +5836,9 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
 
             /* @__PURE__ */ jsxs("div", { className: "rounded-2xl bg-gradient-to-b from-gray-200 to-gray-50 p-4 border border-gray-300 shadow-inner", children: [
               /* @__PURE__ */ jsxs("div", { className: "flex justify-center gap-3", children: [
-                /* @__PURE__ */ jsx(ReelCell, { value: reels[0] }),
-                /* @__PURE__ */ jsx(ReelCell, { value: reels[1] }),
-                /* @__PURE__ */ jsx(ReelCell, { value: reels[2] })
+                /* @__PURE__ */ jsx(ReelCell, { value: reels[0], spinning: isSpinning }),
+                /* @__PURE__ */ jsx(ReelCell, { value: reels[1], spinning: isSpinning }),
+                /* @__PURE__ */ jsx(ReelCell, { value: reels[2], spinning: isSpinning })
               ] }),
               /* @__PURE__ */ jsx("div", { className: "mt-3 flex items-center justify-between", children: /* @__PURE__ */ jsxs(Fragment, { children: [
                 /* @__PURE__ */ jsxs("div", { className: "text-[11px] font-bold text-gray-600", children: [
@@ -5893,7 +5908,12 @@ const fetchTextWithProxies = async (url, { timeoutMs = 8000 } = {}) => {
       const res = await fetch(proxied, { method: "GET", signal: controller?.signal });
       clearTimeout(t);
       if (res.ok) return await res.text();
-      errors.push(`${new URL(proxied).host}:${res.status}`);
+      try {
+        const host = proxied.startsWith("/") ? "self" : new URL(proxied).host;
+        errors.push(`${host}:${res.status}`);
+      } catch {
+        errors.push(`proxy:${res.status}`);
+      }
     } catch (e) {
       clearTimeout(t);
       const host = (() => { try { return new URL(proxied).host; } catch { return "proxy"; } })();
@@ -6735,7 +6755,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
       ] }) }),
-      user && !activeCall && ["home","news","voom","pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "fixed bottom-0 left-0 right-0 h-20 bg-white border-t shadow-[0_-2px_10px_rgba(0,0,0,0.06)] flex items-center justify-around z-50 pt-2", style: { paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }, children: [
+      user && !activeCall && ["home","news","voom","pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[520px] h-16 bg-white border-t shadow-[0_-2px_10px_rgba(0,0,0,0.06)] flex items-center justify-around z-50 pt-1 rounded-t-2xl", style: { paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }, children: [
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("home"), children: [
           /* @__PURE__ */ jsx(Home, { className: "w-6 h-6" }),
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u30DB\u30FC\u30E0" })
