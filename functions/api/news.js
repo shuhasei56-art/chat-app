@@ -2,7 +2,6 @@
 export async function onRequest(context) {
   const u = new URL(context.request.url);
   const targetUrl = u.searchParams.get("url") || "https://news.yahoo.co.jp/rss/topics/top-picks.xml";
-  
   const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36";
 
   try {
@@ -14,10 +13,9 @@ export async function onRequest(context) {
     if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
     const text = await res.text();
 
-    // RSS (XML) 解析モード: URLにxmlが含まれる場合
+    // RSS (XML) 解析モード
     if (targetUrl.includes(".xml")) {
       const items = [];
-      // 正規表現でitemタグ内を抽出（DOMParserを使わないので高速・確実）
       const itemMatches = text.matchAll(/<item>([\s\S]*?)<\/item>/g);
 
       for (const match of itemMatches) {
@@ -27,11 +25,7 @@ export async function onRequest(context) {
         const pubDate = content.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || "";
 
         if (title && link) {
-          items.push({ 
-            title: title.trim(), 
-            link: link.trim(), 
-            pubDate: pubDate.trim() 
-          });
+          items.push({ title: title.trim(), link: link.trim(), pubDate: pubDate.trim() });
         }
       }
       return new Response(JSON.stringify(items), {
@@ -39,7 +33,7 @@ export async function onRequest(context) {
       });
     }
 
-    // 記事本文 (HTML) 解析モード: 不要なタグを除去してテキストのみ返す
+    // 記事本文 (HTML) 解析モード
     const cleanText = text
       .replace(/<script[\s\S]*?<\/script>/gi, "")
       .replace(/<style[\s\S]*?<\/style>/gi, "")
@@ -50,11 +44,7 @@ export async function onRequest(context) {
     return new Response(JSON.stringify({ content: cleanText }), {
       headers: { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*" },
     });
-
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { 
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
 }
