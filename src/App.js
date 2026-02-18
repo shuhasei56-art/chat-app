@@ -4614,7 +4614,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       setCoinModalTarget(viewProfile);
       setViewProfile(null);
     }, myUid: user.uid, myProfile: profile, allUsers, showNotification }),
-    coinModalTarget && /* @__PURE__ */ jsx(CoinTransferModal, { onClose: () => setCoinModalTarget(null), myWallet: profile.wallet, myUid: user.uid, targetUid: coinModalTarget.uid, targetName: coinModalTarget.name, showNotification })
+    coinModalTarget && /* @__PURE__ */ jsx(CoinTransferModal, { onClose: () => setCoinModalTarget(null), myWallet: profile.wallet, myUid: user.uid, targetUid: coinModalTarget.uid, targetName: coinModalTarget.name, showNotification }),
   ] });
 };
 const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, appId: appId2, onLoadMore, hasMore, loadingMore }) => {
