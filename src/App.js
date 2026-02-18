@@ -4576,33 +4576,33 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         /* @__PURE__ */ jsx("button", { onClick: () => setReplyTo(null), className: "p-1 hover:bg-gray-200 rounded-full", children: /* @__PURE__ */ jsx(X, { className: "w-4 h-4 text-gray-500" }) })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "bg-[#f3f4f6] border-t px-2 pt-2", children: [
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-        /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: "p-1 text-gray-600", children: /* @__PURE__ */ jsx(Plus, { className: "w-5 h-5" }) }),
-        /* @__PURE__ */ jsxs("label", { className: "p-1 text-gray-600 cursor-pointer", title: "\u30AB\u30E1\u30E9/\u5199\u771F", children: [
-          /* @__PURE__ */ jsx(Camera, { className: "w-5 h-5" }),
-          /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*", onChange: (e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f)) })
+        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+          /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: "p-1 text-gray-600", children: /* @__PURE__ */ jsx(Plus, { className: "w-5 h-5" }) }),
+          /* @__PURE__ */ jsxs("label", { className: "p-1 text-gray-600 cursor-pointer", title: "\u30AB\u30E1\u30E9/\u5199\u771F", children: [
+            /* @__PURE__ */ jsx(Camera, { className: "w-5 h-5" }),
+            /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*", onChange: (e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f)) })
+          ] }),
+          /* @__PURE__ */ jsxs("label", { className: "p-1 text-gray-600 cursor-pointer", title: "\u753B\u50CF", children: [
+            /* @__PURE__ */ jsx(ImageIcon, { className: "w-5 h-5" }),
+            /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*", onChange: (e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f)) })
+          ] }),
+          !isRecording ? /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-3 py-[6px] text-[12px] leading-none focus:outline-none placeholder:text-[#9ca3af]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-full px-3 py-[6px] flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-[11px]", children: [
+            /* @__PURE__ */ jsx("div", { className: "w-2 h-2 rounded-full bg-red-500 animate-ping" }),
+            "\u9332\u97F3\u4E2D... ",
+            Math.floor(recordingTime / 60),
+            ":",
+            (recordingTime % 60).toString().padStart(2, "0")
+          ] }) }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setStickerMenuOpen(!stickerMenuOpen), className: `p-1 text-gray-600 ${stickerMenuOpen ? "text-green-600" : ""}`, children: /* @__PURE__ */ jsx(Smile, { className: "w-5 h-5" }) }),
+          !isRecording ? /* @__PURE__ */ jsx("button", { onClick: startRecording, className: "p-1 text-gray-600", children: /* @__PURE__ */ jsx(Mic, { className: "w-5 h-5" }) }) : /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
+            /* @__PURE__ */ jsx("button", { onClick: cancelRecording, className: "p-1 text-gray-600", title: "\u30AD\u30E3\u30F3\u30BB\u30EB", children: /* @__PURE__ */ jsx(Trash2, { className: "w-5 h-5" }) }),
+            /* @__PURE__ */ jsx("button", { onClick: stopRecording, className: "p-1 text-red-600 animate-bounce", title: "\u505C\u6B62\u3057\u3066\u9001\u4FE1", children: /* @__PURE__ */ jsx(StopCircle, { className: "w-5 h-5 fill-current" }) })
+          ] }),
+          (text || isUploading) && /* @__PURE__ */ jsx("button", { onClick: () => sendMessage(text), disabled: !text && !isUploading, className: `p-1 ${text ? "text-green-600" : "text-gray-300"}`, children: isUploading ? /* @__PURE__ */ jsx(Loader2, { className: "w-5 h-5 animate-spin text-green-600" }) : /* @__PURE__ */ jsx(Send, { className: "w-5 h-5" }) })
         ] }),
-        /* @__PURE__ */ jsxs("label", { className: "p-1 text-gray-600 cursor-pointer", title: "\u753B\u50CF", children: [
-          /* @__PURE__ */ jsx(ImageIcon, { className: "w-5 h-5" }),
-          /* @__PURE__ */ jsx("input", { type: "file", className: "hidden", accept: "image/*", onChange: (e) => handleFileUpload(e, (d, t, f) => sendMessage(d, t, {}, f)) })
-        ] }),
-        !isRecording ? /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-3 py-[6px] text-[12px] leading-none focus:outline-none placeholder:text-[#9ca3af]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-full px-3 py-[6px] flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-[11px]", children: [
-          /* @__PURE__ */ jsx("div", { className: "w-2 h-2 rounded-full bg-red-500 animate-ping" }),
-          "\u9332\u97F3\u4E2D... ",
-          Math.floor(recordingTime / 60),
-          ":",
-          (recordingTime % 60).toString().padStart(2, "0")
-        ] }) }),
-        /* @__PURE__ */ jsx("button", { onClick: () => setStickerMenuOpen(!stickerMenuOpen), className: `p-1 text-gray-600 ${stickerMenuOpen ? "text-green-600" : ""}`, children: /* @__PURE__ */ jsx(Smile, { className: "w-5 h-5" }) }),
-        !isRecording ? /* @__PURE__ */ jsx("button", { onClick: startRecording, className: "p-1 text-gray-600", children: /* @__PURE__ */ jsx(Mic, { className: "w-5 h-5" }) }) : /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
-          /* @__PURE__ */ jsx("button", { onClick: cancelRecording, className: "p-1 text-gray-600", title: "\u30AD\u30E3\u30F3\u30BB\u30EB", children: /* @__PURE__ */ jsx(Trash2, { className: "w-5 h-5" }) }),
-          /* @__PURE__ */ jsx("button", { onClick: stopRecording, className: "p-1 text-red-600 animate-bounce", title: "\u505C\u6B62\u3057\u3066\u9001\u4FE1", children: /* @__PURE__ */ jsx(StopCircle, { className: "w-5 h-5 fill-current" }) })
-        ] }),
-        (text || isUploading) && /* @__PURE__ */ jsx("button", { onClick: () => sendMessage(text), disabled: !text && !isUploading, className: `p-1 ${text ? "text-green-600" : "text-gray-300"}`, children: isUploading ? /* @__PURE__ */ jsx(Loader2, { className: "w-5 h-5 animate-spin text-green-600" }) : /* @__PURE__ */ jsx(Send, { className: "w-5 h-5" }) })
-      ] }),
-      /* iPhone\u98A8\u306E\u4E0B\u90E8\u30D0\u30FC */
-      /* @__PURE__ */ jsx("div", { className: "h-1 w-28 bg-black/70 rounded-full mx-auto mt-2 mb-1" })
-    ] }),  viewProfile && /* @__PURE__ */ jsx(FriendProfileModal, { friend: viewProfile, onClose: () => setViewProfile(null), onAddFriend: addFriendById, onStartChat: async (uid) => {
+        /* iPhone\u98A8\u306E\u4E0B\u90E8\u30D0\u30FC */
+        /* @__PURE__ */ jsx("div", { className: "h-1 w-28 bg-black/70 rounded-full mx-auto mt-2 mb-1" })
+      ] }),viewProfile && /* @__PURE__ */ jsx(FriendProfileModal, { friend: viewProfile, onClose: () => setViewProfile(null), onAddFriend: addFriendById, onStartChat: async (uid) => {
       // トーク開始時は「友だち追加」も同時に行う
       try {
         await addFriendById?.(uid);
