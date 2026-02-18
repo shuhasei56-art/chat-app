@@ -5663,9 +5663,9 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
   const QUOTA_BACKOFF_MS = 30_000; // クォータ超過時の待機
 
   const COST = 100;
-  const WIN = 5000;
-  const PROB_MIN = 1 / 10;
-  const PROB_MAX = 1 / 5;
+  const WIN = 1000;
+  const PROB_MIN = 2 / 10;
+  const PROB_MAX = 1 / 9;
 
   const SYMBOLS = useMemo(() => ["🍒", "🍋", "🔔", "💎", "BAR", "7"], []);
 
