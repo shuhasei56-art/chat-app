@@ -5666,7 +5666,6 @@ const DiceMiniGameView = ({ user, invite, onBack, showNotification, profile }) =
   ] });
 };
 const PachinkoView = ({ user, profile, onBack, showNotification }) => {
-  const [isSpinning, setIsSpinning] = useState(false);
   const [lastResult, setLastResult] = useState(null);
   const [reels, setReels] = useState(["🍒", "🔔", "7"]);
   const [isSpinning, setIsSpinning] = useState(false);
