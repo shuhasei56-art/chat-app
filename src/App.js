@@ -538,21 +538,21 @@ const handleGuestLogin = async () => {
       !isLoginMode && /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
         /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-gray-400 ml-2", children: "\u8868\u793A\u540D" }),
         /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border", children: [
-          /* @__PURE__ */ jsx(User, { className: "w-4 h-4 text-gray-400" }),
+          /* @__PURE__ */ jsx(User, { className: "w-3 h-3 text-gray-400" }),
           /* @__PURE__ */ jsx("input", { className: "bg-transparent w-full outline-none text-sm font-bold", placeholder: "\u5C71\u7530 \u592A\u90CE", value: displayName, onChange: (e) => setDisplayName(e.target.value) })
         ] })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
         /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-gray-400 ml-2", children: "\u30E6\u30FC\u30B6\u30FCID" }),
         /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border", children: [
-          /* @__PURE__ */ jsx(AtSign, { className: "w-4 h-4 text-gray-400" }),
+          /* @__PURE__ */ jsx(AtSign, { className: "w-3 h-3 text-gray-400" }),
           /* @__PURE__ */ jsx("input", { className: "bg-transparent w-full outline-none text-sm font-bold", placeholder: "user_id", value: userId, onChange: (e) => setUserId(e.target.value) })
         ] })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "space-y-1", children: [
         /* @__PURE__ */ jsx("label", { className: "text-[10px] font-bold text-gray-400 ml-2", children: "\u30D1\u30B9\u30EF\u30FC\u30C9" }),
         /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-2xl px-4 py-3 flex items-center gap-2 border", children: [
-          /* @__PURE__ */ jsx(KeyRound, { className: "w-4 h-4 text-gray-400" }),
+          /* @__PURE__ */ jsx(KeyRound, { className: "w-3 h-3 text-gray-400" }),
           /* @__PURE__ */ jsx("input", { className: "bg-transparent w-full outline-none text-sm font-bold", type: "password", placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022", value: password, onChange: (e) => setPassword(e.target.value) })
         ] })
       ] }),
@@ -2406,7 +2406,7 @@ const MessageItem = React.memo(({ m, user, sender, isGroup, db: db2, appId: appI
         ] }),
         m.type === "contact" && /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2 min-w-[150px] p-1", children: [
           /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-400 mb-1 border-b border-gray-100 pb-1", children: "\u9023\u7D61\u5148" }),
-          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
             /* @__PURE__ */ jsx("img", { src: m.contactAvatar, className: "w-10 h-10 rounded-full border shadow-sm", loading: "lazy" }),
             /* @__PURE__ */ jsx("span", { className: "font-bold text-sm truncate", children: m.contactName })
           ] }),
@@ -2608,7 +2608,7 @@ useEffect(() => {
 
   return /* @__PURE__ */ jsxs("div", { className: "bg-white p-4 mb-2 border-b", children: [
     /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-3", children: [
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
         /* @__PURE__ */ jsxs("div", { className: "relative", children: [
         /* @__PURE__ */ jsx("img", { src: u?.avatar, className: "w-10 h-10 rounded-xl border", loading: "lazy" }, u?.avatar),
         isTodayBirthday(u?.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
@@ -4586,16 +4586,16 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         ] }),
         /* @__PURE__ */ jsx("button", { onClick: () => setReplyTo(null), className: "p-1 hover:bg-gray-200 rounded-full", children: /* @__PURE__ */ jsx(X, { className: "w-4 h-4 text-gray-500" }) })
       ] }),
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
-        /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: "p-0.5", children: /* @__PURE__ */ jsx(Plus, { className: "w-4 h-4 text-gray-400" }) }),
-        !isRecording ? /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-3 py-1 text-[13px] leading-none focus:outline-none placeholder:text-[#9ca3af]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-full px-4 py-2 flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-[11px]", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ jsx("button", { onClick: () => setPlusMenuOpen(!plusMenuOpen), className: "p-0.5", children: /* @__PURE__ */ jsx(Plus, { className: "w-3 h-3 text-gray-400" }) }),
+        !isRecording ? /* @__PURE__ */ jsx("input", { className: "flex-1 bg-[#e6e6ea] rounded-full px-3 py-1 text-[13px] leading-none focus:outline-none placeholder:text-[#9ca3af]", placeholder: "\u30E1\u30C3\u30BB\u30FC\u30B8\u3092\u5165\u529B", value: text, onChange: (e) => setText(e.target.value), onKeyPress: (e) => e.key === "Enter" && sendMessage(text) }) : /* @__PURE__ */ jsx("div", { className: "flex-1 bg-red-50 rounded-full px-3 py-1 flex items-center justify-between animate-pulse", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-500 font-bold text-[11px]", children: [
           /* @__PURE__ */ jsx("div", { className: "w-2 h-2 rounded-full bg-red-500 animate-ping" }),
           "\u9332\u97F3\u4E2D... ",
           Math.floor(recordingTime / 60),
           ":",
           (recordingTime % 60).toString().padStart(2, "0")
         ] }) }),
-        /* @__PURE__ */ jsx("button", { onClick: () => setStickerMenuOpen(!stickerMenuOpen), className: `p-1.5 rounded-full bg-[#e6e6ea] hover:bg-gray-300 ${stickerMenuOpen ? "text-green-500" : "text-gray-500"}`, children: /* @__PURE__ */ jsx(Smile, { className: "w-4 h-4" }) }),
+        /* @__PURE__ */ jsx("button", { onClick: () => setStickerMenuOpen(!stickerMenuOpen), className: `p-1 rounded-full bg-[#e6e6ea] hover:bg-gray-300 ${stickerMenuOpen ? "text-green-500" : "text-gray-500"}`, children: /* @__PURE__ */ jsx(Smile, { className: "w-4 h-4" }) }),
         !isRecording ? /* @__PURE__ */ jsx("button", { onClick: startRecording, className: "p-1.5 rounded-full bg-[#e6e6ea] text-gray-500 hover:bg-gray-300", children: /* @__PURE__ */ jsx(Mic, { className: "w-4 h-4" }) }) : /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
           /* @__PURE__ */ jsx("button", { onClick: cancelRecording, className: "p-1.5 rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300", title: "\u30AD\u30E3\u30F3\u30BB\u30EB", children: /* @__PURE__ */ jsx(Trash2, { className: "w-4 h-4" }) }),
           /* @__PURE__ */ jsx("button", { onClick: stopRecording, className: "p-1.5 rounded-full bg-red-500 text-white hover:bg-red-600 animate-bounce", title: "\u505C\u6B62\u3057\u3066\u9001\u4FE1", children: /* @__PURE__ */ jsx(StopCircle, { className: "w-4 h-4 fill-current" }) })
