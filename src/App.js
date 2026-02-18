@@ -5666,7 +5666,7 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
   const WIN = 20000;
   const PROB_MIN = 1 / 69;
   const PROB_MAX = 1 / 30;
-
+  const SLOT_MIN_INTERVAL_MS = 400; // 待ち時間を0.4秒に短縮
   const SYMBOLS = useMemo(() => ["🍒", "🍋", "🔔", "💎", "BAR", "7"], []);
 
   const randSymbol = useCallback(() => {
