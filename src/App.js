@@ -5664,7 +5664,7 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
 
   const COST = 100;
   const WIN = 1000;
-  const PROB_MIN = 1 / 80;
+  const PROB_MIN = 1 / 18;
   const PROB_MAX = 1 / 30;
 
   const SYMBOLS = useMemo(() => ["🍒", "🍋", "🔔", "💎", "BAR", "7"], []);
