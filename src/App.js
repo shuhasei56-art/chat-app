@@ -5659,14 +5659,14 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
   const [reels, setReels] = useState(["🍒", "🔔", "7"]);
   const spinTimerRef = useRef(null);
   const slotCooldownUntilRef = useRef(0);
-  const SLOT_MIN_INTERVAL_MS = 1200; // 連打/多重実行防止
+  const SLOT_MIN_INTERVAL_MS = 400; // 連打/多重実行防止
   const QUOTA_BACKOFF_MS = 30_000; // クォータ超過時の待機
 
   const COST = 100;
   const WIN = 20000;
   const PROB_MIN = 1 / 69;
   const PROB_MAX = 1 / 30;
-  const SLOT_MIN_INTERVAL_MS = 400; // 待ち時間を0.4秒に短縮
+  
   const SYMBOLS = useMemo(() => ["🍒", "🍋", "🔔", "💎", "BAR", "7"], []);
 
   const randSymbol = useCallback(() => {
