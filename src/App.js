@@ -5759,7 +5759,7 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
       stopSpinAnimation();
     } finally {
       // 修正3: ボタンのロック解除待ち時間 (250ms) を極小にするか削除
-      // setTimeout(() => setIsSpinning(false), 250); <-- これを削除して即時解除
+      
       setIsSpinning(false); 
     }
   };
