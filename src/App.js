@@ -941,7 +941,7 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
       const unsubCandidates = onSnapshot(candidateQuery, (snapshot) => {
         snapshot.docChanges().forEach(async (change) => {
           if (change.type !== "added") return;
-          const data = change.doc.data();
+          const data = change...doc.data();
           if (!data || data.senderId === user.uid || !data.candidate) return;
           try {
             if (pc.remoteDescription) {
@@ -1403,7 +1403,7 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
         if (ch.type !== "added") return;
         if (seen.has(ch.doc.id)) return;
         seen.add(ch.doc.id);
-        const d = ch.doc.data();
+        const d = ch...doc.data();
         if (!d || d.from === user.uid) return;
         try {
           pc.addIceCandidate(new RTCIceCandidate(d.candidate));
@@ -2727,7 +2727,7 @@ const BirthdayCardBox = ({ user, setView }) => {
     if (!user) return;
     const q = query(collection(db, "artifacts", appId, "public", "data", "birthday_cards"), where("toUserId", "==", user.uid));
     const unsub = onSnapshot(q, (snap) => {
-      const cards = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const cards = snap.docs.map((d) => ({ id: d.id, .....d.data() }));
       cards.sort((a, b) => (b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0) - (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0));
       setMyCards(cards);
     });
@@ -3221,7 +3221,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     if (activeTab === "shop" && activeShopTab === "stickers") {
       const q = query(collection(db, "artifacts", appId, "public", "data", "sticker_packs"), where("status", "==", "approved"));
       const unsub = onSnapshot(q, (snap) => {
-        const fetchedPacks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const fetchedPacks = snap.docs.map((d) => ({ id: d.id, .....d.data() }));
         fetchedPacks.sort((a, b) => {
           const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : a.createdAt?.seconds * 1e3 || 0;
           const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : b.createdAt?.seconds * 1e3 || 0;
@@ -3233,7 +3233,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     } else if (activeTab === "admin" && adminSubTab === "stickers") {
       const q = query(collection(db, "artifacts", appId, "public", "data", "sticker_packs"), where("status", "==", "pending"));
       const unsub = onSnapshot(q, (snap) => {
-        const fetchedPacks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const fetchedPacks = snap.docs.map((d) => ({ id: d.id, .....d.data() }));
         setPacks(fetchedPacks);
       });
       return () => unsub();
@@ -3251,7 +3251,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
           id: d.id,
           ref: d.ref,
           marketRefPath: d.ref.path,
-          ...d.data()
+          .....d.data()
         }));
         items.sort((a, b) => {
           const tA = a.listedAt?.toDate ? a.listedAt.toDate().getTime() : a.listedAt?.seconds * 1e3 || a.updatedAt?.seconds * 1e3 || 0;
@@ -3267,7 +3267,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     );
     const qMine = collection(db, "artifacts", appId, "public", "data", "users", user.uid, "effects");
     const unsubMine = onSnapshot(qMine, (snap) => {
-      const mine = snap.docs.map((d) => ({ id: d.id, ref: d.ref, ...d.data() }));
+      const mine = snap.docs.map((d) => ({ id: d.id, ref: d.ref, .....d.data() }));
       mine.sort((a, b) => {
         const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : a.createdAt?.seconds * 1e3 || 0;
         const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : b.createdAt?.seconds * 1e3 || 0;
@@ -3304,7 +3304,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
               sourceRefPath: d.ref.path,
               creatorId: uid,
               ownerId: uid,
-              ...d.data()
+              .....d.data()
             }));
           })
         );
@@ -3969,10 +3969,10 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   useEffect(() => {
     const q = query(collection(db2, "artifacts", appId2, "public", "data", "sticker_packs"), where("purchasedBy", "array-contains", user.uid));
     const unsub = onSnapshot(q, (snap) => {
-      const packs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const packs = snap.docs.map((d) => ({ id: d.id, .....d.data() }));
       const q2 = query(collection(db2, "artifacts", appId2, "public", "data", "sticker_packs"), where("authorId", "==", user.uid));
       getDocs(q2).then((snap2) => {
-        const ownPacks = snap2.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const ownPacks = snap2.docs.map((d) => ({ id: d.id, .....d.data() }));
         const all = [...packs, ...ownPacks];
         const unique = Array.from(new Map(all.map((item) => [item.id, item])).values());
         setMyStickerPacks(unique);
@@ -3988,7 +3988,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     if (!activeChatId) return;
     const q = query(collection(db2, "artifacts", appId2, "public", "data", "chats", activeChatId, "messages"), orderBy("createdAt", "asc"), limitToLast(messageLimit));
     const unsub = onSnapshot(q, (snap) => {
-      setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setMessages(snap.docs.map((d) => ({ id: d.id, .....d.data() })));
     });
     return () => unsub();
   }, [activeChatId, messageLimit]);
@@ -6127,7 +6127,7 @@ function App() {
         return;
       }
       const d = snap.docs[0];
-      const inv = { id: d.id, ...d.data() };
+      const inv = { id: d.id, .....d.data() };
       setMiniGameInvite(inv);
       const fromUid = inv.fromUid;
       if (fromUid) {
@@ -6162,7 +6162,7 @@ const loadMorePosts = async () => {
       limit(POSTS_PAGE_SIZE)
     );
     const snap = await getDocs(q);
-    const more = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const more = snap.docs.map((d) => ({ id: d.id, .....d.data() }));
     if (more.length > 0) {
       setPosts((prev) => {
         const seen = new Set(prev.map((p) => p.id));
@@ -6193,13 +6193,13 @@ const loadMorePosts = async () => {
       setAllUsers(snap.docs.map((d) => d.data()));
     });
     const unsubEffects = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "users", user.uid, "effects"), orderBy("createdAt", "desc")), (snap) => {
-      setUserEffects(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setUserEffects(snap.docs.map((d) => ({ id: d.id, .....d.data() })));
     });
     const unsubChats = onSnapshot(query(collection(db, "artifacts", appId, "public", "data", "chats"), where("participants", "array-contains", user.uid)), (snap) => {
-      const chatList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const chatList = snap.docs.map((d) => ({ id: d.id, .....d.data() }));
       snap.docChanges().forEach((change) => {
         if (change.type === "added" || change.type === "modified") {
-          const data = change.doc.data();
+          const data = change...doc.data();
           const lastMsg = data.lastMessage;
           if (lastMsg && lastMsg.senderId !== user.uid && lastMsg.createdAt) {
             const now = Date.now();
@@ -6261,7 +6261,7 @@ const loadMorePosts = async () => {
       limit(POSTS_PAGE_SIZE)
     );
     const unsubPosts = onSnapshot(firstPostsQuery, (snap) => {
-      const first = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const first = snap.docs.map((d) => ({ id: d.id, .....d.data() }));
       // 最新ページの末尾カーソル（常に更新）
       if (snap.docs.length > 0) {
         postsTopCursorRef.current = snap.docs[snap.docs.length - 1];
