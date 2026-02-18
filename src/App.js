@@ -4603,7 +4603,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         /* iPhone\u98A8\u306E\u4E0B\u90E8\u30D0\u30FC */
         /* @__PURE__ */ jsx("div", { className: "h-1 w-28 bg-black/70 rounded-full mx-auto mt-2 mb-1" })
       ] }),
-    viewProfile && /* @__PURE__ */ jsx(FriendProfileModal, { friend: viewProfile, onClose: () => setViewProfile(null), onAddFriend: addFriendById, onStartChat: async (uid) => {
+    viewProfile ? /* @__PURE__ */ jsx(FriendProfileModal, { friend: viewProfile, onClose: () => setViewProfile(null), onAddFriend: addFriendById, onStartChat: async (uid) => {
       // トーク開始時は「友だち追加」も同時に行う
       try {
         await addFriendById?.(uid);
@@ -4614,9 +4614,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
     }, onTransfer: () => {
       setCoinModalTarget(viewProfile);
       setViewProfile(null);
-    }, myUid: user.uid, myProfile: profile, allUsers, showNotification }),
-    coinModalTarget && /* @__PURE__ */ jsx(CoinTransferModal, { onClose: () => setCoinModalTarget(null), myWallet: profile.wallet, myUid: user.uid, targetUid: coinModalTarget.uid, targetName: coinModalTarget.name, showNotification }),
-  ] });
+    }, myUid: user.uid, myProfile: profile, allUsers, showNotification }) : null,
+    coinModalTarget ? /* @__PURE__ */ jsx(CoinTransferModal, { onClose: () => setCoinModalTarget(null), myWallet: profile.wallet, myUid: user.uid, targetUid: coinModalTarget.uid, targetName: coinModalTarget.name, showNotification }) : null
 };
 const VoomView = ({ user, allUsers, profile, posts, showNotification, db: db2, appId: appId2, onLoadMore, hasMore, loadingMore }) => {
   const [content, setContent] = useState("");
