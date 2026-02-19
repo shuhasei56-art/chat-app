@@ -5653,241 +5653,6 @@ const DiceMiniGameView = ({ user, invite, onBack, showNotification, profile }) =
     ] })
   ] });
 };
-const PachinkoView = ({ user, profile, onBack, showNotification }) => {
-  const [isSpinning, setIsSpinning] = useState(false);
-  const [lastResult, setLastResult] = useState(null);
-  const [chinchiroOpen, setChinchiroOpen] = useState(false);
-  const [reels, setReels] = useState(["🍒", "🔔", "7"]);
-  const [stopped, setStopped] = useState([true, true, true]); // 初期は止まっている扱い
-  const spinTimerRef = useRef(null);
-  const stoppedRef = useRef([true, true, true]);
-  const slotCooldownUntilRef = useRef(0);
-  const spinIdRef = useRef(null);
-  const finishingRef = useRef(false);
-
-  const COST = 100;
-  const WIN = 2000;
-  const SLOT_MIN_INTERVAL_MS = 1200; // 連打防止
-  const QUOTA_BACKOFF_MS = 30_000;
-
-  const SYMBOLS = useMemo(() => ["🍒", "🍋", "🔔", "💎", "BAR", "7"], []);
-
-  const randSymbol = useCallback(() => {
-    return SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
-  }, [SYMBOLS]);
-
-  const stopSpinAnimation = () => {
-    if (spinTimerRef.current) {
-      clearInterval(spinTimerRef.current);
-      spinTimerRef.current = null;
-    }
-  };
-
-  const startSpinAnimation = () => {
-    stopSpinAnimation();
-    spinTimerRef.current = setInterval(() => {
-      setReels((prev) => prev.map((v, i) => (stoppedRef.current[i] ? v : randSymbol())));
-    }, 90);
-  };
-
-  useEffect(() => {
-    return () => stopSpinAnimation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const canPlay = !isSpinning && (profile?.wallet || 0) >= COST;
-
-  const beginPlay = async () => {
-    const now = Date.now();
-    if (now < slotCooldownUntilRef.current) {
-      const sec = Math.ceil((slotCooldownUntilRef.current - now) / 1000);
-      return showNotification(`しばらく待ってから再試行してください（あと${sec}秒）`);
-    }
-    if ((profile?.wallet || 0) < COST) return showNotification("コイン残高が足りません（1回=100コイン）");
-    if (isSpinning) return;
-
-    slotCooldownUntilRef.current = now + SLOT_MIN_INTERVAL_MS;
-
-    // 先にコストを引く（途中で中断しても返金しない仕様）
-    try {
-      const spinId = now;
-      spinIdRef.current = spinId;
-      finishingRef.current = false;
-
-      await runTransaction(db, async (t) => {
-        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-        const uDoc = await t.get(userRef);
-        if (!uDoc.exists()) {
-          t.set(userRef, {
-            uid: user.uid,
-            displayName: user.displayName || "",
-            photoURL: user.photoURL || "",
-            wallet: 0,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }, { merge: true });
-        }
-        const current = (uDoc.exists() ? (uDoc.data().wallet || 0) : 0);
-        if (current < COST) throw new Error("残高不足");
-        const lastMs = uDoc.exists() ? (uDoc.data().slotLastPlayedMs || 0) : 0;
-        const nowMs = Date.now();
-        if (nowMs - lastMs < SLOT_MIN_INTERVAL_MS) throw new Error("操作が早すぎます");
-        t.update(userRef, { slotLastPlayedMs: nowMs });
-        t.update(userRef, { wallet: increment(-COST) });
-        t.update(userRef, {
-          slotPlays: increment(1),
-          slotSpinId: spinId,
-          slotSpinState: "spinning",
-          updatedAt: serverTimestamp()
-        });
-      });
-
-      // スタート
-      setIsSpinning(true);
-      setLastResult(null);
-      setStopped([false, false, false]);
-      stoppedRef.current = [false, false, false];
-      startSpinAnimation();
-      showNotification("スロット開始！順番にSTOPしてください");
-    } catch (e) {
-      console.error(e);
-      const msg = (e && typeof e === "object" && "message" in e) ? e.message : (typeof e === "string" ? e : String(e));
-      const lower = (msg || "").toLowerCase();
-      if (lower.includes("quota") || lower.includes("resource_exhausted") || lower.includes("resource-exhausted") || lower.includes("exceeded")) {
-        slotCooldownUntilRef.current = Date.now() + QUOTA_BACKOFF_MS;
-        showNotification("混雑しています。30秒ほど待ってからもう一度お試しください（Quota exceeded）");
-      } else {
-        showNotification(msg || "開始に失敗しました");
-      }
-    }
-  };
-
-  const finalize = async () => {
-    if (finishingRef.current) return;
-    finishingRef.current = true;
-
-    stopSpinAnimation();
-    setIsSpinning(false);
-
-    const a = reels[0];
-    const b = reels[1];
-    const c = reels[2];
-    const isWin = a === b && b === c;
-
-    try {
-      const spinId = spinIdRef.current;
-      await runTransaction(db, async (t) => {
-        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-        const uDoc = await t.get(userRef);
-        if (!uDoc.exists()) throw new Error("ユーザー情報が見つかりません");
-        const data = uDoc.data() || {};
-        // 二重支払い防止
-        if (data.slotSpinId !== spinId || data.slotSpinState !== "spinning") return;
-
-        if (isWin) {
-          t.update(userRef, { wallet: increment(WIN) });
-          t.update(userRef, { slotWins: increment(1) });
-        }
-
-        t.update(userRef, {
-          slotSpinId: null,
-          slotSpinState: "idle",
-          slotLastResult: { a, b, c, win: isWin, payout: isWin ? WIN : 0, at: Date.now() },
-          updatedAt: serverTimestamp()
-        });
-      });
-
-      const payout = isWin ? WIN : 0;
-      const delta = payout - COST;
-      setLastResult({ cost: COST, win: isWin, payout, delta, reels: [a, b, c] });
-      showNotification(isWin ? `当たり！ +${WIN}コイン` : "ハズレ…");
-    } catch (e) {
-      console.error(e);
-      showNotification((e && e.message) ? e.message : "結果確定に失敗しました");
-    }
-  };
-
-  const stopReel = (idx) => {
-    if (!isSpinning) return;
-    if (stoppedRef.current[idx]) return;
-
-    const next = [...stoppedRef.current];
-    next[idx] = true;
-    stoppedRef.current = next;
-    setStopped(next);
-
-    // 最後の停止で確定
-    if (next[0] && next[1] && next[2]) {
-      finalize();
-    }
-  };
-
-  return (
-    <div className="h-full flex flex-col">
-      <div className="px-4 pt-4 pb-3 flex items-center justify-between">
-        <button onClick={onBack} className="text-slate-600 font-bold">← 戻る</button>
-        <div className="text-xl font-extrabold">スロット</div>
-        <div className="text-slate-600 font-bold">残高: {profile?.wallet || 0}</div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-4 pb-24">
-        <div className="rounded-3xl bg-white border shadow-sm p-4">
-          <div className="text-sm text-slate-600 font-bold mb-2">1回 {COST} コイン / 当たり {WIN} コイン</div>
-
-          <div className="grid grid-cols-3 gap-3 items-center justify-center">
-            {reels.map((s, i) => (
-              <div key={i} className="rounded-2xl border bg-slate-50 h-24 flex items-center justify-center text-3xl font-extrabold">
-                {s}
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-4 grid grid-cols-3 gap-3">
-            {[0, 1, 2].map((i) => (
-              <button
-                key={i}
-                onClick={() => stopReel(i)}
-                disabled={!isSpinning || stopped[i]}
-                className={`py-2 rounded-2xl font-extrabold ${(!isSpinning || stopped[i]) ? "bg-slate-100 text-slate-400" : "bg-red-500 text-white active:scale-[0.99]"}`}
-              >
-                STOP
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-4 flex gap-2">
-            <button
-              onClick={beginPlay}
-              disabled={!canPlay}
-              className={`flex-1 py-3 rounded-2xl font-extrabold ${canPlay ? "bg-green-600 text-white" : "bg-slate-200 text-slate-500"}`}
-            >
-              SPIN
-            </button>
-            <button
-              onClick={() => {
-                // 中断（結果は確定しない＝コストは消費済み）
-                stopSpinAnimation();
-                setIsSpinning(false);
-                setStopped([true, true, true]);
-                stoppedRef.current = [true, true, true];
-                showNotification("中断しました");
-              }}
-              disabled={!isSpinning}
-              className={`px-4 py-3 rounded-2xl font-extrabold ${isSpinning ? "bg-slate-100 text-slate-700" : "bg-slate-50 text-slate-300"}`}
-            >
-              中断
-            </button>
-          </div>
-
-          <button
-            onClick={() => setChinchiroOpen(true)}
-            className="mt-3 w-full py-3 rounded-2xl font-extrabold bg-indigo-600 text-white"
-          >
-            オンライン チンチロ
-          </button>
-
-          {lastResult ? (
-            <div className={`mt-4 p-3 rounded-2xl font-bold ${lastResult.win ? "bg-green-50 
 const ChinchiroPanel = ({ user, profile, showNotification, onClose }) => {
   const [tab, setTab] = useState("find"); // find | room
   const [rooms, setRooms] = useState([]);
@@ -6339,6 +6104,255 @@ text-green-700" : "bg-slate-50 text-slate-700"}`}>
     ) : null}
   );
 };
+const PachinkoView = ({ user, profile, onBack, showNotification }) => {
+  const [isSpinning, setIsSpinning] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+  const [chinchiroOpen, setChinchiroOpen] = useState(false);
+  const [reels, setReels] = useState(["🍒", "🔔", "7"]);
+  const [stopped, setStopped] = useState([true, true, true]); // 初期は止まっている扱い
+  const spinTimerRef = useRef(null);
+  const stoppedRef = useRef([true, true, true]);
+  const slotCooldownUntilRef = useRef(0);
+  const spinIdRef = useRef(null);
+  const finishingRef = useRef(false);
+
+  const COST = 100;
+  const WIN = 2000;
+  const SLOT_MIN_INTERVAL_MS = 1200; // 連打防止
+  const QUOTA_BACKOFF_MS = 30_000;
+
+  const SYMBOLS = useMemo(() => ["🍒", "🍋", "🔔", "💎", "BAR", "7"], []);
+
+  const randSymbol = useCallback(() => {
+    return SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
+  }, [SYMBOLS]);
+
+  const stopSpinAnimation = () => {
+    if (spinTimerRef.current) {
+      clearInterval(spinTimerRef.current);
+      spinTimerRef.current = null;
+    }
+  };
+
+  const startSpinAnimation = () => {
+    stopSpinAnimation();
+    spinTimerRef.current = setInterval(() => {
+      setReels((prev) => prev.map((v, i) => (stoppedRef.current[i] ? v : randSymbol())));
+    }, 90);
+  };
+
+  useEffect(() => {
+    return () => stopSpinAnimation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const canPlay = !isSpinning && (profile?.wallet || 0) >= COST;
+
+  const beginPlay = async () => {
+    const now = Date.now();
+    if (now < slotCooldownUntilRef.current) {
+      const sec = Math.ceil((slotCooldownUntilRef.current - now) / 1000);
+      return showNotification(`しばらく待ってから再試行してください（あと${sec}秒）`);
+    }
+    if ((profile?.wallet || 0) < COST) return showNotification("コイン残高が足りません（1回=100コイン）");
+    if (isSpinning) return;
+
+    slotCooldownUntilRef.current = now + SLOT_MIN_INTERVAL_MS;
+
+    // 先にコストを引く（途中で中断しても返金しない仕様）
+    try {
+      const spinId = now;
+      spinIdRef.current = spinId;
+      finishingRef.current = false;
+
+      await runTransaction(db, async (t) => {
+        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+        const uDoc = await t.get(userRef);
+        if (!uDoc.exists()) {
+          t.set(userRef, {
+            uid: user.uid,
+            displayName: user.displayName || "",
+            photoURL: user.photoURL || "",
+            wallet: 0,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+        }
+        const current = (uDoc.exists() ? (uDoc.data().wallet || 0) : 0);
+        if (current < COST) throw new Error("残高不足");
+        const lastMs = uDoc.exists() ? (uDoc.data().slotLastPlayedMs || 0) : 0;
+        const nowMs = Date.now();
+        if (nowMs - lastMs < SLOT_MIN_INTERVAL_MS) throw new Error("操作が早すぎます");
+        t.update(userRef, { slotLastPlayedMs: nowMs });
+        t.update(userRef, { wallet: increment(-COST) });
+        t.update(userRef, {
+          slotPlays: increment(1),
+          slotSpinId: spinId,
+          slotSpinState: "spinning",
+          updatedAt: serverTimestamp()
+        });
+      });
+
+      // スタート
+      setIsSpinning(true);
+      setLastResult(null);
+      setStopped([false, false, false]);
+      stoppedRef.current = [false, false, false];
+      startSpinAnimation();
+      showNotification("スロット開始！順番にSTOPしてください");
+    } catch (e) {
+      console.error(e);
+      const msg = (e && typeof e === "object" && "message" in e) ? e.message : (typeof e === "string" ? e : String(e));
+      const lower = (msg || "").toLowerCase();
+      if (lower.includes("quota") || lower.includes("resource_exhausted") || lower.includes("resource-exhausted") || lower.includes("exceeded")) {
+        slotCooldownUntilRef.current = Date.now() + QUOTA_BACKOFF_MS;
+        showNotification("混雑しています。30秒ほど待ってからもう一度お試しください（Quota exceeded）");
+      } else {
+        showNotification(msg || "開始に失敗しました");
+      }
+    }
+  };
+
+  const finalize = async () => {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+
+    stopSpinAnimation();
+    setIsSpinning(false);
+
+    const a = reels[0];
+    const b = reels[1];
+    const c = reels[2];
+    const isWin = a === b && b === c;
+
+    try {
+      const spinId = spinIdRef.current;
+      await runTransaction(db, async (t) => {
+        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+        const uDoc = await t.get(userRef);
+        if (!uDoc.exists()) throw new Error("ユーザー情報が見つかりません");
+        const data = uDoc.data() || {};
+        // 二重支払い防止
+        if (data.slotSpinId !== spinId || data.slotSpinState !== "spinning") return;
+
+        if (isWin) {
+          t.update(userRef, { wallet: increment(WIN) });
+          t.update(userRef, { slotWins: increment(1) });
+        }
+
+        t.update(userRef, {
+          slotSpinId: null,
+          slotSpinState: "idle",
+          slotLastResult: { a, b, c, win: isWin, payout: isWin ? WIN : 0, at: Date.now() },
+          updatedAt: serverTimestamp()
+        });
+      });
+
+      const payout = isWin ? WIN : 0;
+      const delta = payout - COST;
+      setLastResult({ cost: COST, win: isWin, payout, delta, reels: [a, b, c] });
+      showNotification(isWin ? `当たり！ +${WIN}コイン` : "ハズレ…");
+    } catch (e) {
+      console.error(e);
+      showNotification((e && e.message) ? e.message : "結果確定に失敗しました");
+    }
+  };
+
+  const stopReel = (idx) => {
+    if (!isSpinning) return;
+    if (stoppedRef.current[idx]) return;
+
+    const next = [...stoppedRef.current];
+    next[idx] = true;
+    stoppedRef.current = next;
+    setStopped(next);
+
+    // 最後の停止で確定
+    if (next[0] && next[1] && next[2]) {
+      finalize();
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="px-4 pt-4 pb-3 flex items-center justify-between">
+        <button onClick={onBack} className="text-slate-600 font-bold">← 戻る</button>
+        <div className="text-xl font-extrabold">スロット</div>
+        <div className="text-slate-600 font-bold">残高: {profile?.wallet || 0}</div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 pb-24">
+        <div className="rounded-3xl bg-white border shadow-sm p-4">
+          <div className="text-sm text-slate-600 font-bold mb-2">1回 {COST} コイン / 当たり {WIN} コイン</div>
+
+          <div className="grid grid-cols-3 gap-3 items-center justify-center">
+            {reels.map((s, i) => (
+              <div key={i} className="rounded-2xl border bg-slate-50 h-24 flex items-center justify-center text-3xl font-extrabold">
+                {s}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 grid grid-cols-3 gap-3">
+            {[0, 1, 2].map((i) => (
+              <button
+                key={i}
+                onClick={() => stopReel(i)}
+                disabled={!isSpinning || stopped[i]}
+                className={`py-2 rounded-2xl font-extrabold ${(!isSpinning || stopped[i]) ? "bg-slate-100 text-slate-400" : "bg-red-500 text-white active:scale-[0.99]"}`}
+              >
+                STOP
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 flex gap-2">
+            <button
+              onClick={beginPlay}
+              disabled={!canPlay}
+              className={`flex-1 py-3 rounded-2xl font-extrabold ${canPlay ? "bg-green-600 text-white" : "bg-slate-200 text-slate-500"}`}
+            >
+              SPIN
+            </button>
+            <button
+              onClick={() => {
+                // 中断（結果は確定しない＝コストは消費済み）
+                stopSpinAnimation();
+                setIsSpinning(false);
+                setStopped([true, true, true]);
+                stoppedRef.current = [true, true, true];
+                showNotification("中断しました");
+              }}
+              disabled={!isSpinning}
+              className={`px-4 py-3 rounded-2xl font-extrabold ${isSpinning ? "bg-slate-100 text-slate-700" : "bg-slate-50 text-slate-300"}`}
+            >
+              中断
+            </button>
+          </div>
+
+          <button
+            onClick={() => setChinchiroOpen(true)}
+            className="mt-3 w-full py-3 rounded-2xl font-extrabold bg-indigo-600 text-white"
+          >
+            オンライン チンチロ
+          </button>
+
+          {lastResult ? (
+            <div
+              className={`mt-4 p-3 rounded-2xl font-bold ${lastResult.win ? "bg-green-50 text-green-700" : "bg-slate-100 text-slate-700"}`}
+            >
+              {lastResult.message || (lastResult.win ? "当たり！+2000コイン" : "はずれ")}
+            </div>
+          ) : null}
+
+          {chinchiroOpen ? (
+            <ChinchiroPanel
+              user={user}
+              profile={profile}
+              showNotification={showNotification}
+              onClose={() => setChinchiroOpen(false)}
+            />
+          ) : null}
 const extractXml = (text) => {
   const idx = text.indexOf("<");
   return idx >= 0 ? text.slice(idx) : text;
