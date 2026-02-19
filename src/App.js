@@ -4552,7 +4552,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u9001\u91D1" })
       ] })
     ] }),
-    !groupSettingsOpen && /* @__PURE__ */ jsxs("div", { className: "bg-[#f3f4f6] border-t border-gray-300 px-2 pt-2 pb-1 flex flex-col gap-1 relative z-10", children: [
+    !groupSettingsOpen && /* @__PURE__ */ jsxs("div", { className: "px-3 py-2 bg-[#f1f2f4] border-t border-gray-300 flex flex-col gap-1.5 relative z-10", children: [
       stickerMenuOpen && myStickerPacks.length > 0 && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-full left-0 right-0 bg-gray-50 border-t h-72 flex flex-col shadow-2xl rounded-t-3xl overflow-hidden animate-in slide-in-from-bottom-2 z-20", children: [
         /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-4 grid grid-cols-4 gap-4 content-start", children: myStickerPacks.find((p) => p.id === selectedPackId)?.stickers.map((s, i) => /* @__PURE__ */ jsxs("div", { className: "relative cursor-pointer hover:scale-110 active:scale-95 transition-transform drop-shadow-sm", onClick: () => sendMessage(s, "sticker", { packId: selectedPackId }), children: [
           /* @__PURE__ */ jsx("img", { src: typeof s === "string" ? s : s.image, className: "w-full aspect-square object-contain" }),
@@ -4595,8 +4595,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
             "%"
           ] })
         ] }) : /* @__PURE__ */ jsx(Send, { className: "w-5 h-5" }) })
-      ] }),
-      /* @__PURE__ */ jsx("div", { className: "h-1 w-28 bg-black/70 rounded-full mx-auto mt-2 mb-1" })
+      ] })
     ] }),
     viewProfile && /* @__PURE__ */ jsx(FriendProfileModal, { friend: viewProfile, onClose: () => setViewProfile(null), onAddFriend: addFriendById, onStartChat: async (uid) => {
       // トーク開始時は「友だち追加」も同時に行う
@@ -5657,31 +5656,25 @@ const DiceMiniGameView = ({ user, invite, onBack, showNotification, profile }) =
 const PachinkoView = ({ user, profile, onBack, showNotification }) => {
   const [isSpinning, setIsSpinning] = useState(false);
   const [lastResult, setLastResult] = useState(null);
+  const [chinchiroOpen, setChinchiroOpen] = useState(false);
   const [reels, setReels] = useState(["🍒", "🔔", "7"]);
+  const [stopped, setStopped] = useState([true, true, true]); // 初期は止まっている扱い
   const spinTimerRef = useRef(null);
+  const stoppedRef = useRef([true, true, true]);
   const slotCooldownUntilRef = useRef(0);
-  const SLOT_MIN_INTERVAL_MS = 1200; // 連打/多重実行防止
-  const QUOTA_BACKOFF_MS = 30_000; // クォータ超過時の待機
+  const spinIdRef = useRef(null);
+  const finishingRef = useRef(false);
 
   const COST = 100;
-  const WIN = 1000;
-  const PROB_MIN = 1 / 80;
-  const PROB_MAX = 1 / 30;
+  const WIN = 2000;
+  const SLOT_MIN_INTERVAL_MS = 1200; // 連打防止
+  const QUOTA_BACKOFF_MS = 30_000;
 
   const SYMBOLS = useMemo(() => ["🍒", "🍋", "🔔", "💎", "BAR", "7"], []);
 
   const randSymbol = useCallback(() => {
     return SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
   }, [SYMBOLS]);
-
-  const randReelsNotJackpot = useCallback(() => {
-    let a = randSymbol();
-    let b = randSymbol();
-    let c = randSymbol();
-    // avoid jackpot "7 7 7"
-    if (a === "7" && b === "7" && c === "7") c = "BAR";
-    return [a, b, c];
-  }, [randSymbol]);
 
   const stopSpinAnimation = () => {
     if (spinTimerRef.current) {
@@ -5693,8 +5686,8 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
   const startSpinAnimation = () => {
     stopSpinAnimation();
     spinTimerRef.current = setInterval(() => {
-      setReels([randSymbol(), randSymbol(), randSymbol()]);
-    }, 70);
+      setReels((prev) => prev.map((v, i) => (stoppedRef.current[i] ? v : randSymbol())));
+    }, 90);
   };
 
   useEffect(() => {
@@ -5702,7 +5695,9 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const playOnce = async () => {
+  const canPlay = !isSpinning && (profile?.wallet || 0) >= COST;
+
+  const beginPlay = async () => {
     const now = Date.now();
     if (now < slotCooldownUntilRef.current) {
       const sec = Math.ceil((slotCooldownUntilRef.current - now) / 1000);
@@ -5710,23 +5705,19 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
     }
     if ((profile?.wallet || 0) < COST) return showNotification("コイン残高が足りません（1回=100コイン）");
     if (isSpinning) return;
-    // 連打対策
+
     slotCooldownUntilRef.current = now + SLOT_MIN_INTERVAL_MS;
 
-    setIsSpinning(true);
-    startSpinAnimation();
-
+    // 先にコストを引く（途中で中断しても返金しない仕様）
     try {
-      const prob = PROB_MIN + Math.random() * (PROB_MAX - PROB_MIN);
-      const win = Math.random() < prob;
-      const payout = win ? WIN : 0;
-      const delta = payout - COST; // net
+      const spinId = now;
+      spinIdRef.current = spinId;
+      finishingRef.current = false;
 
       await runTransaction(db, async (t) => {
         const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
         const uDoc = await t.get(userRef);
         if (!uDoc.exists()) {
-          // 初回利用などでユーザードキュメントが未作成の場合はここで初期化
           t.set(userRef, {
             uid: user.uid,
             displayName: user.displayName || "",
@@ -5742,166 +5733,611 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
         const nowMs = Date.now();
         if (nowMs - lastMs < SLOT_MIN_INTERVAL_MS) throw new Error("操作が早すぎます");
         t.update(userRef, { slotLastPlayedMs: nowMs });
-        t.update(userRef, { wallet: increment(delta) });
-        // 履歴の毎回書き込みはクォータ超過の原因になりやすいため、集計はユーザードキュメント側に寄せます
+        t.update(userRef, { wallet: increment(-COST) });
         t.update(userRef, {
           slotPlays: increment(1),
-          slotWins: increment(win ? 1 : 0),
-          slotLastProb: prob,
+          slotSpinId: spinId,
+          slotSpinState: "spinning",
           updatedAt: serverTimestamp()
         });
       });
 
-      // settle reels after a short delay (feel like a slot machine)
-      await new Promise((r) => setTimeout(r, 650));
-      stopSpinAnimation();
-      setReels(win ? ["7", "7", "7"] : randReelsNotJackpot());
-
-      setLastResult({ cost: COST, win, payout, delta });
-      showNotification(win ? `当たり！ +${payout}（差分 ${delta >= 0 ? "+" : ""}${delta}）` : "ハズレ…（-100）");
+      // スタート
+      setIsSpinning(true);
+      setLastResult(null);
+      setStopped([false, false, false]);
+      stoppedRef.current = [false, false, false];
+      startSpinAnimation();
+      showNotification("スロット開始！順番にSTOPしてください");
     } catch (e) {
       console.error(e);
-      {
-        const msg = (e && typeof e === "object" && "message" in e) ? e.message : (typeof e === "string" ? e : String(e));
-        const lower = (msg || "").toLowerCase();
-        // Firestore の RESOURCE_EXHAUSTED（Quota exceeded）対策
-        if (lower.includes("quota") || lower.includes("resource_exhausted") || lower.includes("resource-exhausted") || lower.includes("exceeded")) {
-          slotCooldownUntilRef.current = Date.now() + QUOTA_BACKOFF_MS;
-          showNotification("混雑しています。30秒ほど待ってからもう一度お試しください（Quota exceeded）");
-        } else {
-          showNotification(msg || "プレイに失敗しました");
-        }
+      const msg = (e && typeof e === "object" && "message" in e) ? e.message : (typeof e === "string" ? e : String(e));
+      const lower = (msg || "").toLowerCase();
+      if (lower.includes("quota") || lower.includes("resource_exhausted") || lower.includes("resource-exhausted") || lower.includes("exceeded")) {
+        slotCooldownUntilRef.current = Date.now() + QUOTA_BACKOFF_MS;
+        showNotification("混雑しています。30秒ほど待ってからもう一度お試しください（Quota exceeded）");
+      } else {
+        showNotification(msg || "開始に失敗しました");
       }
-      stopSpinAnimation();
-    } finally {
-      setTimeout(() => setIsSpinning(false), 250);
     }
   };
 
-  const Lever = ({ onPull, disabled }) => /* @__PURE__ */ jsxs("button", {
-    onClick: onPull,
-    disabled,
-    className: "relative w-16 shrink-0 flex flex-col items-center select-none disabled:opacity-60",
-    children: [
-      /* @__PURE__ */ jsx("div", { className: "w-3 h-24 rounded-full bg-gradient-to-b from-gray-200 to-gray-400 shadow-inner border border-gray-300" }),
-      /* @__PURE__ */ jsx("div", { className: `mt-2 w-10 h-10 rounded-full bg-red-500 shadow-lg border-4 border-white ${disabled ? "" : "active:scale-95"}` })
-    ]
-  });
+  const finalize = async () => {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
 
-  const ReelCell = ({ value }) => /* @__PURE__ */ jsx("div", {
-    className: "w-20 h-20 bg-white rounded-xl border-2 border-gray-300 shadow-inner flex items-center justify-center text-2xl font-black",
-    children: value
-  });
+    stopSpinAnimation();
+    setIsSpinning(false);
 
-  return /* @__PURE__ */ jsxs("div", { className: "w-full h-full flex flex-col", children: [
-    /* @__PURE__ */ jsxs("div", { className: "p-4 bg-white border-b flex items-center gap-3", children: [
-      /* @__PURE__ */ jsx("button", { onClick: onBack, className: "p-2 rounded-full hover:bg-gray-100", children: /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6" }) }),
-      /* @__PURE__ */ jsx("div", { className: "font-black text-lg", children: "オンラインパチンコ（スロット）" }),
-      /* @__PURE__ */ jsx("div", { className: "ml-auto flex items-center gap-2 bg-yellow-50 border border-yellow-100 px-3 py-1.5 rounded-full", children: /* @__PURE__ */ jsxs(Fragment, { children: [
-        /* @__PURE__ */ jsx(Coins, { className: "w-4 h-4 text-yellow-600" }),
-        /* @__PURE__ */ jsx("span", { className: "text-xs font-black text-yellow-700", children: (profile?.wallet || 0).toLocaleString() })
-      ] }) })
-    ] }),
+    const a = reels[0];
+    const b = reels[1];
+    const c = reels[2];
+    const isWin = a === b && b === c;
 
-    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto p-6", children: [
-      /* @__PURE__ */ jsx("div", { className: "max-w-md mx-auto", children: /* @__PURE__ */ jsxs("div", { className: "bg-gradient-to-b from-gray-900 to-black rounded-[2rem] p-4 shadow-2xl border border-white/10", children: [
-        /* @__PURE__ */ jsxs("div", { className: "rounded-2xl bg-gradient-to-r from-yellow-400 via-yellow-200 to-yellow-400 p-3 border border-yellow-100 shadow", children: [
-          /* @__PURE__ */ jsx("div", { className: "text-center font-black text-sm text-gray-900 tracking-wide", children: "BIG BONUS / BAR&7" }),
-          /* @__PURE__ */ jsx("div", { className: "text-center text-[11px] font-bold text-gray-700 mt-1", children: "レバーを引いて回してね" })
-        ] }),
+    try {
+      const spinId = spinIdRef.current;
+      await runTransaction(db, async (t) => {
+        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+        const uDoc = await t.get(userRef);
+        if (!uDoc.exists()) throw new Error("ユーザー情報が見つかりません");
+        const data = uDoc.data() || {};
+        // 二重支払い防止
+        if (data.slotSpinId !== spinId || data.slotSpinState !== "spinning") return;
 
-        /* @__PURE__ */ jsxs("div", { className: "mt-4 flex gap-4 items-stretch", children: [
-          /* @__PURE__ */ jsxs("div", { className: "flex-1 rounded-2xl bg-gray-800/70 border border-white/10 p-4", children: [
-            /* @__PURE__ */ jsx("div", { className: "flex items-center justify-between mb-3", children: /* @__PURE__ */ jsxs("div", { className: "text-xs font-black text-yellow-100/90", children: [
-              "1回 ",
-              COST,
-              " / 当たり ",
-              WIN,
-              "（確率: ランダム）"
-            ] }) }),
+        if (isWin) {
+          t.update(userRef, { wallet: increment(WIN) });
+          t.update(userRef, { slotWins: increment(1) });
+        }
 
-            /* @__PURE__ */ jsxs("div", { className: "rounded-2xl bg-gradient-to-b from-gray-200 to-gray-50 p-4 border border-gray-300 shadow-inner", children: [
-              /* @__PURE__ */ jsxs("div", { className: "flex justify-center gap-3", children: [
-                /* @__PURE__ */ jsx(ReelCell, { value: reels[0] }),
-                /* @__PURE__ */ jsx(ReelCell, { value: reels[1] }),
-                /* @__PURE__ */ jsx(ReelCell, { value: reels[2] })
-              ] }),
-              /* @__PURE__ */ jsx("div", { className: "mt-3 flex items-center justify-between", children: /* @__PURE__ */ jsxs(Fragment, { children: [
-                /* @__PURE__ */ jsxs("div", { className: "text-[11px] font-bold text-gray-600", children: [
-                  "コイン投入 → レバー",
-                  /* @__PURE__ */ jsx("span", { className: "ml-1 text-gray-400", children: "（タップでもOK）" })
-                ] }),
-                /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
-                  /* @__PURE__ */ jsx("div", { className: "w-10 h-7 rounded-lg bg-gray-900 border border-white/10 shadow-inner flex items-center justify-center", children: /* @__PURE__ */ jsx("div", { className: "w-6 h-1.5 rounded-full bg-gray-600" }) }),
-                  /* @__PURE__ */ jsx("div", { className: "w-10 h-7 rounded-lg bg-gray-900 border border-white/10 shadow-inner flex items-center justify-center", children: /* @__PURE__ */ jsx("div", { className: "w-2.5 h-2.5 rounded-full bg-gray-600" }) })
-                ] })
-              ] }) })
-            ] }),
+        t.update(userRef, {
+          slotSpinId: null,
+          slotSpinState: "idle",
+          slotLastResult: { a, b, c, win: isWin, payout: isWin ? WIN : 0, at: Date.now() },
+          updatedAt: serverTimestamp()
+        });
+      });
 
-            /* @__PURE__ */ jsxs("div", { className: "mt-4 grid grid-cols-1 gap-3", children: [
-              /* @__PURE__ */ jsx("button", { onClick: playOnce, disabled: isSpinning, className: "w-full py-4 bg-yellow-500 hover:bg-yellow-600 text-white font-black rounded-2xl shadow-lg shadow-yellow-500/30 disabled:bg-gray-400 flex items-center justify-center gap-2", children: isSpinning ? /* @__PURE__ */ jsx(Loader2, { className: "w-5 h-5 animate-spin" }) : /* @__PURE__ */ jsxs(Fragment, { children: [
-                /* @__PURE__ */ jsx(Disc, { className: "w-5 h-5" }),
-                "スピン（-100）"
-              ] }) }),
-              lastResult && /* @__PURE__ */ jsxs("div", { className: "bg-black/40 border border-white/10 rounded-2xl p-4", children: [
-                /* @__PURE__ */ jsx("div", { className: "text-[11px] font-bold text-white/70", children: "結果" }),
-                /* @__PURE__ */ jsxs("div", { className: "mt-1 text-sm font-black text-white", children: [
-                  lastResult.win ? "🎉 当たり！" : "😢 ハズレ",
-                  " / 払い出し ",
-                  lastResult.payout,
-                  " / 差分 ",
-                  lastResult.delta >= 0 ? "+" : "",
-                  lastResult.delta
-                ] })
-              ] })
-            ] })
-          ] }),
+      const payout = isWin ? WIN : 0;
+      const delta = payout - COST;
+      setLastResult({ cost: COST, win: isWin, payout, delta, reels: [a, b, c] });
+      showNotification(isWin ? `当たり！ +${WIN}コイン` : "ハズレ…");
+    } catch (e) {
+      console.error(e);
+      showNotification((e && e.message) ? e.message : "結果確定に失敗しました");
+    }
+  };
 
-          /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center justify-between py-2", children: [
-            /* @__PURE__ */ jsx("div", { className: "text-[10px] font-black text-white/70", children: "レバー" }),
-            /* @__PURE__ */ jsx(Lever, { onPull: playOnce, disabled: isSpinning }),
-            /* @__PURE__ */ jsx("div", { className: "text-[10px] font-black text-white/70", children: "PULL" })
-          ] })
-        ] }),
+  const stopReel = (idx) => {
+    if (!isSpinning) return;
+    if (stoppedRef.current[idx]) return;
 
-        /* @__PURE__ */ jsx("div", { className: "mt-4 text-[11px] text-white/70 font-bold", children: "※ 遊び用（仮想コイン）です。現金や換金はありません。" })
-      ] }) })
-    ] })
-  ] });
+    const next = [...stoppedRef.current];
+    next[idx] = true;
+    stoppedRef.current = next;
+    setStopped(next);
+
+    // 最後の停止で確定
+    if (next[0] && next[1] && next[2]) {
+      finalize();
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="px-4 pt-4 pb-3 flex items-center justify-between">
+        <button onClick={onBack} className="text-slate-600 font-bold">← 戻る</button>
+        <div className="text-xl font-extrabold">スロット</div>
+        <div className="text-slate-600 font-bold">残高: {profile?.wallet || 0}</div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 pb-24">
+        <div className="rounded-3xl bg-white border shadow-sm p-4">
+          <div className="text-sm text-slate-600 font-bold mb-2">1回 {COST} コイン / 当たり {WIN} コイン</div>
+
+          <div className="grid grid-cols-3 gap-3 items-center justify-center">
+            {reels.map((s, i) => (
+              <div key={i} className="rounded-2xl border bg-slate-50 h-24 flex items-center justify-center text-3xl font-extrabold">
+                {s}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 grid grid-cols-3 gap-3">
+            {[0, 1, 2].map((i) => (
+              <button
+                key={i}
+                onClick={() => stopReel(i)}
+                disabled={!isSpinning || stopped[i]}
+                className={`py-2 rounded-2xl font-extrabold ${(!isSpinning || stopped[i]) ? "bg-slate-100 text-slate-400" : "bg-red-500 text-white active:scale-[0.99]"}`}
+              >
+                STOP
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 flex gap-2">
+            <button
+              onClick={beginPlay}
+              disabled={!canPlay}
+              className={`flex-1 py-3 rounded-2xl font-extrabold ${canPlay ? "bg-green-600 text-white" : "bg-slate-200 text-slate-500"}`}
+            >
+              SPIN
+            </button>
+            <button
+              onClick={() => {
+                // 中断（結果は確定しない＝コストは消費済み）
+                stopSpinAnimation();
+                setIsSpinning(false);
+                setStopped([true, true, true]);
+                stoppedRef.current = [true, true, true];
+                showNotification("中断しました");
+              }}
+              disabled={!isSpinning}
+              className={`px-4 py-3 rounded-2xl font-extrabold ${isSpinning ? "bg-slate-100 text-slate-700" : "bg-slate-50 text-slate-300"}`}
+            >
+              中断
+            </button>
+          </div>
+
+          <button
+            onClick={() => setChinchiroOpen(true)}
+            className="mt-3 w-full py-3 rounded-2xl font-extrabold bg-indigo-600 text-white"
+          >
+            オンライン チンチロ
+          </button>
+
+          {lastResult ? (
+            <div className={`mt-4 p-3 rounded-2xl font-bold ${lastResult.win ? "bg-green-50 
+const ChinchiroPanel = ({ user, profile, showNotification, onClose }) => {
+  const [tab, setTab] = useState("find"); // find | room
+  const [rooms, setRooms] = useState([]);
+  const [loadingRooms, setLoadingRooms] = useState(false);
+
+  const [bet, setBet] = useState(100);
+  const [roomId, setRoomId] = useState(null);
+  const [room, setRoom] = useState(null);
+
+  const [rolling, setRolling] = useState(false);
+
+  const FACE = ["", "⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+
+  const sortDice = (arr) => [...arr].sort((a, b) => a - b);
+
+  const evalHand = (dice) => {
+    const d = sortDice(dice);
+    const [a, b, c] = d;
+
+    // ピンゾロ
+    if (a === 1 && b === 1 && c === 1) return { rank: 7, name: "ピンゾロ", value: 0 };
+
+    // 4-5-6
+    if (a === 4 && b === 5 && c === 6) return { rank: 6, name: "シゴロ", value: 0 };
+
+    // ゾロ目（1以外）
+    if (a === b && b === c) return { rank: 5, name: `${a}のゾロ目`, value: a };
+
+    // 1-2-3
+    if (a === 1 && b === 2 && c === 3) return { rank: 1, name: "ヒフミ", value: 0 };
+
+    // 目（2つ同じ）
+    if (a === b && b !== c) return { rank: 3, name: `${c}の目`, value: c };
+    if (a === c && a !== b) return { rank: 3, name: `${b}の目`, value: b };
+    if (b === c && a !== b) return { rank: 3, name: `${a}の目`, value: a };
+
+    // 役なし
+    return { rank: 2, name: "役なし", value: 0 };
+  };
+
+  const compareHands = (h1, h2) => {
+    if (h1.rank !== h2.rank) return h1.rank - h2.rank; // rank大が強い
+    return h1.value - h2.value;
+  };
+
+  // ルーム一覧（待機中）
+  useEffect(() => {
+    if (tab !== "find") return;
+    setLoadingRooms(true);
+    const qy = query(
+      collection(db, "artifacts", appId, "public", "data", "chinchiro_rooms"),
+      where("status", "==", "waiting"),
+      orderBy("createdAt", "desc"),
+      limit(20)
+    );
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        setRooms(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setLoadingRooms(false);
+      },
+      (e) => {
+        console.error(e);
+        setLoadingRooms(false);
+      }
+    );
+    return () => unsub();
+  }, [tab]);
+
+  // ルーム購読
+  useEffect(() => {
+    if (!roomId) return;
+    const unsub = onSnapshot(
+      doc(db, "artifacts", appId, "public", "data", "chinchiro_rooms", roomId),
+      (d) => setRoom(d.exists() ? { id: d.id, ...d.data() } : null),
+      (e) => console.error(e)
+    );
+    return () => unsub();
+  }, [roomId]);
+
+  const canAfford = (amount) => (profile?.wallet || 0) >= amount;
+
+  const createRoom = async () => {
+    const b = Math.max(10, Math.floor(Number(bet) || 0));
+    if (!canAfford(b)) return showNotification("コインが足りません");
+    try {
+      const roomRef = doc(collection(db, "artifacts", appId, "public", "data", "chinchiro_rooms"));
+      await runTransaction(db, async (t) => {
+        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+        const uDoc = await t.get(userRef);
+        if (!uDoc.exists()) throw new Error("ユーザー情報が見つかりません");
+        const w = uDoc.data()?.wallet || 0;
+        if (w < b) throw new Error("コインが足りません");
+        t.update(userRef, { wallet: w - b, updatedAt: serverTimestamp() });
+        t.set(roomRef, {
+          status: "waiting",
+          bet: b,
+          hostId: user.uid,
+          hostRollsLeft: 3,
+          guestRollsLeft: 3,
+          hostDice: null,
+          guestDice: null,
+          hostHand: null,
+          guestHand: null,
+          winner: null,
+          createdAt: serverTimestamp()
+        });
+      });
+      setRoomId(roomRef.id);
+      setTab("room");
+      showNotification("ルームを作成しました（相手を待っています）");
+    } catch (e) {
+      console.error(e);
+      showNotification(e?.message || "作成に失敗しました");
+    }
+  };
+
+  const joinRoom = async (rid) => {
+    const r = rooms.find((x) => x.id === rid);
+    const b = r?.bet || 0;
+    if (!b) return;
+    if (!canAfford(b)) return showNotification("コインが足りません");
+    try {
+      await runTransaction(db, async (t) => {
+        const roomRef = doc(db, "artifacts", appId, "public", "data", "chinchiro_rooms", rid);
+        const rDoc = await t.get(roomRef);
+        if (!rDoc.exists()) throw new Error("ルームが見つかりません");
+        const data = rDoc.data();
+        if (data.status !== "waiting") throw new Error("参加できません（満員/開始済み）");
+        if (data.hostId === user.uid) throw new Error("自分のルームには参加できません");
+
+        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+        const uDoc = await t.get(userRef);
+        if (!uDoc.exists()) throw new Error("ユーザー情報が見つかりません");
+        const w = uDoc.data()?.wallet || 0;
+        if (w < b) throw new Error("コインが足りません");
+        t.update(userRef, { wallet: w - b, updatedAt: serverTimestamp() });
+
+        t.update(roomRef, {
+          status: "ready",
+          guestId: user.uid,
+          startedAt: serverTimestamp()
+        });
+      });
+
+      setRoomId(rid);
+      setTab("room");
+      showNotification("参加しました！ チンチロ開始！");
+    } catch (e) {
+      console.error(e);
+      showNotification(e?.message || "参加に失敗しました");
+    }
+  };
+
+  const leaveRoom = async () => {
+    if (!roomId || !room) return onClose();
+    try {
+      // 途中離脱は返金なし（簡易仕様）
+      await updateDoc(doc(db, "artifacts", appId, "public", "data", "chinchiro_rooms", roomId), {
+        status: "finished",
+        winner: room.hostId === user.uid ? (room.guestId || "guest") : (room.hostId || "host"),
+        finishedAt: serverTimestamp(),
+        note: "途中離脱"
+      });
+    } catch (e) {
+      console.error(e);
+    }
+    setRoomId(null);
+    setRoom(null);
+    setTab("find");
+    onClose();
+  };
+
+  const rollOnce = () => [1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)];
+
+  const doRoll = async () => {
+    if (!roomId || !room) return;
+    if (!(room.status === "ready" || room.status === "playing")) return;
+    if (rolling) return;
+
+    const isHost = room.hostId === user.uid;
+    const myDice = isHost ? room.hostDice : room.guestDice;
+    const myLeft = isHost ? room.hostRollsLeft : room.guestRollsLeft;
+
+    if (myDice) return showNotification("すでに確定しています");
+    if (myLeft <= 0) return showNotification("振れる回数がありません");
+
+    setRolling(true);
+    try {
+      await runTransaction(db, async (t) => {
+        const roomRef = doc(db, "artifacts", appId, "public", "data", "chinchiro_rooms", roomId);
+        const rDoc = await t.get(roomRef);
+        if (!rDoc.exists()) throw new Error("ルームが見つかりません");
+        const data = rDoc.data();
+        const hostId = data.hostId;
+        const guestId = data.guestId;
+
+        const isHostTx = hostId === user.uid;
+        const leftKey = isHostTx ? "hostRollsLeft" : "guestRollsLeft";
+        const diceKey = isHostTx ? "hostTempDice" : "guestTempDice";
+        const currentLeft = data[leftKey] ?? 3;
+        if (currentLeft <= 0) throw new Error("振れる回数がありません");
+
+        const dice = rollOnce();
+        t.update(roomRef, {
+          status: "playing",
+          [leftKey]: currentLeft - 1,
+          [diceKey]: dice,
+          updatedAt: serverTimestamp()
+        });
+      });
+    } catch (e) {
+      console.error(e);
+      showNotification(e?.message || "失敗しました");
+    } finally {
+      setRolling(false);
+    }
+  };
+
+  const confirmDice = async () => {
+    if (!roomId || !room) return;
+    const isHost = room.hostId === user.uid;
+    const temp = isHost ? room.hostTempDice : room.guestTempDice;
+    if (!temp) return showNotification("まず振ってください");
+    if (isHost ? room.hostDice : room.guestDice) return;
+
+    const hand = evalHand(temp);
+
+    try {
+      await runTransaction(db, async (t) => {
+        const roomRef = doc(db, "artifacts", appId, "public", "data", "chinchiro_rooms", roomId);
+        const rDoc = await t.get(roomRef);
+        if (!rDoc.exists()) throw new Error("ルームが見つかりません");
+        const data = rDoc.data();
+
+        const hostId = data.hostId;
+        const guestId = data.guestId;
+        const bet = data.bet || 0;
+
+        if (!guestId) throw new Error("相手がまだ参加していません");
+
+        const isHostTx = hostId === user.uid;
+        const diceKey = isHostTx ? "hostDice" : "guestDice";
+        const handKey = isHostTx ? "hostHand" : "guestHand";
+
+        t.update(roomRef, {
+          [diceKey]: temp,
+          [handKey]: hand,
+          status: "playing",
+          updatedAt: serverTimestamp()
+        });
+      });
+    } catch (e) {
+      console.error(e);
+      showNotification(e?.message || "確定に失敗しました");
+    }
+  };
+
+  // 両者確定したら勝敗決定＆精算
+  useEffect(() => {
+    if (!roomId || !room) return;
+    if (room.status === "finished") return;
+    if (!room.hostId || !room.guestId) return;
+    if (!room.hostDice || !room.guestDice) return;
+
+    const settle = async () => {
+      try {
+        await runTransaction(db, async (t) => {
+          const roomRef = doc(db, "artifacts", appId, "public", "data", "chinchiro_rooms", roomId);
+          const rDoc = await t.get(roomRef);
+          if (!rDoc.exists()) return;
+          const data = rDoc.data();
+          if (data.status === "finished") return;
+
+          const bet = data.bet || 0;
+          const hostHand = data.hostHand;
+          const guestHand = data.guestHand;
+          if (!hostHand || !guestHand) return;
+
+          const cmp = compareHands(hostHand, guestHand);
+          let winner = "draw";
+          if (cmp > 0) winner = data.hostId;
+          else if (cmp < 0) winner = data.guestId;
+
+          const hostRef = doc(db, "artifacts", appId, "public", "data", "users", data.hostId);
+          const guestRef = doc(db, "artifacts", appId, "public", "data", "users", data.guestId);
+
+          if (winner === "draw") {
+            // 返金（両者にベット分返す）
+            t.update(hostRef, { wallet: increment(bet) });
+            t.update(guestRef, { wallet: increment(bet) });
+          } else {
+            // 勝者が総取り（bet*2）
+            t.update(doc(db, "artifacts", appId, "public", "data", "users", winner), { wallet: increment(bet * 2) });
+          }
+
+          t.update(roomRef, {
+            status: "finished",
+            winner,
+            finishedAt: serverTimestamp()
+          });
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    };
+
+    settle();
+  }, [roomId, room]);
+
+  if (!roomId) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center">
+        <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-4">
+          <div className="flex items-center justify-between">
+            <div className="text-lg font-extrabold">オンライン チンチロ</div>
+            <button onClick={onClose} className="font-bold text-slate-600">✕</button>
+          </div>
+
+          <div className="mt-3 rounded-2xl bg-slate-50 p-3">
+            <div className="text-xs text-slate-600 font-bold">ベット（参加時に支払い）</div>
+            <div className="mt-2 flex gap-2">
+              <input
+                value={bet}
+                onChange={(e) => setBet(e.target.value)}
+                className="flex-1 px-3 py-2 rounded-2xl border bg-white text-sm font-bold"
+                inputMode="numeric"
+              />
+              <button onClick={createRoom} className="px-4 py-2 rounded-2xl bg-green-600 text-white font-extrabold">
+                ルーム作成
+              </button>
+            </div>
+            <div className="mt-2 text-xs text-slate-500">残高: {profile?.wallet || 0} / 勝者は総取り（ベット×2）</div>
+          </div>
+
+          <div className="mt-4">
+            <div className="text-sm font-extrabold">参加できるルーム</div>
+            {loadingRooms ? <div className="text-slate-500 mt-2">読み込み中...</div> : null}
+            <div className="mt-2 space-y-2 max-h-[45vh] overflow-y-auto">
+              {rooms.length ? rooms.map((r) => (
+                <div key={r.id} className="p-3 rounded-2xl border bg-white flex items-center justify-between">
+                  <div>
+                    <div className="font-extrabold">ベット {r.bet} コイン</div>
+                    <div className="text-xs text-slate-500">作成者: {r.hostId?.slice(0, 6)}…</div>
+                  </div>
+                  <button onClick={() => joinRoom(r.id)} className="px-4 py-2 rounded-2xl bg-blue-600 text-white font-extrabold">
+                    参加
+                  </button>
+                </div>
+              )) : (
+                <div className="text-slate-500 mt-2">待機中のルームがありません</div>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-4 text-xs text-slate-500">
+            役の強さ：ピンゾロ ＞ シゴロ(4-5-6) ＞ ゾロ目 ＞ 目(2つ同じ) ＞ 役なし ＞ ヒフミ(1-2-3)
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ルーム画面
+  const isHost = room?.hostId === user.uid;
+  const meDice = isHost ? room?.hostDice : room?.guestDice;
+  const meTemp = isHost ? room?.hostTempDice : room?.guestTempDice;
+  const meLeft = isHost ? room?.hostRollsLeft : room?.guestRollsLeft;
+
+  const otherDice = isHost ? room?.guestDice : room?.hostDice;
+  const otherHand = isHost ? room?.guestHand : room?.hostHand;
+
+  const myHand = isHost ? room?.hostHand : room?.guestHand;
+
+  const showDice = (d) => d ? d.map((x) => FACE[x]).join(" ") : "—";
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center">
+      <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-4">
+        <div className="flex items-center justify-between">
+          <div className="text-lg font-extrabold">チンチロ ルーム</div>
+          <button onClick={leaveRoom} className="font-bold text-slate-600">✕</button>
+        </div>
+
+        <div className="mt-2 text-xs text-slate-500">ルームID: {roomId} / ベット: {room?.bet || 0} / 状態: {room?.status}</div>
+
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <div className="p-3 rounded-2xl bg-slate-50">
+            <div className="text-xs font-bold text-slate-600">あなた</div>
+            <div className="mt-2 text-2xl font-extrabold">{showDice(meDice || meTemp)}</div>
+            <div className="mt-1 text-xs text-slate-500">{myHand ? myHand.name : "未確定"}</div>
+            <div className="mt-1 text-xs text-slate-500">残り {meLeft ?? 3} 回</div>
+          </div>
+          <div className="p-3 rounded-2xl bg-slate-50">
+            <div className="text-xs font-bold text-slate-600">相手</div>
+            <div className="mt-2 text-2xl font-extrabold">{showDice(otherDice)}</div>
+            <div className="mt-1 text-xs text-slate-500">{otherHand ? otherHand.name : "未確定"}</div>
+          </div>
+        </div>
+
+        {room?.status !== "finished" ? (
+          <div className="mt-4 space-y-2">
+            <button
+              onClick={doRoll}
+              disabled={rolling || !!meDice || (meLeft ?? 0) <= 0}
+              className={`w-full py-3 rounded-2xl font-extrabold ${(!meDice && (meLeft ?? 0) > 0) ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-500"}`}
+            >
+              サイコロを振る
+            </button>
+            <button
+              onClick={confirmDice}
+              disabled={!!meDice || !meTemp}
+              className={`w-full py-3 rounded-2xl font-extrabold ${(meTemp && !meDice) ? "bg-green-600 text-white" : "bg-slate-200 text-slate-500"}`}
+            >
+              この目で確定
+            </button>
+            <div className="text-xs text-slate-500 text-center">※ 確定すると変更できません。両者確定で自動精算。</div>
+          </div>
+        ) : (
+          <div className="mt-4 p-3 rounded-2xl bg-amber-50 border border-amber-100">
+            <div className="font-extrabold">
+              {room?.winner === "draw" ? "引き分け（ベット返金）" : (room?.winner === user.uid ? "あなたの勝ち！" : "あなたの負け…")}
+            </div>
+            <div className="text-xs text-slate-600 mt-1">
+              勝者は +{(room?.bet || 0) * 2} コイン（引き分けは双方+{room?.bet || 0}）
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
-// ===================== /MiniGame + Pachinko =====================
-
-// ===== Yahoo News (RSS) + in-app article reader =====
-// NOTE: Some proxies (e.g. r.jina.ai) may return 4xx depending on their rules.
-// We try multiple lightweight proxies to improve reliability without needing a custom backend.
-const _newsProxyBuilders = [
-  // Same-origin proxy (Cloudflare Workers / Pages Functions)
-  // Works even when external proxies are blocked by CORS / 403.
-  (url) => `/api/news?url=${encodeURIComponent(url)}`,
-  // Fallbacks (may be blocked depending on hosting)
-  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  (url) => `https://r.jina.ai/${url}`,
-  (url) => `https://cors.isomorphic-git.org/${url}`
-];
-const fetchTextWithProxies = async (url, { timeoutMs = 8000 } = {}) => {
-  const errors = [];
-  for (const build of _newsProxyBuilders) {
-    const proxied = build(url);
-    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const t = setTimeout(() => controller?.abort?.(), timeoutMs);
-    try {
-      const res = await fetch(proxied, { method: "GET", signal: controller?.signal });
-      clearTimeout(t);
-      if (res.ok) return await res.text();
-      errors.push(`${new URL(proxied).host}:${res.status}`);
-    } catch (e) {
-      clearTimeout(t);
-      const host = (() => { try { return new URL(proxied).host; } catch { return "proxy"; } })();
-      errors.push(`${host}:${e?.name === "AbortError" ? "timeout" : e?.message || "fetch failed"}`);
-    }
-  }
-  throw new Error(`ニュースの取得に失敗しました (${errors.join(", ")})`);
+text-green-700" : "bg-slate-50 text-slate-700"}`}>
+              <div>結果: {lastResult.reels?.join(" / ")}</div>
+              <div>{lastResult.win ? `当たり！ +${lastResult.payout}` : "ハズレ"}</div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+    {chinchiroOpen ? (
+      <ChinchiroPanel
+        user={user}
+        profile={profile}
+        showNotification={showNotification}
+        onClose={() => setChinchiroOpen(false)}
+      />
+    ) : null}
+  );
 };
 const extractXml = (text) => {
   const idx = text.indexOf("<");
