@@ -1,4 +1,5 @@
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
+import News from "./news";
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import {
@@ -6334,104 +6335,6 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
               showNotification={showNotification}
               onClose={() => setChinchiroOpen(false)}
             />
-          ) : null}
-const extractXml = (text) => {
-  const idx = text.indexOf("<");
-  return idx >= 0 ? text.slice(idx) : text;
-};
-const decodeHtml = (str = "") => str.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, "\"").replace(/&#39;/g, "'");
-const parseRssItems = (xmlText) => {
-  const xml = new DOMParser().parseFromString(xmlText, "text/xml");
-  return Array.from(xml.querySelectorAll("item")).map((it) => ({
-    title: it.querySelector("title")?.textContent?.trim() ?? "",
-    link: it.querySelector("link")?.textContent?.trim() ?? "",
-    pubDate: it.querySelector("pubDate")?.textContent?.trim() ?? "",
-    desc: it.querySelector("description")?.textContent?.trim() ?? ""
-  })).filter((x) => x.title && x.link);
-};
-const extractArticleTextFromHtml = (htmlText) => {
-  const html = new DOMParser().parseFromString(htmlText, "text/html");
-  const ldJson = Array.from(html.querySelectorAll('script[type="application/ld+json"]')).map((s) => s.textContent || "").join("\n");
-  const bodyMatch = ldJson.match(/"articleBody"\s*:\s*"([\s\S]*?)"\s*(,|\})/);
-  if (bodyMatch?.[1]) {
-    const body = decodeHtml(bodyMatch[1]).replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\u003c/g, "<").replace(/\\u003e/g, ">").replace(/\\u0026/g, "&");
-    return body.replace(/<[^>]+>/g, "").trim();
-  }
-  const ps = Array.from(html.querySelectorAll("p")).map((p) => (p.textContent || "").trim()).filter(Boolean);
-  const text = ps.slice(0, 80).join("\n\n").trim();
-  return text || "本文を抽出できませんでした。右上の「ブラウザで開く」をお試しください。";
-};
-const NewsView = ({ showNotification }) => {
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState("");
-  const [items, setItems] = useState([]);
-  const [selected, setSelected] = useState(null);
-  const [articleLoading, setArticleLoading] = useState(false);
-  const [articleText, setArticleText] = useState("");
-
-  const loadYahooRss = useCallback(async () => {
-    setLoading(true);
-    setErr("");
-    setSelected(null);
-    setArticleText("");
-    try {
-      const rssUrl = "https://news.yahoo.co.jp/rss/topics/top-picks.xml";
-      const text = await fetchTextWithProxies(rssUrl, { timeoutMs: 8000 });
-      const xmlText = extractXml(text);
-      const parsed = parseRssItems(xmlText);
-      setItems(parsed);
-      if (!parsed.length) setErr("記事が見つかりませんでした");
-    } catch (e) {
-      setErr(e?.message || "Yahooニュースの取得に失敗しました");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const openArticle = useCallback(async (item) => {
-    setSelected(item);
-    setArticleLoading(true);
-    setArticleText("");
-    try {
-      const htmlText = await fetchTextWithProxies(item.link, { timeoutMs: 10000 });
-      const html = extractXml(htmlText);
-      const text = extractArticleTextFromHtml(html);
-      setArticleText(text);
-    } catch (e) {
-      setArticleText(e?.message || "記事の取得に失敗しました。");
-    } finally {
-      setArticleLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadYahooRss();
-  }, [loadYahooRss]);
-
-  return /* @__PURE__ */ jsxs("div", { className: "h-full flex flex-col bg-gray-50", children: [
-    /* @__PURE__ */ jsxs("div", { className: "px-5 pt-6 pb-3 flex items-center justify-between", children: [
-      /* @__PURE__ */ jsx("div", { className: "text-2xl font-black text-gray-900", children: "ニュース" }),
-      /* @__PURE__ */ jsx("button", { onClick: () => loadYahooRss(), disabled: loading, className: "text-green-600 font-black text-sm", children: "更新" })
-    ] }),
-    err ? /* @__PURE__ */ jsx("div", { className: "mx-5 mt-2 p-4 rounded-2xl bg-red-50 text-red-600 font-bold text-sm", children: err }) : null,
-    !selected ? /* @__PURE__ */ jsxs("div", { className: "px-5 pb-28 flex-1 overflow-y-auto scrollbar-hide", children: [
-      loading ? /* @__PURE__ */ jsx("div", { className: "mt-4 text-gray-500 font-bold", children: "読み込み中..." }) : null,
-      items.map((it, idx) => /* @__PURE__ */ jsxs("div", { onClick: () => openArticle(it), className: "mt-3 p-4 rounded-2xl bg-white shadow-sm border border-gray-100 cursor-pointer active:scale-[0.99] transition-transform", children: [
-        /* @__PURE__ */ jsx("div", { className: "font-black text-gray-900", children: it.title }),
-        /* @__PURE__ */ jsx("div", { className: "mt-1 text-[11px] font-bold text-gray-500", children: it.pubDate })
-      ] }, idx))
-    ] }) : /* @__PURE__ */ jsxs("div", { className: "px-5 pb-28 flex-1 overflow-y-auto scrollbar-hide", children: [
-      /* @__PURE__ */ jsxs("div", { className: "flex gap-3 mt-2", children: [
-        /* @__PURE__ */ jsx("button", { onClick: () => { setSelected(null); setArticleText(""); }, className: "px-4 py-2 rounded-2xl bg-gray-100 text-gray-700 font-bold", children: "← 戻る" }),
-        /* @__PURE__ */ jsx("button", { onClick: () => window.open(selected.link, "_blank"), className: "px-4 py-2 rounded-2xl bg-white border border-gray-200 text-gray-800 font-bold", children: "ブラウザで開く" })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "mt-3 p-4 rounded-2xl bg-white shadow-sm border border-gray-100", children: [
-        /* @__PURE__ */ jsx("div", { className: "font-black text-lg text-gray-900", children: selected.title }),
-        /* @__PURE__ */ jsx("div", { className: "mt-1 text-[11px] font-bold text-gray-500", children: selected.pubDate }),
-        /* @__PURE__ */ jsx("div", { className: "mt-4 whitespace-pre-wrap leading-relaxed text-gray-800 font-medium", children: articleLoading ? "本文を読み込み中..." : articleText })
-      ] })
-    ] })
-  ] });
 };
 
 
@@ -7122,7 +7025,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
         ] })
       ] }) : /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden relative pb-24", children: [
         view === "home" && /* @__PURE__ */ jsx(HomeView, { user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }),
-        view === "news" && /* @__PURE__ */ jsx(NewsView, { showNotification }),
+        view === "news" && /* @__PURE__ */ jsx(News, {}),
         view === "voom" && /* @__PURE__ */ jsx(VoomView, { user, allUsers, profile, posts, showNotification, db, appId, onLoadMore: loadMorePosts, hasMore: postsHasMore, loadingMore: postsLoadingMore }),
         view === "chatroom" && /* @__PURE__ */ jsx(ChatRoomView, { user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startChatWithUser, startVideoCall }),
         view === "profile" && /* @__PURE__ */ jsx(ProfileEditView, { user, profile, setView, showNotification, copyToClipboard }),
