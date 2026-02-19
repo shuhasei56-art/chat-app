@@ -6086,24 +6086,6 @@ const ChinchiroPanel = ({ user, profile, showNotification, onClose }) => {
   );
 };
 
-text-green-700" : "bg-slate-50 text-slate-700"}`}>
-              <div>結果: {lastResult.reels?.join(" / ")}</div>
-              <div>{lastResult.win ? `当たり！ +${lastResult.payout}` : "ハズレ"}</div>
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
-    {chinchiroOpen ? (
-      <ChinchiroPanel
-        user={user}
-        profile={profile}
-        showNotification={showNotification}
-        onClose={() => setChinchiroOpen(false)}
-      />
-    ) : null}
-  );
-};
 const PachinkoView = ({ user, profile, onBack, showNotification }) => {
   const [isSpinning, setIsSpinning] = useState(false);
   const [lastResult, setLastResult] = useState(null);
