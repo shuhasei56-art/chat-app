@@ -6335,8 +6335,12 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
               showNotification={showNotification}
               onClose={() => setChinchiroOpen(false)}
             />
-};
-
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function App() {
   const [user, setUser] = useState(null);
@@ -7071,7 +7075,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
       ] }) }),
-      user && !activeCall && ["home","news","voom","pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "fixed bottom-0 left-0 right-0 h-20 bg-white border-t shadow-[0_-2px_10px_rgba(0,0,0,0.06)] flex items-center justify-around z-50 pt-2", style: { paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }, children: [
+      user && !activeCall && ["home","news","voom","pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-0 left-0 right-0 h-20 bg-white border-t shadow-[0_-2px_10px_rgba(0,0,0,0.06)] flex items-center justify-around z-50 pt-2", style: { paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }, children: [
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("home"), children: [
           /* @__PURE__ */ jsx(Home, { className: "w-6 h-6" }),
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u30DB\u30FC\u30E0" })
