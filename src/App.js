@@ -1193,7 +1193,7 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [callError, setCallError] = useState(null);
-  const remoteAudioRef = useRef(null);
+  const [spotlightUid, setSpotlightUid] = useState(null);
   const localVideoRef = useRef(null);
   const pcsRef = useRef(new Map());
   const localStreamRef = useRef(null);
@@ -1340,22 +1340,7 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
       event.streams?.[0]?.getTracks?.().forEach((t) => {
         try { remoteStream.addTrack(t); } catch { }
       });
-      // Ensure remote audio keeps playing (Safari/autoplay and Wi-Fi switch robustness)
-      try {
-        if (remoteAudioRef.current) {
-          const audioTracks = remoteStream.getAudioTracks ? remoteStream.getAudioTracks() : [];
-          const mixed = new MediaStream();
-          audioTracks.forEach((t) => {
-            try { mixed.addTrack(t); } catch { }
-          });
-          if (mixed.getAudioTracks().length > 0) {
-            remoteAudioRef.current.srcObject = mixed;
-            remoteAudioRef.current.muted = false;
-            remoteAudioRef.current.volume = 1;
-            remoteAudioRef.current.play?.().catch(() => {});
-          }
-        }
-      } catch { }
+      setRemoteStreams((prev) => ({ ...prev, [remoteUid]: remoteStream }));
     };
 
     const sessionRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "group_calls", sessionId);
@@ -1420,6 +1405,28 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
       if (p?.uid && p.uid !== user.uid) ensurePeer(p.uid);
     });
   }, [participants, ensurePeer, sessionId, user.uid]);
+
+
+  const remoteTiles = useMemo(() => Object.entries(remoteStreams).map(([uid, stream]) => ({ uid, stream })), [remoteStreams]);
+
+  useEffect(() => {
+    const currentRemoteUids = remoteTiles.map((t) => t.uid);
+    if (!currentRemoteUids.length) {
+      setSpotlightUid(null);
+      return;
+    }
+    if (!spotlightUid || !currentRemoteUids.includes(spotlightUid)) {
+      setSpotlightUid(currentRemoteUids[0]);
+    }
+  }, [remoteTiles, spotlightUid]);
+
+  const audioPolicy = useMemo(() => {
+    const policy = new Map();
+    remoteTiles.forEach((t) => {
+      policy.set(t.uid, spotlightUid ? t.uid === spotlightUid : false);
+    });
+    return policy;
+  }, [remoteTiles, spotlightUid]);
 
   const toggleMute = () => {
     const stream = localStreamRef.current;
@@ -1534,10 +1541,13 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   };
 
   const tiles = useMemo(() => {
-    const remotes = Object.entries(remoteStreams).map(([uid, stream]) => ({ uid, stream, isLocal: false }));
+    const remotes = remoteTiles.map(({ uid, stream }) => ({ uid, stream, isLocal: false }));
+    const spotlightRemote = spotlightUid ? remotes.find((t) => t.uid === spotlightUid) : null;
+    const otherRemotes = remotes.filter((t) => t.uid !== spotlightUid);
+    const orderedRemotes = spotlightRemote ? [spotlightRemote, ...otherRemotes] : remotes;
     const local = { uid: user.uid, stream: localStreamRef.current, isLocal: true };
-    return [local, ...remotes];
-  }, [remoteStreams, user.uid]);
+    return [local, ...orderedRemotes];
+  }, [remoteTiles, spotlightUid, user.uid]);
 
   const cols = useMemo(() => {
     const n = tiles.length;
@@ -1557,26 +1567,35 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   }
 
   return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black flex flex-col", children: [
-      /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true }),
-    /* @__PURE__ */ jsx("div", { className: "flex-1 relative overflow-hidden", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : void 0, backgroundSize: "cover", backgroundPosition: "center" }, children: /* @__PURE__ */ jsx("div", { className: "w-full h-full p-2", style: { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: "8px" }, children: tiles.map((t) => {
-      const isLocal = t.isLocal;
-      const remoteEf = participants.find((p) => p.uid === t.uid)?.effect || "Normal";
-      const filter = isLocal ? getFilterStyle(activeEffect) : getFilterStyle(remoteEf);
-      return /* @__PURE__ */ jsxs("div", { className: "relative bg-black rounded-xl overflow-hidden border border-white/10", children: [
-        /* @__PURE__ */ jsx("video", { ref: (el) => {
-          if (!el) return;
-          if (t.stream && el.srcObject !== t.stream) el.srcObject = t.stream;
-          el.muted = isLocal;
-          el.playsInline = true;
-          el.autoplay = true;
-          try { el.play(); } catch { }
-        }, className: "w-full h-full object-cover", style: { filter, transform: isLocal ? "scaleX(-1)" : void 0 }, autoPlay: true, playsInline: true }),
-        /* @__PURE__ */ jsxs(Fragment, { children: [
-        /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/40 text-white text-[10px] px-2 py-0.5 rounded-full", children: isLocal ? "You" : (participants.find((p) => p.uid === t.uid)?.name || t.uid.slice(0, 6)) }),
-        !isLocal && remoteEf && remoteEf !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute top-2 left-2 bg-black/50 text-white text-[10px] px-2 py-0.5 rounded-full", children: remoteEf })
-      ] })
-      ] }, t.uid);
-    }) }) }),
+    /* @__PURE__ */ jsx("div", { className: "flex-1 relative overflow-hidden", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : void 0, backgroundSize: "cover", backgroundPosition: "center" }, children: /* @__PURE__ */ jsxs(Fragment, { children: [
+      remoteTiles.length > 0 && /* @__PURE__ */ jsx("div", { className: "absolute top-3 left-1/2 -translate-x-1/2 z-20 bg-black/55 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-md border border-white/10", children: spotlightUid ? `スポットライト音声: ${participants.find((p) => p.uid === spotlightUid)?.name || spotlightUid.slice(0, 6)}` : "スポットライト未選択" }),
+      /* @__PURE__ */ jsx("div", { className: "w-full h-full p-2", style: { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: "8px" }, children: tiles.map((t) => {
+        const isLocal = t.isLocal;
+        const isSpotlight = !isLocal && spotlightUid === t.uid;
+        const remoteEf = participants.find((p) => p.uid === t.uid)?.effect || "Normal";
+        const filter = isLocal ? getFilterStyle(activeEffect) : getFilterStyle(remoteEf);
+        const remoteName = participants.find((p) => p.uid === t.uid)?.name || t.uid.slice(0, 6);
+        return /* @__PURE__ */ jsxs("button", { type: "button", onClick: () => {
+          if (!isLocal) setSpotlightUid(t.uid);
+        }, className: `relative bg-black rounded-xl overflow-hidden border text-left ${isSpotlight ? "border-green-400 ring-2 ring-green-400/70" : "border-white/10"} ${isLocal ? "cursor-default" : "cursor-pointer"}`, children: [
+          /* @__PURE__ */ jsx("video", { ref: (el) => {
+            if (!el) return;
+            if (t.stream && el.srcObject !== t.stream) el.srcObject = t.stream;
+            const shouldHear = isLocal ? false : !!audioPolicy.get(t.uid);
+            el.muted = isLocal || !shouldHear;
+            el.volume = shouldHear ? 1 : 0;
+            el.playsInline = true;
+            el.autoplay = true;
+            try { el.play(); } catch { }
+          }, className: "w-full h-full object-cover", style: { filter, transform: isLocal ? "scaleX(-1)" : void 0 }, autoPlay: true, playsInline: true }),
+          /* @__PURE__ */ jsxs(Fragment, { children: [
+            /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/40 text-white text-[10px] px-2 py-0.5 rounded-full", children: isLocal ? "You" : remoteName }),
+            !isLocal && remoteEf && remoteEf !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute top-2 left-2 bg-black/50 text-white text-[10px] px-2 py-0.5 rounded-full", children: remoteEf }),
+            !isLocal && /* @__PURE__ */ jsx("div", { className: `absolute top-2 right-2 text-[10px] px-2 py-0.5 rounded-full ${isSpotlight ? "bg-green-500 text-white" : "bg-black/50 text-white"}`, children: isSpotlight ? "音声ON" : "タップで音声" })
+          ] })
+        ] }, t.uid);
+      }) })
+    ] }) }),
     /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-6 pb-6 backdrop-blur-lg", children: [
       /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `w-16 h-16 rounded-full ${isMuted ? "bg-red-600 text-white" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
       /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: !isVideoEnabled || isVideoOff || isScreenSharing, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff || isScreenSharing ? "bg-gray-700/50 text-white/50" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
