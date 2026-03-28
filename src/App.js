@@ -6354,12 +6354,8 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
               showNotification={showNotification}
               onClose={() => setChinchiroOpen(false)}
             />
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
 };
+
 
 function App() {
   const [user, setUser] = useState(null);
