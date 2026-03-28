@@ -1,25 +1,32 @@
 import React from "react";
+import { Newspaper, RefreshCw, ExternalLink, ChevronLeft, Clock3 } from "lucide-react";
 
 const RSS_FEEDS = [
-  "https://news.yahoo.co.jp/rss/topics/top-picks.xml",
-  "https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja",
+  {
+    key: "yahoo-top",
+    label: "Yahoo!ニュース",
+    url: "https://news.yahoo.co.jp/rss/topics/top-picks.xml",
+  },
+  {
+    key: "google-ja",
+    label: "Google ニュース",
+    url: "https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja",
+  },
 ];
 
 const REMOTE_PROXY = process.env.REACT_APP_NEWS_PROXY || "";
-
-function stripPreamble(text) {
-  const i = text.indexOf("<");
-  return i >= 0 ? text.slice(i) : text;
-}
+const RSS2JSON_BASE = "https://api.rss2json.com/v1/api.json";
+const ALLORIGINS_BASE = "https://api.allorigins.win/raw?url=";
 
 function decodeHtml(str = "") {
   return str
+    .replace(/<!\[CDATA\[|\]\]>/g, "")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/<!\[CDATA\[|\]\]>/g, "");
+    .replace(/&#x2F;/g, "/");
 }
 
 function cleanText(str = "") {
@@ -29,12 +36,26 @@ function cleanText(str = "") {
     .trim();
 }
 
-function formatPubDate(pubDate = "") {
-  if (!pubDate) return "";
-  const date = new Date(pubDate);
-  if (Number.isNaN(date.getTime())) return pubDate;
-  return date.toLocaleString("ja-JP", {
-    year: "numeric",
+function stripPreamble(text) {
+  const i = text.indexOf("<");
+  return i >= 0 ? text.slice(i) : text;
+}
+
+function formatRelativeOrAbsolute(dateStr = "") {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "たった今";
+  if (mins < 60) return `${mins}分前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}時間前`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}日前`;
+
+  return d.toLocaleString("ja-JP", {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -42,140 +63,201 @@ function formatPubDate(pubDate = "") {
   });
 }
 
-function parseRss(xmlText) {
+function parseRss(xmlText, feedLabel = "") {
   const xml = new DOMParser().parseFromString(xmlText, "text/xml");
   const parserError = xml.querySelector("parsererror");
-  if (parserError) {
-    throw new Error("RSSの解析に失敗しました");
-  }
+  if (parserError) throw new Error("RSSの解析に失敗しました");
 
-  const channelTitle = xml.querySelector("channel > title")?.textContent?.trim() ?? "";
+  const channelTitle = xml.querySelector("channel > title")?.textContent?.trim() || feedLabel || "ニュース";
 
   return Array.from(xml.querySelectorAll("item"))
-    .map((it) => ({
-      title: cleanText(it.querySelector("title")?.textContent ?? ""),
-      link: (it.querySelector("link")?.textContent ?? "").trim(),
-      pubDate: formatPubDate(it.querySelector("pubDate")?.textContent?.trim() ?? ""),
-      rawPubDate: (it.querySelector("pubDate")?.textContent ?? "").trim(),
-      description: cleanText(
-        it.querySelector("description")?.textContent ??
-          it.querySelector("content\\:encoded")?.textContent ??
+    .map((it, idx) => {
+      const title = cleanText(it.querySelector("title")?.textContent || "");
+      const link = (it.querySelector("link")?.textContent || "").trim();
+      const description = cleanText(
+        it.querySelector("description")?.textContent ||
+          it.querySelector("content\\:encoded")?.textContent ||
           ""
-      ),
-      source:
-        cleanText(it.querySelector("source")?.textContent ?? "") ||
-        cleanText(it.querySelector("dc\\:creator")?.textContent ?? "") ||
-        channelTitle,
-    }))
+      );
+      const pubDateRaw = (it.querySelector("pubDate")?.textContent || "").trim();
+      const source =
+        cleanText(it.querySelector("source")?.textContent || "") ||
+        cleanText(it.querySelector("dc\\:creator")?.textContent || "") ||
+        channelTitle;
+
+      let thumbnail = "";
+      const enc = it.querySelector("enclosure");
+      if (enc?.getAttribute("type")?.startsWith("image/")) {
+        thumbnail = enc.getAttribute("url") || "";
+      }
+      const mediaThumb = it.querySelector("media\\:thumbnail");
+      if (!thumbnail && mediaThumb) thumbnail = mediaThumb.getAttribute("url") || "";
+      const mediaContent = it.querySelector("media\\:content");
+      if (!thumbnail && mediaContent?.getAttribute("medium") === "image") {
+        thumbnail = mediaContent.getAttribute("url") || "";
+      }
+
+      return {
+        id: `${link || title}-${idx}`,
+        title,
+        link,
+        description,
+        source,
+        pubDateRaw,
+        pubDateLabel: formatRelativeOrAbsolute(pubDateRaw),
+        thumbnail,
+      };
+    })
     .filter((it) => it.title && it.link);
 }
 
-function extractArticleText(htmlText) {
-  const doc = new DOMParser().parseFromString(htmlText, "text/html");
-
-  const jsonLdBlocks = Array.from(doc.querySelectorAll('script[type="application/ld+json"]'))
-    .map((s) => s.textContent || "")
-    .join("\n");
-
-  const bodyMatch = jsonLdBlocks.match(/"articleBody"\s*:\s*"([\s\S]*?)"\s*(,|\})/);
-  if (bodyMatch?.[1]) {
-    const body = decodeHtml(bodyMatch[1])
-      .replace(/\\n/g, "\n")
-      .replace(/\\"/g, '"')
-      .replace(/\\u003c/g, "<")
-      .replace(/\\u003e/g, ">")
-      .replace(/\\u0026/g, "&")
-      .replace(/<[^>]+>/g, "")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-    if (body.length > 80) return body;
-  }
-
-  const metaDescription =
-    doc.querySelector('meta[property="og:description"]')?.getAttribute("content") ||
-    doc.querySelector('meta[name="description"]')?.getAttribute("content") ||
-    "";
-
-  const paragraphs = Array.from(doc.querySelectorAll("article p, main p, p"))
-    .map((p) => (p.textContent || "").trim())
-    .filter(Boolean)
-    .filter((t) => t.length > 20)
-    .slice(0, 40);
-
-  const combined = [cleanText(metaDescription), ...paragraphs].filter(Boolean).join("\n\n").trim();
-  if (combined) return combined;
-
-  return "本文を抽出できませんでした。『ブラウザで開く』で記事を確認してください。";
-}
-
-async function fetchWithTimeout(url, options = {}, ms = 10000) {
+async function fetchWithTimeout(url, options = {}, ms = 12000) {
   const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), ms);
+  const timer = setTimeout(() => ac.abort(), ms);
   try {
     return await fetch(url, { ...options, signal: ac.signal });
   } finally {
-    clearTimeout(t);
+    clearTimeout(timer);
   }
 }
 
-function proxyCandidates(targetUrl) {
-  const encoded = encodeURIComponent(targetUrl);
+async function tryFetchText(url) {
+  const res = await fetchWithTimeout(url, {}, 12000);
+  if (!res.ok) throw new Error(`${res.status}`);
+  return await res.text();
+}
+
+async function fetchFeedViaStrategies(feed) {
+  const encoded = encodeURIComponent(feed.url);
   const origin = window.location.origin;
-  const candidates = [
+  const errors = [];
+
+  const strategies = [
     {
       key: "local-api",
-      url: `${origin}/api/news?url=${encoded}`,
-      parse: async (res) => await res.text(),
+      run: async () => await tryFetchText(`${origin}/api/news?url=${encoded}`),
+    },
+    ...(REMOTE_PROXY
+      ? [
+          {
+            key: "custom-proxy",
+            run: async () => await tryFetchText(`${REMOTE_PROXY.replace(/\/$/, "")}?url=${encoded}`),
+          },
+        ]
+      : []),
+    {
+      key: "rss2json",
+      run: async () => {
+        const res = await fetchWithTimeout(`${RSS2JSON_BASE}?rss_url=${encoded}`, {}, 12000);
+        if (!res.ok) throw new Error(String(res.status));
+        const json = await res.json();
+        if (json?.status !== "ok" || !Array.isArray(json?.items)) {
+          throw new Error(json?.message || "invalid rss2json response");
+        }
+        const items = json.items.map((it, idx) => ({
+          id: `${it.link || it.title}-${idx}`,
+          title: cleanText(it.title || ""),
+          link: (it.link || "").trim(),
+          description: cleanText(it.description || it.content || ""),
+          source: cleanText(it.author || json?.feed?.title || feed.label),
+          pubDateRaw: (it.pubDate || "").trim(),
+          pubDateLabel: formatRelativeOrAbsolute(it.pubDate || ""),
+          thumbnail: it.thumbnail || "",
+        })).filter((it) => it.title && it.link);
+        return { items, feedName: json?.feed?.title || feed.label, provider: "rss2json" };
+      },
+    },
+    {
+      key: "allorigins",
+      run: async () => {
+        const xmlText = stripPreamble(await tryFetchText(`${ALLORIGINS_BASE}${encoded}`));
+        return {
+          items: parseRss(xmlText, feed.label),
+          feedName: feed.label,
+          provider: "allorigins",
+        };
+      },
+    },
+    {
+      key: "whateverorigin",
+      run: async () => {
+        const res = await fetchWithTimeout(`https://whateverorigin.org/get?url=${encoded}`, {}, 12000);
+        if (!res.ok) throw new Error(String(res.status));
+        const json = await res.json();
+        const xmlText = stripPreamble(json?.contents || "");
+        return {
+          items: parseRss(xmlText, feed.label),
+          feedName: feed.label,
+          provider: "whateverorigin",
+        };
+      },
     },
   ];
 
-  if (REMOTE_PROXY) {
-    const base = REMOTE_PROXY.replace(/\/$/, "");
-    candidates.push({
-      key: "custom-proxy",
-      url: `${base}?url=${encoded}`,
-      parse: async (res) => await res.text(),
-    });
-  }
-
-  candidates.push({
-    key: "whateverorigin",
-    url: `https://whateverorigin.org/get?url=${encoded}`,
-    parse: async (res) => {
-      const json = await res.json();
-      return json?.contents || "";
-    },
-  });
-
-  return candidates;
-}
-
-async function fetchViaAvailableProxy(targetUrl) {
-  const errors = [];
-
-  for (const candidate of proxyCandidates(targetUrl)) {
+  for (const strategy of strategies) {
     try {
-      const res = await fetchWithTimeout(candidate.url, {}, 10000);
-      if (!res.ok) throw new Error(`${candidate.key}: ${res.status}`);
-      const text = await candidate.parse(res);
-      if (!text || typeof text !== "string") throw new Error(`${candidate.key}: empty response`);
-      return text;
-    } catch (error) {
-      errors.push(error?.message || String(error));
+      if (strategy.key === "local-api" || strategy.key === "custom-proxy") {
+        const xmlText = stripPreamble(await strategy.run());
+        return {
+          items: parseRss(xmlText, feed.label),
+          feedName: feed.label,
+          provider: strategy.key,
+        };
+      }
+      const out = await strategy.run();
+      if (!out?.items?.length) throw new Error("empty");
+      return out;
+    } catch (e) {
+      errors.push(`${strategy.key}: ${e?.message || String(e)}`);
     }
   }
 
-  throw new Error(`ニュース取得に失敗しました: ${errors.join(" / ")}`);
+  throw new Error(errors.join(" / "));
+}
+
+function buildMerged(itemsByFeed) {
+  return itemsByFeed
+    .flatMap((x) => x.items)
+    .sort((a, b) => new Date(b.pubDateRaw || 0).getTime() - new Date(a.pubDateRaw || 0).getTime())
+    .slice(0, 40);
+}
+
+function NewsListItem({ item, onClick }) {
+  return (
+    <button
+      onClick={() => onClick(item)}
+      className="w-full text-left bg-white hover:bg-slate-50 active:scale-[0.995] transition rounded-2xl border border-slate-200 px-3 py-3 shadow-sm"
+    >
+      <div className="flex gap-3 items-start">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-[11px] text-slate-500 font-semibold">
+            <span className="truncate">{item.source || "ニュース"}</span>
+            {item.pubDateLabel ? <span>• {item.pubDateLabel}</span> : null}
+          </div>
+          <div className="mt-1 text-[15px] leading-6 font-bold text-slate-900 line-clamp-2">{item.title}</div>
+          {item.description ? (
+            <div className="mt-1 text-[12px] leading-5 text-slate-500 line-clamp-2">{item.description}</div>
+          ) : null}
+        </div>
+
+        <div className="w-[92px] h-[92px] shrink-0 rounded-2xl overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center">
+          {item.thumbnail ? (
+            <img src={item.thumbnail} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <Newspaper className="w-7 h-7 text-slate-400" />
+          )}
+        </div>
+      </div>
+    </button>
+  );
 }
 
 export default function News({ onOpenUrl }) {
   const [loading, setLoading] = React.useState(false);
-  const [err, setErr] = React.useState("");
+  const [errorLines, setErrorLines] = React.useState([]);
   const [items, setItems] = React.useState([]);
   const [selected, setSelected] = React.useState(null);
-  const [articleLoading, setArticleLoading] = React.useState(false);
-  const [articleText, setArticleText] = React.useState("");
-  const [feedName, setFeedName] = React.useState("");
+  const [feedStatus, setFeedStatus] = React.useState([]);
 
   const openUrl = React.useCallback(
     (url) => {
@@ -185,122 +267,144 @@ export default function News({ onOpenUrl }) {
     [onOpenUrl]
   );
 
-  const loadRss = React.useCallback(async () => {
+  const loadNews = React.useCallback(async () => {
     setLoading(true);
-    setErr("");
+    setErrorLines([]);
     setSelected(null);
-    setArticleText("");
 
-    const attemptErrors = [];
+    const success = [];
+    const fails = [];
 
-    for (const feedUrl of RSS_FEEDS) {
+    for (const feed of RSS_FEEDS) {
       try {
-        const xmlText = stripPreamble(await fetchViaAvailableProxy(feedUrl));
-        const parsed = parseRss(xmlText);
-        if (!parsed.length) throw new Error("記事が見つかりませんでした");
-        setItems(parsed);
-        setFeedName(parsed[0]?.source || "ニュース");
-        setLoading(false);
-        return;
+        const result = await fetchFeedViaStrategies(feed);
+        success.push({ ...result, feed });
       } catch (e) {
-        attemptErrors.push(`${feedUrl} -> ${e?.message || "取得失敗"}`);
+        fails.push(`${feed.label}: ${e?.message || "取得失敗"}`);
       }
     }
 
-    setErr(attemptErrors.join("\n"));
+    const merged = buildMerged(success);
+    setItems(merged);
+    setFeedStatus(
+      success.map((s) => ({
+        label: s.feed.label,
+        provider: s.provider,
+        count: s.items.length,
+      }))
+    );
+    setErrorLines(fails);
     setLoading(false);
   }, []);
 
-  const openArticle = React.useCallback(async (item) => {
-    setSelected(item);
-    setArticleLoading(true);
-    setArticleText(item.description || "");
-
-    try {
-      const html = stripPreamble(await fetchViaAvailableProxy(item.link));
-      const text = extractArticleText(html);
-      setArticleText(text || item.description || "本文を取得できませんでした。");
-    } catch (e) {
-      setArticleText(item.description || e?.message || "取得に失敗しました");
-    } finally {
-      setArticleLoading(false);
-    }
-  }, []);
-
   React.useEffect(() => {
-    loadRss();
-  }, [loadRss]);
+    loadNews();
+  }, [loadNews]);
 
   return (
-    <div className="h-full flex flex-col bg-slate-50">
-      <div className="px-4 pt-4 pb-3 flex items-center justify-between border-b border-slate-200 bg-white sticky top-0 z-10">
-        <div>
-          <div className="text-2xl font-extrabold">ニュース</div>
-          {feedName ? <div className="text-xs text-slate-500 mt-1">{feedName}</div> : null}
-        </div>
-        <button onClick={loadRss} disabled={loading} className="text-green-600 font-bold disabled:opacity-50">
-          更新
-        </button>
-      </div>
-
-      {err ? (
-        <div className="mx-4 mt-4 p-3 rounded-2xl bg-red-50 text-red-700 font-semibold whitespace-pre-wrap text-sm">
-          {err}
-        </div>
-      ) : null}
-
-      <div className="flex-1 overflow-y-auto px-4 pb-24 pt-4">
+    <div className="h-full bg-[#f5f6f8] flex flex-col">
+      <div className="sticky top-0 z-20 bg-white border-b border-slate-200 px-4 pt-4 pb-3">
         {!selected ? (
           <>
-            {loading ? <div className="text-slate-500 font-semibold">読み込み中...</div> : null}
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[26px] leading-none font-black text-slate-900">ニュース</div>
+                <div className="mt-1 text-[12px] text-slate-500">LINE風の一覧で最新記事を表示</div>
+              </div>
+              <button
+                onClick={loadNews}
+                disabled={loading}
+                className="h-11 px-4 rounded-full bg-[#06c755] text-white font-bold disabled:opacity-50 flex items-center gap-2"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+                更新
+              </button>
+            </div>
+
+            <div className="mt-3 flex gap-2 overflow-x-auto no-scrollbar">
+              {feedStatus.map((s) => (
+                <div key={s.label} className="shrink-0 px-3 py-2 rounded-full bg-[#f2fff6] border border-[#c9f2d8] text-[12px] font-semibold text-[#169b4a]">
+                  {s.label} {s.count}件
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center justify-between gap-3">
+            <button onClick={() => setSelected(null)} className="h-11 w-11 rounded-full bg-slate-100 flex items-center justify-center">
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="text-[18px] font-black truncate">記事詳細</div>
+              <div className="text-[12px] text-slate-500 truncate">{selected.source}</div>
+            </div>
+            <button onClick={() => openUrl(selected.link)} className="h-11 px-4 rounded-full bg-[#06c755] text-white font-bold flex items-center gap-2">
+              <ExternalLink className="w-4 h-4" />
+              開く
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-3 pt-3 pb-28">
+        {!selected ? (
+          <>
+            {errorLines.length ? (
+              <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] leading-5 text-amber-800">
+                <div className="font-bold">一部の取得経路で失敗しました</div>
+                <div className="mt-1">別の経路で取得できた記事はそのまま表示しています。</div>
+                <div className="mt-2 whitespace-pre-wrap">{errorLines.join("\n")}</div>
+              </div>
+            ) : null}
+
+            {loading && items.length === 0 ? (
+              <div className="px-4 py-10 text-center text-slate-500 font-semibold">ニュースを読み込み中...</div>
+            ) : null}
+
+            {!loading && items.length === 0 ? (
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 text-center shadow-sm">
+                <div className="mx-auto w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center">
+                  <Newspaper className="w-7 h-7 text-slate-400" />
+                </div>
+                <div className="mt-3 text-[17px] font-black">ニュースを読み込めませんでした</div>
+                <div className="mt-2 text-[13px] leading-6 text-slate-500">
+                  公開RSS・プロキシの状態により失敗することがあります。更新ボタンでもう一度試してください。
+                </div>
+              </div>
+            ) : null}
+
             <div className="space-y-3">
-              {items.map((it, idx) => (
-                <button
-                  key={`${it.link}-${idx}`}
-                  onClick={() => openArticle(it)}
-                  className="w-full text-left p-4 rounded-2xl bg-white shadow-sm border border-slate-100"
-                >
-                  <div className="font-extrabold leading-6">{it.title}</div>
-                  <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-                    {it.pubDate ? <span>{it.pubDate}</span> : null}
-                    {it.source ? <span>• {it.source}</span> : null}
-                  </div>
-                  {it.description ? (
-                    <div className="mt-3 text-sm text-slate-700 line-clamp-3">{it.description}</div>
-                  ) : null}
-                </button>
+              {items.map((item) => (
+                <NewsListItem key={item.id} item={item} onClick={setSelected} />
               ))}
             </div>
           </>
         ) : (
           <div className="space-y-3">
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  setSelected(null);
-                  setArticleText("");
-                }}
-                className="px-3 py-2 rounded-xl bg-slate-100 font-bold"
-              >
-                ← 戻る
-              </button>
-              <button onClick={() => openUrl(selected.link)} className="px-3 py-2 rounded-xl bg-slate-100 font-bold">
-                ブラウザで開く
-              </button>
-            </div>
+            {selected.thumbnail ? (
+              <div className="overflow-hidden rounded-[28px] bg-white border border-slate-200 shadow-sm">
+                <img src={selected.thumbnail} alt="" className="w-full h-56 object-cover" />
+              </div>
+            ) : null}
 
-            <div className="p-4 rounded-2xl bg-white shadow-sm border border-slate-100">
-              <div className="text-lg font-extrabold leading-7">{selected.title}</div>
-              <div className="mt-2 text-xs text-slate-500">
-                {selected.pubDate}
-                {selected.source ? ` • ${selected.source}` : ""}
+            <div className="bg-white border border-slate-200 shadow-sm rounded-[28px] p-5">
+              <div className="flex items-center gap-2 text-[12px] text-slate-500 font-semibold">
+                <Clock3 className="w-4 h-4" />
+                <span>{selected.pubDateLabel || "時刻不明"}</span>
+                <span>•</span>
+                <span className="truncate">{selected.source || "ニュース"}</span>
               </div>
-              {selected.description ? (
-                <div className="mt-4 text-sm text-slate-600 leading-6">要約: {selected.description}</div>
-              ) : null}
-              <div className="mt-4 whitespace-pre-wrap leading-7 text-slate-800">
-                {articleLoading ? "本文を読み込み中..." : articleText}
+              <div className="mt-3 text-[22px] leading-9 font-black text-slate-900">{selected.title}</div>
+              <div className="mt-4 text-[14px] leading-7 text-slate-700 whitespace-pre-wrap">
+                {selected.description || "この記事の本文プレビューは取得できなかったため、元ページを開いて確認してください。"}
               </div>
+              <button
+                onClick={() => openUrl(selected.link)}
+                className="mt-5 w-full h-12 rounded-2xl bg-[#06c755] text-white font-black flex items-center justify-center gap-2"
+              >
+                <ExternalLink className="w-4 h-4" />
+                元記事を開く
+              </button>
             </div>
           </div>
         )}
