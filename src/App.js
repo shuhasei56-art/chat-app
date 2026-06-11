@@ -4507,7 +4507,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   const [coinModalTarget, setCoinModalTarget] = useState(null);
   const [aiEffectModalOpen, setAiEffectModalOpen] = useState(false);
   const [headerAvatarError, setHeaderAvatarError] = useState(false);
-  const [liveModalOpen, setLiveModalOpen] = useState(false);
+  const [liveModalOpen, setLiveModalOpen] = useState(false); // 配信ボタンで開くLIVEモーダル
   const chatData = chats.find((c) => c.id === activeChatId);
   const contactCandidates = useMemo(() => {
     const hiddenSet = new Set(profile?.hiddenFriends || []);
@@ -4919,7 +4919,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       !isGroup ? /* @__PURE__ */ jsx("div", { className: "font-bold text-[12px] flex-1 truncate text-gray-900 leading-none", children: title }) : /* @__PURE__ */ jsx("div", { className: "flex-1" }),
       /* @__PURE__ */ jsxs("div", { className: "flex gap-2 mr-1 items-center", children: [
         /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-          /* @__PURE__ */ /* @__PURE__ */ jsx("button", { onClick: () => setLiveModalOpen(true), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "LIVE\u914D\u4FE1", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1", children: [/* @__PURE__ */ jsx("span", { className: "w-2 h-2 rounded-full bg-red-500 inline-block" }), /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold text-gray-700", children: "LIVE" })] }) }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setLiveModalOpen(true), className: "flex items-center gap-1 px-2 py-1 rounded-full bg-red-500 hover:bg-red-600 text-white text-[11px] font-bold shadow-sm transition-colors", title: "配信", "aria-label": "配信", children: [/* @__PURE__ */ jsx("span", { className: "w-2 h-2 rounded-full bg-white inline-block animate-pulse" }), "配信"] }),
           jsx("button", { onClick: () => setBackgroundMenuOpen(!backgroundMenuOpen), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u80CC\u666F\u3092\u5909\u66F4", children: /* @__PURE__ */ jsx(Palette, { className: "w-5 h-5 text-gray-500" }) }),
           backgroundMenuOpen && /* @__PURE__ */ jsxs("div", { className: "absolute top-full right-0 mt-2 bg-white rounded-xl shadow-xl border overflow-hidden w-40 z-20", children: [
             /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 px-4 py-3 hover:bg-gray-50 cursor-pointer text-sm font-bold text-gray-700", children: [
