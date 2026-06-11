@@ -5682,6 +5682,7 @@ const AvatarWithFallback = ({ src, name, className, fallbackClassName }) => {
   return /* @__PURE__ */ jsx("img", { src, className, loading: "lazy", onError: () => setHasError(true), alt: name || "avatar" });
 };
 const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }) => {
+  const [liveModalOpen, setLiveModalOpen] = useState(false);
   const [tab, setTab] = useState("chats");
   const [selectedFriend, setSelectedFriend] = useState(null);
   const [coinModalTarget, setCoinModalTarget] = useState(null);
@@ -5836,6 +5837,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
             /* @__PURE__ */ jsx(Users, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("group-create") }),
             /* @__PURE__ */ jsx(Search, { className: "w-6 h-6 cursor-pointer", onClick: () => setSearchModalOpen(true) }),
             /* @__PURE__ */ jsx(UserPlus, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("qr") }),
+            /* @__PURE__ */ jsx("button", { onClick: () => setLiveModalOpen(true), className: "w-6 h-6 cursor-pointer text-red-500 hover:text-red-600 relative flex items-center justify-center bg-transparent border-0 p-0", title: "配信", "aria-label": "配信", children: /* @__PURE__ */ jsxs("span", { className: "relative flex items-center justify-center", children: [/* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }), /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse" })] }) }),
             /* @__PURE__ */ jsx(Settings, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("profile") })
           ] })
         ] }),
@@ -6044,7 +6046,8 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
             targetName: coinModalTarget.name,
             showNotification
           }
-        )
+        ),
+        liveModalOpen && /* @__PURE__ */ jsx(LiveStreamModal, { open: liveModalOpen, onClose: () => setLiveModalOpen(false) })
       ]
     }
   );
