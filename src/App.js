@@ -1,5 +1,4 @@
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
-import News from "./news";
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import {
@@ -595,16 +594,6 @@ const VideoCallView = ({ user, chatId, callData, onEndCall, isCaller: isCallerPr
   const hasRemoteVideoTrackRef = useRef(false);
   const sessionId = callData?.sessionId || "";
   const isCaller = typeof isCallerProp === "boolean" ? isCallerProp : callData?.callerId === user.uid;
-  const remoteUid = useMemo(() => {
-    if (!callData) return null;
-    if (isCaller) return callData?.acceptedBy || callData?.answererId || null;
-    return callData?.callerId || null;
-  }, [callData, isCaller]);
-  const remoteEffectName = useMemo(() => {
-    if (!remoteUid) return "Normal";
-    const map = callData?.effects || {};
-    return map?.[remoteUid] || "Normal";
-  }, [callData, remoteUid]);
   const getFilterStyle = (effectName) => {
     if (!effectName || effectName === "Normal") return "none";
     const sanitizeFilter = (filterValue) => {
@@ -1157,10 +1146,7 @@ const toggleScreenShare = async () => {
       /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true }),
     /* @__PURE__ */ jsxs("div", { className: "relative flex-1 flex items-center justify-center backdrop-blur-md bg-black/30", children: [
       /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, className: "hidden" }),
-      remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsxs(Fragment, { children: [
-        /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover", style: { filter: getFilterStyle(remoteEffectName) } }),
-        remoteEffectName && remoteEffectName !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute top-3 left-3 bg-black/50 text-white text-[10px] px-2 py-1 rounded-full", children: `相手: ${remoteEffectName}` })
-      ] }) : /* @__PURE__ */ jsxs("div", { className: "text-white flex flex-col items-center gap-4", children: [
+      remoteStream && hasRemoteVideo ? /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover" }) : /* @__PURE__ */ jsxs("div", { className: "text-white flex flex-col items-center gap-4", children: [
         /* @__PURE__ */ jsx("div", { className: "w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center animate-pulse", children: /* @__PURE__ */ jsx(User, { className: "w-10 h-10" }) }),
         /* @__PURE__ */ jsx("p", { className: "font-bold text-lg drop-shadow-md", children: remoteStream ? isVideoEnabled ? "\u30D3\u30C7\u30AA\u3092\u53D7\u4FE1\u4E2D..." : "\u97F3\u58F0\u901A\u8A71\u4E2D..." : "\u63A5\u7D9A\u4E2D..." })
       ] }),
@@ -1193,7 +1179,7 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   const [isVideoOff, setIsVideoOff] = useState(!isVideoEnabled);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [callError, setCallError] = useState(null);
-  const [spotlightUid, setSpotlightUid] = useState(null);
+  const remoteAudioRef = useRef(null);
   const localVideoRef = useRef(null);
   const pcsRef = useRef(new Map());
   const localStreamRef = useRef(null);
@@ -1289,8 +1275,7 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
           name: user.displayName || "",
           joinedAt: serverTimestamp(),
           videoEnabled: !!isVideoEnabled,
-          screenSharing: false,
-          effect: activeEffect || "Normal"
+          screenSharing: false
         }, { merge: true });
 
         const unsubParts = onSnapshot(collection(sessionRef, "participants"), (snap) => {
@@ -1340,7 +1325,22 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
       event.streams?.[0]?.getTracks?.().forEach((t) => {
         try { remoteStream.addTrack(t); } catch { }
       });
-      setRemoteStreams((prev) => ({ ...prev, [remoteUid]: remoteStream }));
+      // Ensure remote audio keeps playing (Safari/autoplay and Wi-Fi switch robustness)
+      try {
+        if (remoteAudioRef.current) {
+          const audioTracks = remoteStream.getAudioTracks ? remoteStream.getAudioTracks() : [];
+          const mixed = new MediaStream();
+          audioTracks.forEach((t) => {
+            try { mixed.addTrack(t); } catch { }
+          });
+          if (mixed.getAudioTracks().length > 0) {
+            remoteAudioRef.current.srcObject = mixed;
+            remoteAudioRef.current.muted = false;
+            remoteAudioRef.current.volume = 1;
+            remoteAudioRef.current.play?.().catch(() => {});
+          }
+        }
+      } catch { }
     };
 
     const sessionRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "group_calls", sessionId);
@@ -1405,28 +1405,6 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
       if (p?.uid && p.uid !== user.uid) ensurePeer(p.uid);
     });
   }, [participants, ensurePeer, sessionId, user.uid]);
-
-
-  const remoteTiles = useMemo(() => Object.entries(remoteStreams).map(([uid, stream]) => ({ uid, stream })), [remoteStreams]);
-
-  useEffect(() => {
-    const currentRemoteUids = remoteTiles.map((t) => t.uid);
-    if (!currentRemoteUids.length) {
-      setSpotlightUid(null);
-      return;
-    }
-    if (!spotlightUid || !currentRemoteUids.includes(spotlightUid)) {
-      setSpotlightUid(currentRemoteUids[0]);
-    }
-  }, [remoteTiles, spotlightUid]);
-
-  const audioPolicy = useMemo(() => {
-    const policy = new Map();
-    remoteTiles.forEach((t) => {
-      policy.set(t.uid, spotlightUid ? t.uid === spotlightUid : false);
-    });
-    return policy;
-  }, [remoteTiles, spotlightUid]);
 
   const toggleMute = () => {
     const stream = localStreamRef.current;
@@ -1541,13 +1519,10 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   };
 
   const tiles = useMemo(() => {
-    const remotes = remoteTiles.map(({ uid, stream }) => ({ uid, stream, isLocal: false }));
-    const spotlightRemote = spotlightUid ? remotes.find((t) => t.uid === spotlightUid) : null;
-    const otherRemotes = remotes.filter((t) => t.uid !== spotlightUid);
-    const orderedRemotes = spotlightRemote ? [spotlightRemote, ...otherRemotes] : remotes;
+    const remotes = Object.entries(remoteStreams).map(([uid, stream]) => ({ uid, stream, isLocal: false }));
     const local = { uid: user.uid, stream: localStreamRef.current, isLocal: true };
-    return [local, ...orderedRemotes];
-  }, [remoteTiles, spotlightUid, user.uid]);
+    return [local, ...remotes];
+  }, [remoteStreams, user.uid]);
 
   const cols = useMemo(() => {
     const n = tiles.length;
@@ -1567,35 +1542,22 @@ const GroupCallView = ({ user, chatId, callData, onEndCall, isVideoEnabled = tru
   }
 
   return /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1000] bg-black flex flex-col", children: [
-    /* @__PURE__ */ jsx("div", { className: "flex-1 relative overflow-hidden", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : void 0, backgroundSize: "cover", backgroundPosition: "center" }, children: /* @__PURE__ */ jsxs(Fragment, { children: [
-      remoteTiles.length > 0 && /* @__PURE__ */ jsx("div", { className: "absolute top-3 left-1/2 -translate-x-1/2 z-20 bg-black/55 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-md border border-white/10", children: spotlightUid ? `スポットライト音声: ${participants.find((p) => p.uid === spotlightUid)?.name || spotlightUid.slice(0, 6)}` : "スポットライト未選択" }),
-      /* @__PURE__ */ jsx("div", { className: "w-full h-full p-2", style: { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: "8px" }, children: tiles.map((t) => {
-        const isLocal = t.isLocal;
-        const isSpotlight = !isLocal && spotlightUid === t.uid;
-        const remoteEf = participants.find((p) => p.uid === t.uid)?.effect || "Normal";
-        const filter = isLocal ? getFilterStyle(activeEffect) : getFilterStyle(remoteEf);
-        const remoteName = participants.find((p) => p.uid === t.uid)?.name || t.uid.slice(0, 6);
-        return /* @__PURE__ */ jsxs("button", { type: "button", onClick: () => {
-          if (!isLocal) setSpotlightUid(t.uid);
-        }, className: `relative bg-black rounded-xl overflow-hidden border text-left ${isSpotlight ? "border-green-400 ring-2 ring-green-400/70" : "border-white/10"} ${isLocal ? "cursor-default" : "cursor-pointer"}`, children: [
-          /* @__PURE__ */ jsx("video", { ref: (el) => {
-            if (!el) return;
-            if (t.stream && el.srcObject !== t.stream) el.srcObject = t.stream;
-            const shouldHear = isLocal ? false : !!audioPolicy.get(t.uid);
-            el.muted = isLocal || !shouldHear;
-            el.volume = shouldHear ? 1 : 0;
-            el.playsInline = true;
-            el.autoplay = true;
-            try { el.play(); } catch { }
-          }, className: "w-full h-full object-cover", style: { filter, transform: isLocal ? "scaleX(-1)" : void 0 }, autoPlay: true, playsInline: true }),
-          /* @__PURE__ */ jsxs(Fragment, { children: [
-            /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/40 text-white text-[10px] px-2 py-0.5 rounded-full", children: isLocal ? "You" : remoteName }),
-            !isLocal && remoteEf && remoteEf !== "Normal" && /* @__PURE__ */ jsx("div", { className: "absolute top-2 left-2 bg-black/50 text-white text-[10px] px-2 py-0.5 rounded-full", children: remoteEf }),
-            !isLocal && /* @__PURE__ */ jsx("div", { className: `absolute top-2 right-2 text-[10px] px-2 py-0.5 rounded-full ${isSpotlight ? "bg-green-500 text-white" : "bg-black/50 text-white"}`, children: isSpotlight ? "音声ON" : "タップで音声" })
-          ] })
-        ] }, t.uid);
-      }) })
-    ] }) }),
+      /* @__PURE__ */ jsx("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true }),
+    /* @__PURE__ */ jsx("div", { className: "flex-1 relative overflow-hidden", style: { backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : void 0, backgroundSize: "cover", backgroundPosition: "center" }, children: /* @__PURE__ */ jsx("div", { className: "w-full h-full p-2", style: { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: "8px" }, children: tiles.map((t) => {
+      const isLocal = t.isLocal;
+      const filter = isLocal ? getFilterStyle(activeEffect) : "none";
+      return /* @__PURE__ */ jsxs("div", { className: "relative bg-black rounded-xl overflow-hidden border border-white/10", children: [
+        /* @__PURE__ */ jsx("video", { ref: (el) => {
+          if (!el) return;
+          if (t.stream && el.srcObject !== t.stream) el.srcObject = t.stream;
+          el.muted = isLocal;
+          el.playsInline = true;
+          el.autoplay = true;
+          try { el.play(); } catch { }
+        }, className: "w-full h-full object-cover", style: { filter, transform: isLocal ? "scaleX(-1)" : void 0 }, autoPlay: true, playsInline: true }),
+        /* @__PURE__ */ jsx("div", { className: "absolute bottom-1 left-1 bg-black/40 text-white text-[10px] px-2 py-0.5 rounded-full", children: isLocal ? "You" : (participants.find((p) => p.uid === t.uid)?.name || t.uid.slice(0, 6)) })
+      ] }, t.uid);
+    }) }) }),
     /* @__PURE__ */ jsxs("div", { className: "relative z-[1003] h-24 bg-black/80 flex items-center justify-center gap-6 pb-6 backdrop-blur-lg", children: [
       /* @__PURE__ */ jsx("button", { onClick: toggleMute, className: `w-16 h-16 rounded-full ${isMuted ? "bg-red-600 text-white" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: isMuted ? /* @__PURE__ */ jsx(MicOff, { className: "w-6 h-6" }) : /* @__PURE__ */ jsx(Mic, { className: "w-6 h-6" }) }),
       /* @__PURE__ */ jsx("button", { onClick: switchCamera, disabled: !isVideoEnabled || isVideoOff || isScreenSharing, className: `w-16 h-16 rounded-full ${!isVideoEnabled || isVideoOff || isScreenSharing ? "bg-gray-700/50 text-white/50" : "bg-gray-700 text-white hover:bg-gray-600"} shadow-lg transform hover:scale-110 transition-all flex items-center justify-center`, children: /* @__PURE__ */ jsx(RefreshCcw, { className: "w-6 h-6" }) }),
@@ -2673,7 +2635,7 @@ useEffect(() => {
     postPreview && /* @__PURE__ */ jsxs("div", { className: "fixed inset-0 z-[1200] bg-black/95 flex items-center justify-center p-4", onClick: () => setPostPreview(null), children: [
       /* @__PURE__ */ jsx("button", { className: "absolute top-5 right-5 text-white p-2 rounded-full bg-white/20", onClick: () => setPostPreview(null), children: /* @__PURE__ */ jsx(X, { className: "w-6 h-6" }) }),
       postPreview.type === "video" ? /* @__PURE__ */ jsx("video", { src: postPreview.src, controls: true, autoPlay: true, className: "max-w-full max-h-[88vh] rounded-xl bg-black", onClick: (e) => e.stopPropagation() }) : /* @__PURE__ */ jsx("img", { src: postPreview.src, className: "max-w-full max-h-[88vh] object-contain rounded-xl", onClick: (e) => e.stopPropagation() })
-    ] }),
+    ] })
   ] });
 };
 const GroupCreateView = ({ user, profile, allUsers, chats, setView, showNotification }) => {
@@ -3855,7 +3817,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
           await addDoc(collection(db, "artifacts", appId, "public", "data", "minigame_invites"), {
             toUid: u.uid,
             fromUid: user.uid,
-            gameType: "dice",
+            gameType: "shooting",
             durationSec: 60,
             status: "pending",
             createdAt: serverTimestamp()
@@ -3898,6 +3860,617 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     ] }) })
   ] });
 };
+
+/* =========================
+   LIVE配信（P2P WebRTC）追加
+   - サーバー不要の簡易シグナリング（オファー/アンサーのコピペ方式）
+   - 1対1のライブ配信/通話を想定（複数視聴や大規模配信にはSFU等が必要）
+   ========================= */
+/* =========================
+   LIVE配信（WebRTC + Firestore シグナリング）
+   - 1人(Host)が開催したルームに複数人(Viewer)が参加して視聴できる
+   - 構成：Hostが各Viewerと個別にP2P接続（メッシュ）
+     ※少人数向け。大量視聴はSFU(例: mediasoup/LiveKit)が必要
+   - 既存UI/機能には触れず、LIVEモーダルのみ拡張
+   ========================= */
+function LiveStreamModal({ open, onClose, user }) {
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+
+  const localStreamRef = useRef(null);
+  const screenStreamRef = useRef(null);
+
+  // Host: viewerUid -> { pc, dc, unsubs: [...] }
+  const hostPeersRef = useRef(new Map());
+  const roomUnsubsRef = useRef([]);
+
+  // Viewer:
+  const viewerPcRef = useRef(null);
+  const viewerDcRef = useRef(null);
+  const viewerUnsubsRef = useRef([]);
+
+  const [role, setRole] = useState("host"); // host | viewer
+  const [status, setStatus] = useState("idle"); // idle | ready | connecting | connected | ended | error
+  const [error, setError] = useState(null);
+
+  const [roomId, setRoomId] = useState("");
+  const [joinRoomId, setJoinRoomId] = useState("");
+
+  const [micOn, setMicOn] = useState(true);
+  const [camOn, setCamOn] = useState(true);
+  const [paused, setPaused] = useState(false);
+  const [screenOn, setScreenOn] = useState(false);
+
+  const [chatText, setChatText] = useState("");
+  const [chatLog, setChatLog] = useState([]);
+  const [flowComments, setFlowComments] = useState([]);
+
+  const uid = user?.uid || auth.currentUser?.uid || null;
+
+  const rtcConfig = useMemo(() => ({
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" }
+    ]
+  }), []);
+
+  const pushChat = useCallback((who, text) => {
+    const msg = { id: `${Date.now()}_${Math.random()}`, who, text, ts: Date.now() };
+    setChatLog((prev) => [...prev, msg]);
+    setFlowComments((prev) => [...prev, { ...msg, x: Math.random() * 60 + 10 }]);
+    // 自動で消す
+    setTimeout(() => {
+      setFlowComments((prev) => prev.filter((x) => x.id !== msg.id));
+    }, 8000);
+  }, []);
+
+  const attachLocalPreview = useCallback(() => {
+    if (localVideoRef.current && localStreamRef.current) {
+      localVideoRef.current.srcObject = localStreamRef.current;
+    }
+  }, []);
+
+  const attachRemote = useCallback((stream) => {
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = stream;
+    }
+  }, []);
+
+  const stopTracks = (stream) => {
+    try {
+      stream?.getTracks?.().forEach((t) => t.stop());
+    } catch (e) {
+    }
+  };
+
+  const cleanupHostPeers = useCallback(async () => {
+    for (const [viewerUid, peer] of hostPeersRef.current.entries()) {
+      try { peer.unsubs?.forEach((u) => u && u()); } catch (e) {}
+      try { peer.dc?.close?.(); } catch (e) {}
+      try { peer.pc?.close?.(); } catch (e) {}
+    }
+    hostPeersRef.current.clear();
+  }, []);
+
+  const cleanupViewer = useCallback(async () => {
+    try { viewerUnsubsRef.current.forEach((u) => u && u()); } catch (e) {}
+    viewerUnsubsRef.current = [];
+    try { viewerDcRef.current?.close?.(); } catch (e) {}
+    viewerDcRef.current = null;
+    try { viewerPcRef.current?.close?.(); } catch (e) {}
+    viewerPcRef.current = null;
+  }, []);
+
+  const cleanupRoomUnsubs = useCallback(() => {
+    try { roomUnsubsRef.current.forEach((u) => u && u()); } catch (e) {}
+    roomUnsubsRef.current = [];
+  }, []);
+
+  const fullCleanup = useCallback(async () => {
+    cleanupRoomUnsubs();
+    await cleanupHostPeers();
+    await cleanupViewer();
+    stopTracks(screenStreamRef.current);
+    screenStreamRef.current = null;
+    stopTracks(localStreamRef.current);
+    localStreamRef.current = null;
+    setScreenOn(false);
+    setStatus("ended");
+  }, [cleanupHostPeers, cleanupRoomUnsubs, cleanupViewer]);
+
+  const ensureLocalStream = useCallback(async () => {
+    if (localStreamRef.current) return localStreamRef.current;
+    try {
+      setError(null);
+      const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localStreamRef.current = s;
+      // 初期状態反映
+      s.getAudioTracks().forEach((t) => t.enabled = !!micOn);
+      s.getVideoTracks().forEach((t) => t.enabled = !!camOn && !paused);
+      attachLocalPreview();
+      return s;
+    } catch (e) {
+      setError(e?.message || String(e));
+      setStatus("error");
+      throw e;
+    }
+  }, [attachLocalPreview, micOn, camOn, paused]);
+
+  // ---- Host: room create / manage
+  const createRoom = useCallback(async () => {
+    if (!uid) {
+      setError("ログイン状態が確認できません（uidがありません）");
+      setStatus("error");
+      return;
+    }
+    setStatus("connecting");
+    await ensureLocalStream();
+
+    try {
+      // ルーム作成
+      const roomDocRef = doc(collection(db, "liveRooms"));
+      const rid = roomDocRef.id;
+      setRoomId(rid);
+
+      await setDoc(roomDocRef, {
+        hostUid: uid,
+        createdAt: serverTimestamp(),
+        status: "open"
+      });
+
+      // Viewer一覧監視（参加したら個別に接続作成）
+      const viewersColRef = collection(db, "liveRooms", rid, "viewers");
+      const unsubViewers = onSnapshot(viewersColRef, async (snap) => {
+        for (const ch of snap.docChanges()) {
+          if (ch.type === "added") {
+            const vUid = ch.doc.id;
+            if (vUid === uid) continue;
+            if (hostPeersRef.current.has(vUid)) continue;
+            await hostConnectViewer({ rid, viewerUid: vUid });
+          }
+          if (ch.type === "removed") {
+            const vUid = ch.doc.id;
+            const peer = hostPeersRef.current.get(vUid);
+            if (peer) {
+              try { peer.unsubs?.forEach((u) => u && u()); } catch (e) {}
+              try { peer.dc?.close?.(); } catch (e) {}
+              try { peer.pc?.close?.(); } catch (e) {}
+              hostPeersRef.current.delete(vUid);
+            }
+          }
+        }
+      });
+
+      roomUnsubsRef.current.push(unsubViewers);
+      setStatus("connected");
+    } catch (e) {
+      setError(e?.message || String(e));
+      setStatus("error");
+    }
+  }, [db, ensureLocalStream, uid]);
+
+  const hostConnectViewer = useCallback(async ({ rid, viewerUid }) => {
+    const pc = new RTCPeerConnection(rtcConfig);
+    const peer = { pc, dc: null, unsubs: [] };
+    hostPeersRef.current.set(viewerUid, peer);
+
+    // local tracks
+    const s = localStreamRef.current;
+    if (s) {
+      s.getTracks().forEach((t) => pc.addTrack(t, s));
+    }
+
+    // DataChannel（チャット用）
+    const dc = pc.createDataChannel("chat");
+    peer.dc = dc;
+
+    dc.onopen = () => {
+      pushChat("system", `Viewer(${viewerUid.slice(0, 6)}) が接続しました`);
+    };
+    dc.onmessage = (ev) => {
+      const txt = String(ev.data || "");
+      pushChat(`viewer:${viewerUid.slice(0, 6)}`, txt);
+      // 受け取ったコメントは他Viewerにも中継（便利機能：全員に見える）
+      for (const [k, p] of hostPeersRef.current.entries()) {
+        if (k !== viewerUid && p?.dc?.readyState === "open") {
+          try { p.dc.send(txt); } catch (e) {}
+        }
+      }
+    };
+    dc.onclose = () => {
+      pushChat("system", `Viewer(${viewerUid.slice(0, 6)}) が切断しました`);
+    };
+
+    // Firestore signaling doc:
+    const connDocRef = doc(db, "liveRooms", rid, "connections", viewerUid);
+    const hostCandCol = collection(db, "liveRooms", rid, "connections", viewerUid, "hostCandidates");
+    const viewerCandCol = collection(db, "liveRooms", rid, "connections", viewerUid, "viewerCandidates");
+
+    // ICE candidates (host -> hostCandidates)
+    pc.onicecandidate = async (event) => {
+      if (event.candidate) {
+        try {
+          await addDoc(hostCandCol, event.candidate.toJSON());
+        } catch (e) {
+        }
+      }
+    };
+
+    // Offer
+    const offer = await pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true });
+    await pc.setLocalDescription(offer);
+    await setDoc(connDocRef, {
+      createdAt: serverTimestamp(),
+      viewerUid,
+      offer: {
+        type: offer.type,
+        sdp: offer.sdp
+      }
+    }, { merge: true });
+
+    // Watch for answer
+    const unsubAnswer = onSnapshot(connDocRef, async (snap) => {
+      const data = snap.data();
+      if (!data) return;
+      if (data.answer && !pc.currentRemoteDescription) {
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        } catch (e) {
+        }
+      }
+    });
+    peer.unsubs.push(unsubAnswer);
+
+    // Watch viewer ICE candidates
+    const unsubViewerCands = onSnapshot(viewerCandCol, (snap) => {
+      snap.docChanges().forEach(async (ch) => {
+        if (ch.type === "added") {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(ch.doc.data()));
+          } catch (e) {
+          }
+        }
+      });
+    });
+    peer.unsubs.push(unsubViewerCands);
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "failed" || pc.connectionState === "disconnected" || pc.connectionState === "closed") {
+        // cleanup peer
+        const p = hostPeersRef.current.get(viewerUid);
+        if (p) {
+          try { p.unsubs?.forEach((u) => u && u()); } catch (e) {}
+          try { p.dc?.close?.(); } catch (e) {}
+          try { p.pc?.close?.(); } catch (e) {}
+          hostPeersRef.current.delete(viewerUid);
+        }
+      }
+    };
+  }, [db, pushChat, rtcConfig]);
+
+  // ---- Viewer: join room
+  const joinRoom = useCallback(async () => {
+    if (!uid) {
+      setError("ログイン状態が確認できません（uidがありません）");
+      setStatus("error");
+      return;
+    }
+    const rid = (joinRoomId || "").trim();
+    if (!rid) {
+      setError("ルームIDを入力してください");
+      setStatus("error");
+      return;
+    }
+    setStatus("connecting");
+    setError(null);
+
+    try {
+      const roomDocRef = doc(db, "liveRooms", rid);
+      const roomSnap = await getDoc(roomDocRef);
+      if (!roomSnap.exists()) {
+        setError("ルームが見つかりません");
+        setStatus("error");
+        return;
+      }
+
+      // Viewer登録
+      await setDoc(doc(db, "liveRooms", rid, "viewers", uid), {
+        joinedAt: serverTimestamp()
+      }, { merge: true });
+
+      // Connection doc path (viewer uid)
+      const connDocRef = doc(db, "liveRooms", rid, "connections", uid);
+      const hostCandCol = collection(db, "liveRooms", rid, "connections", uid, "hostCandidates");
+      const viewerCandCol = collection(db, "liveRooms", rid, "connections", uid, "viewerCandidates");
+
+      // Create PC
+      const pc = new RTCPeerConnection(rtcConfig);
+      viewerPcRef.current = pc;
+
+      const remoteStream = new MediaStream();
+      attachRemote(remoteStream);
+
+      pc.ontrack = (event) => {
+        event.streams[0]?.getTracks?.().forEach((t) => {
+          try { remoteStream.addTrack(t); } catch (e) {}
+        });
+      };
+
+      pc.ondatachannel = (event) => {
+        viewerDcRef.current = event.channel;
+        event.channel.onmessage = (ev) => {
+          pushChat("host", String(ev.data || ""));
+        };
+      };
+
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          try {
+            await addDoc(viewerCandCol, event.candidate.toJSON());
+          } catch (e) {
+          }
+        }
+      };
+
+      // Listen offer -> answer
+      const unsubConn = onSnapshot(connDocRef, async (snap) => {
+        const data = snap.data();
+        if (!data) return;
+        if (data.offer && !pc.currentRemoteDescription) {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await setDoc(connDocRef, {
+              answer: { type: answer.type, sdp: answer.sdp }
+            }, { merge: true });
+          } catch (e) {
+          }
+        }
+      });
+      viewerUnsubsRef.current.push(unsubConn);
+
+      // Listen host ICE
+      const unsubHostCands = onSnapshot(hostCandCol, (snap) => {
+        snap.docChanges().forEach(async (ch) => {
+          if (ch.type === "added") {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(ch.doc.data()));
+            } catch (e) {
+            }
+          }
+        });
+      });
+      viewerUnsubsRef.current.push(unsubHostCands);
+
+      setRoomId(rid);
+      setStatus("connected");
+    } catch (e) {
+      setError(e?.message || String(e));
+      setStatus("error");
+    }
+  }, [attachRemote, db, joinRoomId, pushChat, rtcConfig, uid]);
+
+  // ---- Controls
+  const toggleMic = useCallback(() => {
+    setMicOn((v) => {
+      const nv = !v;
+      try {
+        localStreamRef.current?.getAudioTracks?.().forEach((t) => t.enabled = nv);
+      } catch (e) {}
+      return nv;
+    });
+  }, []);
+
+  const toggleCam = useCallback(() => {
+    setCamOn((v) => {
+      const nv = !v;
+      try {
+        localStreamRef.current?.getVideoTracks?.().forEach((t) => t.enabled = nv && !paused);
+      } catch (e) {}
+      return nv;
+    });
+  }, [paused]);
+
+  const togglePause = useCallback(() => {
+    setPaused((v) => {
+      const nv = !v;
+      try {
+        localStreamRef.current?.getVideoTracks?.().forEach((t) => t.enabled = camOn && !nv);
+      } catch (e) {}
+      return nv;
+    });
+  }, [camOn]);
+
+  const toggleScreen = useCallback(async () => {
+    // Host only
+    if (role !== "host") return;
+    if (!screenOn) {
+      try {
+        const ss = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+        screenStreamRef.current = ss;
+        setScreenOn(true);
+
+        // replace video track for all host peers
+        const screenTrack = ss.getVideoTracks()[0];
+        const oldTrack = localStreamRef.current?.getVideoTracks?.()[0] || null;
+
+        for (const [, peer] of hostPeersRef.current.entries()) {
+          try {
+            const sender = peer.pc.getSenders().find((s) => s.track && s.track.kind === "video");
+            if (sender) await sender.replaceTrack(screenTrack);
+          } catch (e) {}
+        }
+
+        // local preview also switches to screen to avoid confusion
+        if (localVideoRef.current) {
+          const previewStream = new MediaStream();
+          previewStream.addTrack(screenTrack);
+          const audioTrack = localStreamRef.current?.getAudioTracks?.()[0];
+          if (audioTrack) previewStream.addTrack(audioTrack);
+          localVideoRef.current.srcObject = previewStream;
+        }
+
+        screenTrack.onended = async () => {
+          // back to camera
+          try { stopTracks(screenStreamRef.current); } catch (e) {}
+          screenStreamRef.current = null;
+          setScreenOn(false);
+          attachLocalPreview();
+          if (oldTrack) {
+            for (const [, peer] of hostPeersRef.current.entries()) {
+              try {
+                const sender = peer.pc.getSenders().find((s) => s.track && s.track.kind === "video");
+                if (sender) await sender.replaceTrack(oldTrack);
+              } catch (e) {}
+            }
+          }
+        };
+      } catch (e) {
+        setError(e?.message || String(e));
+      }
+    } else {
+      // stop screen share
+      try { stopTracks(screenStreamRef.current); } catch (e) {}
+      screenStreamRef.current = null;
+      setScreenOn(false);
+      attachLocalPreview();
+
+      // replace back to camera track
+      const camTrack = localStreamRef.current?.getVideoTracks?.()[0] || null;
+      if (camTrack) {
+        for (const [, peer] of hostPeersRef.current.entries()) {
+          try {
+            const sender = peer.pc.getSenders().find((s) => s.track && s.track.kind === "video");
+            if (sender) await sender.replaceTrack(camTrack);
+          } catch (e) {}
+        }
+      }
+    }
+  }, [attachLocalPreview, role, screenOn]);
+
+  const sendChat = useCallback(() => {
+    const txt = (chatText || "").trim();
+    if (!txt) return;
+    setChatText("");
+
+    if (role === "host") {
+      pushChat("me", txt);
+      for (const [, peer] of hostPeersRef.current.entries()) {
+        if (peer?.dc?.readyState === "open") {
+          try { peer.dc.send(txt); } catch (e) {}
+        }
+      }
+    } else {
+      pushChat("me", txt);
+      if (viewerDcRef.current?.readyState === "open") {
+        try { viewerDcRef.current.send(txt); } catch (e) {}
+      }
+    }
+  }, [chatText, pushChat, role]);
+
+  const copyRoomId = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(roomId);
+      pushChat("system", "ルームIDをコピーしました");
+    } catch (e) {
+    }
+  }, [roomId, pushChat]);
+
+  // Close behavior
+  useEffect(() => {
+    if (!open) return;
+    setStatus("idle");
+    setError(null);
+    setChatLog([]);
+    setFlowComments([]);
+    setRoomId("");
+    setJoinRoomId("");
+    setRole("host");
+    return () => {
+      fullCleanup();
+      cleanupRoomUnsubs();
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  return /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4", children: /* @__PURE__ */ jsxs("div", { className: "w-full max-w-3xl bg-white rounded-3xl shadow-2xl overflow-hidden", children: [
+    /* Header */
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between px-4 py-3 border-b", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ jsx(Video, { className: "w-5 h-5 text-red-500" }),
+        /* @__PURE__ */ jsx("div", { className: "font-bold", children: "LIVE配信" }),
+        status === "connected" && /* @__PURE__ */ jsx("span", { className: "text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full", children: "接続中" }),
+        status === "connecting" && /* @__PURE__ */ jsx("span", { className: "text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full", children: "接続準備中" }),
+        status === "error" && /* @__PURE__ */ jsx("span", { className: "text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full", children: "エラー" })
+      ] }),
+      /* @__PURE__ */ jsx("button", { onClick: async () => {
+        await fullCleanup();
+        onClose();
+      }, className: "p-2 rounded-xl hover:bg-gray-100", children: /* @__PURE__ */ jsx(X, { className: "w-5 h-5" }) })
+    ] }),
+
+    /* Body */
+    /* @__PURE__ */ jsxs("div", { className: "p-4 grid grid-cols-1 md:grid-cols-2 gap-4", children: [
+      /* Left: video */
+      /* @__PURE__ */ jsxs("div", { className: "space-y-3", children: [
+        /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-gray-700", children: role === "host" ? "配信プレビュー（Host）" : "視聴（Viewer）" }),
+        /* @__PURE__ */ jsx("div", { className: "relative bg-black rounded-3xl overflow-hidden aspect-video", children: role === "host" ? /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover" }) : /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover" }) }),
+        /* Controls */
+        /* @__PURE__ */ jsxs("div", { className: "flex flex-wrap gap-2", children: [
+          /* @__PURE__ */ jsx("button", { onClick: toggleMic, className: `px-3 py-2 rounded-2xl font-bold flex items-center gap-2 ${micOn ? "bg-gray-100 hover:bg-gray-200" : "bg-red-100 hover:bg-red-200 text-red-700"}`, children: micOn ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(Mic, { className: "w-4 h-4" }), "MIC"] }) : /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(MicOff, { className: "w-4 h-4" }), "MIC"] }) }),
+          /* @__PURE__ */ jsx("button", { onClick: toggleCam, className: `px-3 py-2 rounded-2xl font-bold flex items-center gap-2 ${camOn ? "bg-gray-100 hover:bg-gray-200" : "bg-red-100 hover:bg-red-200 text-red-700"}`, children: camOn ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(CameraIcon, { className: "w-4 h-4" }), "CAM"] }) : /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(VideoOff, { className: "w-4 h-4" }), "CAM"] }) }),
+          role === "host" && /* @__PURE__ */ jsx("button", { onClick: togglePause, className: `px-3 py-2 rounded-2xl font-bold flex items-center gap-2 ${paused ? "bg-yellow-100 hover:bg-yellow-200 text-yellow-800" : "bg-gray-100 hover:bg-gray-200"}`, children: paused ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(StopCircle, { className: "w-4 h-4" }), "一時停止"] }) : /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(Play, { className: "w-4 h-4" }), "一時停止"] }) }),
+          role === "host" && /* @__PURE__ */ jsx("button", { onClick: toggleScreen, className: `px-3 py-2 rounded-2xl font-bold flex items-center gap-2 ${screenOn ? "bg-blue-100 hover:bg-blue-200 text-blue-800" : "bg-gray-100 hover:bg-gray-200"}`, children: screenOn ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(ScreenShareOff, { className: "w-4 h-4" }), "共有"] }) : /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(ScreenShare, { className: "w-4 h-4" }), "共有"] }) })
+        ] })
+      ] }),
+
+      /* Right: room + chat */
+      /* @__PURE__ */ jsxs("div", { className: "space-y-3", children: [
+        /* Role switch */
+        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+          /* @__PURE__ */ jsx("button", { onClick: () => setRole("host"), className: `flex-1 py-2 rounded-2xl font-bold ${role === "host" ? "bg-black text-white" : "bg-gray-100 hover:bg-gray-200"}`, children: "Host（開催）" }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setRole("viewer"), className: `flex-1 py-2 rounded-2xl font-bold ${role === "viewer" ? "bg-black text-white" : "bg-gray-100 hover:bg-gray-200"}`, children: "Viewer（視聴）" })
+        ] }),
+
+        role === "host" ? /* Host panel */ /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-3xl p-3 space-y-2", children: [
+          /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-gray-700", children: "ルーム作成（複数視聴OK）" }),
+          /* @__PURE__ */ jsx("button", { onClick: createRoom, className: "w-full py-3 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-bold", children: roomId ? "配信中（再作成しない）" : "配信を開始（ルーム作成）" }),
+          roomId && /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsx("div", { className: "flex-1 bg-white rounded-2xl px-3 py-2 text-sm font-mono select-all", children: roomId }),
+            /* @__PURE__ */ jsx("button", { onClick: copyRoomId, className: "p-2 rounded-2xl bg-white hover:bg-gray-100", children: /* @__PURE__ */ jsx(Copy, { className: "w-4 h-4" }) })
+          ] }),
+          /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500", children: "ViewerはこのルームIDを入力して参加できます。少人数向け（Hostが各Viewerへ個別送信）" })
+        ] }) : /* Viewer panel */ /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-3xl p-3 space-y-2", children: [
+          /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-gray-700", children: "ルーム参加" }),
+          /* @__PURE__ */ jsx("input", { value: joinRoomId, onChange: (e) => setJoinRoomId(e.target.value), placeholder: "ルームIDを入力", className: "w-full px-3 py-3 rounded-2xl border bg-white outline-none" }),
+          /* @__PURE__ */ jsx("button", { onClick: joinRoom, className: "w-full py-3 rounded-2xl bg-black hover:bg-gray-900 text-white font-bold", children: "参加して視聴する" }),
+          error && /* @__PURE__ */ jsxs("div", { className: "text-sm text-red-600 flex items-center gap-2", children: [/* @__PURE__ */ jsx(AlertCircle, { className: "w-4 h-4" }), error] })
+        ] }),
+
+        /* Chat */
+        /* @__PURE__ */ jsxs("div", { className: "bg-white rounded-3xl border p-3 space-y-2", children: [
+          /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-gray-700", children: "コメントチャット" }),
+          /* @__PURE__ */ jsx("div", { className: "h-40 overflow-auto bg-gray-50 rounded-2xl p-2 space-y-1", children: chatLog.map((m) => /* @__PURE__ */ jsxs("div", { className: "text-sm", children: [
+            /* @__PURE__ */ jsx("span", { className: "font-bold text-gray-700", children: m.who }),
+            /* @__PURE__ */ jsx("span", { className: "text-gray-500", children: " : " }),
+            /* @__PURE__ */ jsx("span", { className: "text-gray-800", children: m.text })
+          ] }, m.id)) }),
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsx("input", { value: chatText, onChange: (e) => setChatText(e.target.value), onKeyDown: (e) => {
+              if (e.key === "Enter") sendChat();
+            }, placeholder: "コメント…", className: "flex-1 px-3 py-2 rounded-2xl border bg-white outline-none" }),
+            /* @__PURE__ */ jsx("button", { onClick: sendChat, className: "px-4 py-2 rounded-2xl bg-blue-500 hover:bg-blue-600 text-white font-bold flex items-center gap-2", children: /* @__PURE__ */ jsx(Send, { className: "w-4 h-4" }) })
+          ] })
+        ] })
+      ] })
+    ] }),
+
+    /* Flow comments overlay (visual helper) */
+    flowComments.length > 0 && /* @__PURE__ */ jsx("div", { className: "pointer-events-none fixed inset-0 z-[60]", children: flowComments.map((m, i) => /* @__PURE__ */ jsx("div", { className: "absolute left-0 right-0", style: { top: `${20 + (i % 10) * 6}%` }, children: /* @__PURE__ */ jsx("div", { className: "inline-block px-3 py-2 bg-black/70 text-white rounded-full whitespace-nowrap opacity-90", style: { marginLeft: `${m.x}%` }, children: m.text }) }, m.id)) })
+  ] }) });
+}
 const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db: db2, appId: appId2, mutedChats, toggleMuteChat, showNotification, addFriendById, startChatWithUser, startVideoCall }) => {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
@@ -3934,6 +4507,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   const [coinModalTarget, setCoinModalTarget] = useState(null);
   const [aiEffectModalOpen, setAiEffectModalOpen] = useState(false);
   const [headerAvatarError, setHeaderAvatarError] = useState(false);
+  const [liveModalOpen, setLiveModalOpen] = useState(false);
   const chatData = chats.find((c) => c.id === activeChatId);
   const contactCandidates = useMemo(() => {
     const hiddenSet = new Set(profile?.hiddenFriends || []);
@@ -4345,7 +4919,8 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       !isGroup ? /* @__PURE__ */ jsx("div", { className: "font-bold text-[12px] flex-1 truncate text-gray-900 leading-none", children: title }) : /* @__PURE__ */ jsx("div", { className: "flex-1" }),
       /* @__PURE__ */ jsxs("div", { className: "flex gap-2 mr-1 items-center", children: [
         /* @__PURE__ */ jsxs("div", { className: "relative", children: [
-          /* @__PURE__ */ jsx("button", { onClick: () => setBackgroundMenuOpen(!backgroundMenuOpen), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u80CC\u666F\u3092\u5909\u66F4", children: /* @__PURE__ */ jsx(Palette, { className: "w-5 h-5 text-gray-500" }) }),
+          /* @__PURE__ */ /* @__PURE__ */ jsx("button", { onClick: () => setLiveModalOpen(true), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "LIVE\u914D\u4FE1", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-1", children: [/* @__PURE__ */ jsx("span", { className: "w-2 h-2 rounded-full bg-red-500 inline-block" }), /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold text-gray-700", children: "LIVE" })] }) }),
+          jsx("button", { onClick: () => setBackgroundMenuOpen(!backgroundMenuOpen), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u80CC\u666F\u3092\u5909\u66F4", children: /* @__PURE__ */ jsx(Palette, { className: "w-5 h-5 text-gray-500" }) }),
           backgroundMenuOpen && /* @__PURE__ */ jsxs("div", { className: "absolute top-full right-0 mt-2 bg-white rounded-xl shadow-xl border overflow-hidden w-40 z-20", children: [
             /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 px-4 py-3 hover:bg-gray-50 cursor-pointer text-sm font-bold text-gray-700", children: [
               /* @__PURE__ */ jsx(ImageIcon, { className: "w-4 h-4" }),
@@ -4536,6 +5111,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       setBuyStickerModalPackId(null);
     } }),
     aiEffectModalOpen && /* @__PURE__ */ jsx(AIEffectGenerator, { user, onClose: () => setAiEffectModalOpen(false), showNotification }),
+    liveModalOpen && /* @__PURE__ */ jsx(LiveStreamModal, { open: liveModalOpen, onClose: () => setLiveModalOpen(false) }),
     !groupSettingsOpen && plusMenuOpen && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-16 left-4 right-4 bg-white rounded-3xl p-4 shadow-2xl grid grid-cols-4 gap-4 animate-in slide-in-from-bottom-4 z-20", children: [
       /* @__PURE__ */ jsxs("label", { className: "flex flex-col items-center gap-2 cursor-pointer", children: [
         /* @__PURE__ */ jsx("div", { className: "p-3 bg-green-50 rounded-2xl", children: /* @__PURE__ */ jsx(ImageIcon, { className: "w-6 h-6 text-green-500" }) }),
@@ -5485,11 +6061,11 @@ const MiniGameInviteModal = ({ invite, fromUser, onAccept, onDecline }) => {
         /* @__PURE__ */ jsx("div", { className: "font-black text-lg text-gray-900", children: "ミニゲーム通知" }),
         /* @__PURE__ */ jsxs("div", { className: "text-xs font-bold text-gray-500", children: [
           fromName,
-          " からミニパチンコ(1分)の招待"
+          " からシューティング(1分)の招待"
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ jsx("div", { className: "bg-gray-50 border rounded-2xl p-4 text-sm text-gray-700 font-bold mb-4", children: "ミニパチンコで獲得したコインをそのまま受け取れます" }),
+    /* @__PURE__ */ jsx("div", { className: "bg-gray-50 border rounded-2xl p-4 text-sm text-gray-700 font-bold mb-4", children: "獲得したスコアをコインに変換できます（1点 = 1コイン）" }),
     /* @__PURE__ */ jsxs("div", { className: "flex gap-3", children: [
       /* @__PURE__ */ jsx("button", { onClick: onDecline, className: "flex-1 py-3 rounded-2xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200", children: "後で" }),
       /* @__PURE__ */ jsx("button", { onClick: onAccept, className: "flex-1 py-3 rounded-2xl font-bold text-white bg-green-500 hover:bg-green-600 shadow-lg shadow-green-200 flex items-center justify-center gap-2", children: /* @__PURE__ */ jsxs(Fragment, { children: [
@@ -5500,867 +6076,1042 @@ const MiniGameInviteModal = ({ invite, fromUser, onAccept, onDecline }) => {
   ] }) });
 };
 
-const DiceMiniGameView = ({ user, invite, onBack, showNotification, profile }) => {
-  // Dice rules
-  const DURATION_SEC = 60;
-  const ROLL_COST = 10; // per roll (requested: one ball=10 coins -> here one roll)
-  const FACE_REWARDS = {
-    1: 0,
-    2: 10,
-    3: 20,
-    4: 30, // requested 30 coins exists
-    5: 40,
-    6: 60
+const ShootingMiniGameView = ({ user, invite, onBack, showNotification }) => {
+  const canvasRef = useRef(null);
+  const rafRef = useRef(null);
+  const lastTsRef = useRef(0);
+  const [timeLeft, setTimeLeft] = useState(60);
+  const [score, setScore] = useState(0);
+  const [phase, setPhase] = useState("ready"); // ready | playing | done
+  const playerRef = useRef({ x: 160, y: 360, w: 34, h: 34 });
+  const bulletsRef = useRef([]);
+  const targetsRef = useRef([]);
+  const spawnAccRef = useRef(0);
+  const fireAccRef = useRef(0);
+
+  const resizeCanvas = () => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const parent = c.parentElement;
+    const w = Math.min(380, parent?.clientWidth || 380);
+    const h = 520;
+    c.width = w * (window.devicePixelRatio || 1);
+    c.height = h * (window.devicePixelRatio || 1);
+    c.style.width = w + "px";
+    c.style.height = h + "px";
   };
 
-  const [phase, setPhase] = useState("ready"); // ready | playing | paused | done
-  const [timeLeft, setTimeLeft] = useState(DURATION_SEC);
-  const [lastFace, setLastFace] = useState(null);
-  const [lastGain, setLastGain] = useState(0);
-  const [totalGain, setTotalGain] = useState(0);
-  const [rolling, setRolling] = useState(false);
-  const endNotifiedRef = useRef(false);
+  useEffect(() => {
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+    return () => window.removeEventListener("resize", resizeCanvas);
+  }, []);
 
-  // timer
+  const resetGame = () => {
+    setScore(0);
+    setTimeLeft(60);
+    bulletsRef.current = [];
+    targetsRef.current = [];
+    spawnAccRef.current = 0;
+    fireAccRef.current = 0;
+    lastTsRef.current = 0;
+    setPhase("ready");
+  };
+
+  useEffect(() => {
+    resetGame();
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [invite?.id]);
+
+  const toCanvasPt = (e) => {
+    const c = canvasRef.current;
+    if (!c) return null;
+    const rect = c.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: clientX - rect.left, y: clientY - rect.top, w: rect.width, h: rect.height };
+  };
+
+  const handleMove = (e) => {
+    if (phase !== "playing" && phase !== "ready") return;
+    const pt = toCanvasPt(e);
+    if (!pt) return;
+    const p = playerRef.current;
+    p.x = Math.max(0, Math.min(pt.w - p.w, pt.x - p.w / 2));
+    p.y = Math.max(0, Math.min(pt.h - p.h, pt.y - p.h / 2));
+  };
+
+  const start = () => {
+    if (phase === "playing") return;
+    setPhase("playing");
+    lastTsRef.current = performance.now();
+  };
+
   useEffect(() => {
     if (phase !== "playing") return;
     const t = setInterval(() => {
-      setTimeLeft((s) => {
-        if (s <= 1) {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(t);
           setPhase("done");
           return 0;
         }
-        return s - 1;
+        return prev - 1;
       });
     }, 1000);
     return () => clearInterval(t);
   }, [phase]);
 
-  // Ensure the game ends when time reaches 0 and notify once.
-  useEffect(() => {
+  const gameLoop = (ts) => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = c.width / dpr;
+    const h = c.height / dpr;
+    const dt = Math.min(0.05, (ts - (lastTsRef.current || ts)) / 1000);
+    lastTsRef.current = ts;
+
     if (phase === "playing") {
-      endNotifiedRef.current = false;
+      spawnAccRef.current += dt;
+      if (spawnAccRef.current >= 0.65) {
+        spawnAccRef.current = 0;
+        const size = 22 + Math.random() * 18;
+        targetsRef.current.push({ x: Math.random() * (w - size), y: -size, r: size / 2, vy: 70 + Math.random() * 90 });
+      }
+      fireAccRef.current += dt;
+      if (fireAccRef.current >= 0.12) {
+        fireAccRef.current = 0;
+        const p = playerRef.current;
+        bulletsRef.current.push({ x: p.x + p.w / 2, y: p.y, vy: -420, r: 4 });
+      }
+      bulletsRef.current.forEach((b) => b.y += b.vy * dt);
+      bulletsRef.current = bulletsRef.current.filter((b) => b.y > -20);
+      targetsRef.current.forEach((t) => t.y += t.vy * dt);
+      targetsRef.current = targetsRef.current.filter((t) => t.y < h + 40);
+
+      let gained = 0;
+      const bullets = bulletsRef.current;
+      const targets = targetsRef.current;
+      const aliveTargets = [];
+      const aliveBullets = [];
+      for (let bi = 0; bi < bullets.length; bi++) {
+        let hit = false;
+        const b = bullets[bi];
+        for (let ti = 0; ti < targets.length; ti++) {
+          const t = targets[ti];
+          if (!t) continue;
+          const dx = b.x - (t.x + t.r);
+          const dy = b.y - (t.y + t.r);
+          const dist2 = dx * dx + dy * dy;
+          const rr = (b.r + t.r) * (b.r + t.r);
+          if (dist2 <= rr) {
+            targets[ti] = null;
+            hit = true;
+            gained += 1;
+            break;
+          }
+        }
+        if (!hit) aliveBullets.push(b);
+      }
+      for (let ti = 0; ti < targets.length; ti++) {
+        if (targets[ti]) aliveTargets.push(targets[ti]);
+      }
+      bulletsRef.current = aliveBullets;
+      targetsRef.current = aliveTargets;
+      if (gained) setScore((s) => s + gained);
+    }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.fillStyle = "#0b1220";
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    for (let i = 0; i < 40; i++) {
+      const x = (i * 97 + ts / 20) % w;
+      const y = (i * 53 + ts / 35) % h;
+      ctx.fillRect(x, y, 2, 2);
+    }
+
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.fillRect(12, 12, w - 24, 44);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 14px system-ui, -apple-system, Segoe UI, Roboto";
+    ctx.fillText(`残り ${timeLeft}s`, 24, 40);
+    ctx.textAlign = "right";
+    ctx.fillText(`スコア ${score}`, w - 24, 40);
+    ctx.textAlign = "left";
+
+    const p = playerRef.current;
+    ctx.fillStyle = "#22c55e";
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.fillStyle = "#14532d";
+    ctx.fillRect(p.x + 8, p.y + 8, p.w - 16, p.h - 16);
+
+    ctx.fillStyle = "#e5e7eb";
+    bulletsRef.current.forEach((b) => {
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    targetsRef.current.forEach((t) => {
+      ctx.fillStyle = "#ef4444";
+      ctx.beginPath();
+      ctx.arc(t.x + t.r, t.y + t.r, t.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(0,0,0,0.25)";
+      ctx.beginPath();
+      ctx.arc(t.x + t.r + 4, t.y + t.r + 4, t.r * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    if (phase === "ready") {
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.font = "900 20px system-ui";
+      ctx.fillText("タップで開始", w / 2, h / 2 - 8);
+      ctx.font = "700 12px system-ui";
+      ctx.fillText("1分間のシューティング（自動発射）", w / 2, h / 2 + 16);
+      ctx.textAlign = "left";
+    }
+    if (phase === "done") {
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.font = "900 22px system-ui";
+      ctx.fillText("終了！", w / 2, h / 2 - 28);
+      ctx.font = "800 14px system-ui";
+      ctx.fillText(`スコア: ${score}  →  ${score}コイン`, w / 2, h / 2);
+      ctx.font = "700 12px system-ui";
+      ctx.fillText("下のボタンでコインに変換", w / 2, h / 2 + 22);
+      ctx.textAlign = "left";
+    }
+
+    rafRef.current = requestAnimationFrame(gameLoop);
+  };
+
+  useEffect(() => {
+    rafRef.current = requestAnimationFrame(gameLoop);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [phase, timeLeft, score]);
+
+  const convertScoreToCoins = async () => {
+    if (!user?.uid) return;
+    if (score <= 0) {
+      showNotification("スコアが0のため変換できません");
+      onBack?.();
       return;
     }
-    if (phase === "done" && !endNotifiedRef.current) {
-      endNotifiedRef.current = true;
-      setRolling(false);
-      showNotification?.("時間切れ！ゲーム終了");
-    }
-  }, [phase, showNotification]);
-
-  const reset = () => {
-    setPhase("ready");
-    setTimeLeft(DURATION_SEC);
-    setLastFace(null);
-    setLastGain(0);
-    setTotalGain(0);
-    setRolling(false);
-  };
-
-  const startGame = () => {
-    setPhase("playing");
-    setTimeLeft(DURATION_SEC);
-    setLastFace(null);
-    setLastGain(0);
-    setTotalGain(0);
-  };
-
-  const pauseGame = () => setPhase((p) => (p === "playing" ? "paused" : p));
-  const resumeGame = () => setPhase((p) => (p === "paused" ? "playing" : p));
-  const stopGame = () => {
-    setPhase("done");
-    onBack?.();
-  };
-
-  const rollDice = async () => {
-    if (phase !== "playing") return;
-    if (rolling) return;
-    setRolling(true);
-
-    const face = 1 + Math.floor(Math.random() * 6);
-    const reward = FACE_REWARDS[face] ?? 0;
-
     try {
-      // Wallet update (atomic)
-      const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-      await runTransaction(db, async (tx) => {
-        const snap = await tx.get(userRef);
-        const cur = snap.exists() ? (snap.data()?.wallet || 0) : 0;
-        if (cur < ROLL_COST) {
-          throw new Error("コインが足りません");
+      await runTransaction(db, async (t) => {
+        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+        const uDoc = await t.get(userRef);
+        if (!uDoc.exists()) throw new Error("ユーザーが見つかりません");
+        t.update(userRef, { wallet: increment(score) });
+        if (invite?.id) {
+          const invRef = doc(db, "artifacts", appId, "public", "data", "minigame_invites", invite.id);
+          t.update(invRef, { status: "completed", earnedCoins: score, completedAt: serverTimestamp() });
         }
-        const next = cur - ROLL_COST + reward;
-        tx.set(userRef, { wallet: next, updatedAt: serverTimestamp() }, { merge: true });
       });
-
-      setLastFace(face);
-      setLastGain(reward);
-      setTotalGain((g) => g + reward);
-      if (reward > 0) showNotification(`${face} の目！ +${reward}コイン`);
-      else showNotification(`${face} の目… +0コイン`);
+      showNotification(`${score}コインを獲得しました！`);
+      onBack?.();
     } catch (e) {
       console.error(e);
-      const msg = (e && typeof e === "object" && "message" in e) ? e.message : "プレイに失敗しました";
-      showNotification(msg);
-    } finally {
-      setRolling(false);
+      showNotification("コイン変換に失敗しました");
     }
   };
 
-  const DiceFace = ({ n }) => {
-    const pip = (x, y) => /* @__PURE__ */ jsx("span", { className: "absolute w-3 h-3 rounded-full bg-black", style: { left: x, top: y, transform: "translate(-50%, -50%)" } });
-    const c = "50%";
-    const l = "25%";
-    const r = "75%";
-    const t = "25%";
-    const b = "75%";
-    const m = "50%";
-    const pips = [];
-    if (!n) return /* @__PURE__ */ jsx("div", { className: "w-40 h-40 rounded-3xl bg-white shadow-inner border-4 border-gray-200 flex items-center justify-center text-4xl font-black text-gray-400", children: "?" });
-    if (n === 1) pips.push(pip(c, m));
-    if (n === 2) pips.push(pip(l, t), pip(r, b));
-    if (n === 3) pips.push(pip(l, t), pip(c, m), pip(r, b));
-    if (n === 4) pips.push(pip(l, t), pip(r, t), pip(l, b), pip(r, b));
-    if (n === 5) pips.push(pip(l, t), pip(r, t), pip(c, m), pip(l, b), pip(r, b));
-    if (n === 6) pips.push(pip(l, t), pip(r, t), pip(l, m), pip(r, m), pip(l, b), pip(r, b));
-    return /* @__PURE__ */ jsx("div", { className: "relative w-40 h-40 rounded-3xl bg-white shadow-inner border-4 border-gray-200", children: pips });
+  return /* @__PURE__ */ jsxs("div", { className: "w-full h-full flex flex-col", children: [
+    /* @__PURE__ */ jsxs("div", { className: "p-4 bg-white border-b flex items-center gap-3", children: [
+      /* @__PURE__ */ jsx("button", { onClick: onBack, className: "p-2 rounded-full hover:bg-gray-100", children: /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6" }) }),
+      /* @__PURE__ */ jsx("div", { className: "font-black text-lg", children: "シューティング（1分）" }),
+      /* @__PURE__ */ jsx("div", { className: "ml-auto flex items-center gap-2 bg-yellow-50 border border-yellow-100 px-3 py-1.5 rounded-full", children: /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx(Coins, { className: "w-4 h-4 text-yellow-600" }),
+        /* @__PURE__ */ jsx("span", { className: "text-xs font-black text-yellow-700", children: score })
+      ] }) })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden flex flex-col items-center justify-center p-4", children: [
+      /* @__PURE__ */ jsx("div", { className: "w-full flex justify-center", children: /* @__PURE__ */ jsx("canvas", { ref: canvasRef, className: "rounded-3xl border shadow-lg touch-none", onMouseMove: handleMove, onTouchMove: handleMove, onClick: () => { if (phase === "ready") start(); } }) }),
+      /* @__PURE__ */ jsx("div", { className: "w-full max-w-sm mt-4", children: phase === "done" ? /* @__PURE__ */ jsx("button", { onClick: convertScoreToCoins, className: "w-full py-4 bg-yellow-500 hover:bg-yellow-600 text-white font-black rounded-2xl shadow-lg shadow-yellow-200 flex items-center justify-center gap-2", children: /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx(Coins, { className: "w-5 h-5" }),
+        `スコアをコインに変換（+${score}）`
+      ] }) }) : /* @__PURE__ */ jsx("div", { className: "text-center text-xs text-gray-500 font-bold", children: "画面をなぞって移動 / 自動発射" }) })
+    ] })
+  ] });
+};
+
+const PachinkoView = ({ user, profile, onBack, showNotification }) => {
+  const [bet, setBet] = useState("10");
+  const [isSpinning, setIsSpinning] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+
+  const playOnce = async () => {
+    const b = parseInt(bet, 10);
+    if (!Number.isFinite(b) || b <= 0) return showNotification("ベットは正の整数にしてください");
+    if ((profile?.wallet || 0) < b) return showNotification("コイン残高が足りません");
+    if (isSpinning) return;
+    setIsSpinning(true);
+    try {
+      const r = Math.random();
+      let mult = 0;
+      if (r < 0.55) mult = 0;
+      else if (r < 0.80) mult = 1;
+      else if (r < 0.93) mult = 2;
+      else if (r < 0.985) mult = 5;
+      else mult = 10;
+      const payout = Math.floor(b * mult);
+      const delta = payout - b;
+      await runTransaction(db, async (t) => {
+        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+        const uDoc = await t.get(userRef);
+        if (!uDoc.exists()) throw new Error("ユーザーが見つかりません");
+        const current = uDoc.data().wallet || 0;
+        if (current < b) throw new Error("残高不足");
+        t.update(userRef, { wallet: increment(delta) });
+        const histRef = doc(collection(db, "artifacts", appId, "public", "data", "pachinko_history"));
+        t.set(histRef, { uid: user.uid, bet: b, mult, payout, delta, createdAt: serverTimestamp() });
+      });
+      setLastResult({ bet: b, mult, payout, delta });
+      showNotification(mult === 0 ? "ハズレ…" : `当たり！ x${mult}（+${delta}）`);
+    } catch (e) {
+      console.error(e);
+      showNotification(typeof e === "string" ? e : "プレイに失敗しました");
+    } finally {
+      setTimeout(() => setIsSpinning(false), 650);
+    }
   };
 
-  return /* @__PURE__ */ jsxs("div", { className: "min-h-screen bg-gradient-to-b from-indigo-50 to-white p-4 pb-28", children: [
-    /* @__PURE__ */ jsxs("div", { className: "max-w-md mx-auto", children: [
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-4", children: [
-        /* @__PURE__ */ jsx("button", { onClick: onBack, className: "px-3 py-2 rounded-xl bg-white shadow border text-sm font-bold", children: "← 戻る" }),
-        /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-gray-700", children: `残り ${timeLeft}s` })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "bg-white rounded-[28px] shadow-lg border p-5", children: [
-        /* @__PURE__ */ jsx("div", { className: "text-lg font-black text-gray-800 mb-1", children: "ミニゲーム：サイコロ" }),
-        /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500 mb-4", children: `1回 ${ROLL_COST}コイン / 制限時間 ${DURATION_SEC}秒` }),
-
-        /* @__PURE__ */ jsx("div", { className: "flex items-center justify-center mb-4", children: /* @__PURE__ */ jsx(DiceFace, { n: lastFace }) }),
-
-        /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-3 gap-2 text-center mb-4", children: [
-          /* @__PURE__ */ jsxs("div", { className: "rounded-2xl bg-gray-50 border p-3", children: [
-            /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500", children: "直近獲得" }),
-            /* @__PURE__ */ jsx("div", { className: "text-xl font-black", children: `+${lastGain}` })
-          ] }),
-          /* @__PURE__ */ jsxs("div", { className: "rounded-2xl bg-gray-50 border p-3", children: [
-            /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500", children: "合計獲得" }),
-            /* @__PURE__ */ jsx("div", { className: "text-xl font-black", children: `+${totalGain}` })
-          ] }),
-          /* @__PURE__ */ jsxs("div", { className: "rounded-2xl bg-gray-50 border p-3", children: [
-            /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500", children: "所持コイン" }),
-            /* @__PURE__ */ jsx("div", { className: "text-xl font-black", children: `${profile?.wallet ?? 0}` })
+  return /* @__PURE__ */ jsxs("div", { className: "w-full h-full flex flex-col", children: [
+    /* @__PURE__ */ jsxs("div", { className: "p-4 bg-white border-b flex items-center gap-3", children: [
+      /* @__PURE__ */ jsx("button", { onClick: onBack, className: "p-2 rounded-full hover:bg-gray-100", children: /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6" }) }),
+      /* @__PURE__ */ jsx("div", { className: "font-black text-lg", children: "オンラインパチンコ（コイン）" }),
+      /* @__PURE__ */ jsx("div", { className: "ml-auto flex items-center gap-2 bg-yellow-50 border border-yellow-100 px-3 py-1.5 rounded-full", children: /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx(Coins, { className: "w-4 h-4 text-yellow-600" }),
+        /* @__PURE__ */ jsx("span", { className: "text-xs font-black text-yellow-700", children: (profile?.wallet || 0).toLocaleString() })
+      ] }) })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto p-6", children: [
+      /* @__PURE__ */ jsx("div", { className: "bg-white rounded-3xl p-6 shadow border", children: /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx("div", { className: "font-black text-base mb-2", children: "ベットして回す" }),
+        /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500 font-bold mb-4", children: "※ これは遊び用（仮想コイン）です。現金や換金はありません。" }),
+        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-4", children: [
+          /* @__PURE__ */ jsx("input", { type: "number", min: 1, step: 1, value: bet, onChange: (e) => setBet(e.target.value), className: "flex-1 bg-gray-50 border rounded-2xl p-4 font-black text-center outline-none focus:ring-2 focus:ring-yellow-400", placeholder: "10" }),
+          /* @__PURE__ */ jsx("button", { onClick: playOnce, disabled: isSpinning, className: "px-5 py-4 rounded-2xl font-black text-white bg-yellow-500 hover:bg-yellow-600 shadow-lg shadow-yellow-200 disabled:bg-gray-300 flex items-center gap-2", children: isSpinning ? /* @__PURE__ */ jsx(Loader2, { className: "w-5 h-5 animate-spin" }) : /* @__PURE__ */ jsxs(Fragment, { children: [
+            /* @__PURE__ */ jsx(Disc, { className: "w-5 h-5" }),
+            "回す"
+          ] }) })
+        ] }),
+        lastResult && /* @__PURE__ */ jsxs("div", { className: "mt-2 bg-gray-50 border rounded-2xl p-4", children: [
+          /* @__PURE__ */ jsx("div", { className: "text-xs font-bold text-gray-500", children: "結果" }),
+          /* @__PURE__ */ jsxs("div", { className: "mt-1 text-sm font-black text-gray-900", children: [
+            "ベット ",
+            lastResult.bet,
+            " / 倍率 x",
+            lastResult.mult,
+            " / 払い出し ",
+            lastResult.payout,
+            " / ",
+            lastResult.delta >= 0 ? "+" : "",
+            lastResult.delta
           ] })
-        ] }),
+        ] })
+      ] }) })
+    ] })
+  ] });
+};
+// ===================== /MiniGame + Pachinko =====================
+// ===================== Coin Arcade (from app.js) =====================
+function __initCoinArcade() {
+  const __root = document.getElementById("coinArcadeRoot");
+  if (__root) {
+    if (__root.dataset.caInited === "1") return;
+    __root.dataset.caInited = "1";
+  }
+  // ---------- storage ----------
+  const STORAGE_KEY = "coin_arcade_wallet_v1";
+  const DEFAULT_COIN = 1000;
 
-        /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
-          phase === "ready" && /* @__PURE__ */ jsx("button", { onClick: startGame, className: "flex-1 py-3 rounded-2xl font-black text-white bg-indigo-600 shadow-lg shadow-indigo-200", children: "スタート" }),
-          phase === "playing" && /* @__PURE__ */ jsx("button", { onClick: rollDice, disabled: rolling, className: `flex-1 py-3 rounded-2xl font-black text-white ${rolling ? "bg-gray-300" : "bg-green-600 hover:bg-green-700"} shadow-lg`, children: rolling ? "..." : "振る" }),
-          phase === "playing" && /* @__PURE__ */ jsx("button", { onClick: pauseGame, className: "px-4 py-3 rounded-2xl font-black bg-white border shadow", children: "一時停止" }),
-          phase === "paused" && /* @__PURE__ */ jsx("button", { onClick: resumeGame, className: "flex-1 py-3 rounded-2xl font-black text-white bg-green-600 shadow-lg shadow-green-200", children: "再開" }),
-          phase === "paused" && /* @__PURE__ */ jsx("button", { onClick: stopGame, className: "px-4 py-3 rounded-2xl font-black bg-white border shadow", children: "中断" }),
-          phase === "done" && /* @__PURE__ */ jsx("button", { onClick: reset, className: "flex-1 py-3 rounded-2xl font-black text-white bg-indigo-600 shadow-lg shadow-indigo-200", children: "もう一度" }),
-          phase === "done" && /* @__PURE__ */ jsx("button", { onClick: stopGame, className: "px-4 py-3 rounded-2xl font-black bg-white border shadow", children: "戻る" })
-        ] }),
+  function loadCoin() {
+    const v = Number(localStorage.getItem(STORAGE_KEY));
+    return Number.isFinite(v) ? v : DEFAULT_COIN;
+  }
+  function saveCoin(v) {
+    localStorage.setItem(STORAGE_KEY, String(v));
+  }
 
-        /* @__PURE__ */ jsx("div", { className: "mt-4 rounded-2xl bg-gray-50 border p-4", children: /* @__PURE__ */ jsxs("div", { className: "text-xs text-gray-600 space-y-1", children: [
-          /* @__PURE__ */ jsx("div", { className: "font-bold text-gray-700", children: "目ごとの獲得コイン" }),
-          /* @__PURE__ */ jsx("div", { children: `1 → ${FACE_REWARDS[1]} / 2 → ${FACE_REWARDS[2]} / 3 → ${FACE_REWARDS[3]}` }),
-          /* @__PURE__ */ jsx("div", { children: `4 → ${FACE_REWARDS[4]} / 5 → ${FACE_REWARDS[5]} / 6 → ${FACE_REWARDS[6]}` })
-        ] }) })
+  // ---------- UI ----------
+  const coinEl = document.getElementById("coin");
+  const reelEls = [0,1,2].map(i => document.getElementById(`reel${i}`));
+  const spinBtn = document.getElementById("spinBtn");
+  const slotAutoBtn = document.getElementById("slotAutoBtn");
+  const slotHint = document.getElementById("slotHint");
+  const slotResult = document.getElementById("slotResult");
+  const resetBtn = document.getElementById("resetBtn");
+
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const overlay = document.getElementById("overlay");
+  const startMiniBtn = document.getElementById("startMiniBtn");
+  const pauseBtn = document.getElementById("pauseBtn");
+  const abortBtn = document.getElementById("abortBtn");
+  const stateLabel = document.getElementById("stateLabel");
+  const ballLabel = document.getElementById("ballLabel");
+  const lastWinEl = document.getElementById("lastWin");
+  const holesList = document.getElementById("holesList");
+
+  let coin = loadCoin();
+  function renderCoin(){ coinEl.textContent = coin.toLocaleString(); }
+  function canSpend(amount){ return coin >= amount; }
+  function spend(amount){
+    if (!canSpend(amount)) return false;
+    coin -= amount;
+    saveCoin(coin);
+    renderCoin();
+    return true;
+  }
+  function earn(amount){
+    coin += amount;
+    saveCoin(coin);
+    renderCoin();
+  }
+
+  renderCoin();
+
+  resetBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    coin = DEFAULT_COIN;
+    saveCoin(coin);
+    renderCoin();
+    toast("コインを初期化しました（1000）");
+  });
+
+  // ---------- toast ----------
+  let toastTimer = null;
+  function toast(text){
+    slotHint.textContent = text;
+    slotHint.style.opacity = "1";
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      slotHint.style.opacity = ".85";
+      slotHint.textContent = "回すと30コイン消費します。";
+    }, 2200);
+  }
+
+  // ---------- slot ----------
+  const SYMBOLS = ["🍒","🔔","🍋","7️⃣","⭐","💎","BAR"];
+  let autoLeft = 0;
+  let slotBusy = false;
+
+  function spinOnce(){
+    if (slotBusy) return;
+    if (!spend(30)){
+      slotResult.className = "result lose";
+      slotResult.textContent = "コインが足りません（30必要）";
+      return;
+    }
+
+    slotBusy = true;
+    spinBtn.disabled = true;
+    slotAutoBtn.disabled = true;
+    slotResult.className = "result";
+    slotResult.textContent = "";
+
+    const pick = () => SYMBOLS[Math.floor(Math.random()*SYMBOLS.length)];
+    const isWin = (arr) => (arr[0] === arr[1] && arr[1] === arr[2]);
+
+    // animation
+    const start = performance.now();
+    const dur = 950;
+    const tick = (t) => {
+      const p = Math.min(1, (t-start)/dur);
+      reelEls.forEach((el) => { el.textContent = pick(); });
+      if (p < 1){
+        requestAnimationFrame(tick);
+      } else {
+        // settle
+        // ランダムに3リールを止めて、3つ同じなら当たり（確率はランダム）
+        const finals = [pick(), pick(), pick()];
+        reelEls.forEach((el, i) => el.textContent = finals[i]);
+
+        if (isWin(finals)) {
+          earn(500);
+          slotResult.className = "result win";
+          slotResult.textContent = "🎉 当たり！ +500コイン";
+        } else {
+          slotResult.className = "result lose";
+          slotResult.textContent = "はずれ…";
+        }
+        slotBusy = false;
+        spinBtn.disabled = false;
+        slotAutoBtn.disabled = false;
+        if (autoLeft > 0){
+          autoLeft--;
+          setTimeout(spinOnce, 220);
+        }
+      }
+    };
+    requestAnimationFrame(tick);
+  }
+
+  spinBtn.addEventListener("click", spinOnce);
+  slotAutoBtn.addEventListener("click", () => {
+    if (slotBusy) return;
+    autoLeft = 10;
+    spinOnce();
+  });
+
+  // ---------- minigame physics ----------
+  // Canvas logical size is fixed by element width/height attributes.
+  const W = canvas.width;
+  const H = canvas.height;
+
+  const GRAVITY = 900;         // px/s^2
+  const AIR_DAMP = 0.999;      // velocity damping
+  const RESTITUTION = 0.62;    // bounce
+  const FRICTION = 0.985;
+
+  // Playfield layout
+  const wallPad = 18;
+  const launchAnchor = { x: W - 48, y: H - 72 };
+  const launchMaxPull = 78;
+
+  // Holes at bottom (bonus coins)
+  const holes = [
+    { bonus: 10,  label: "+10"  },
+    { bonus: 20,  label: "+20"  },
+    { bonus: 50,  label: "+50"  },
+    { bonus: 20,  label: "+20"  },
+    { bonus: 10,  label: "+10"  },
+  ];
+  function holesGeometry(){
+    const y = H - 32;
+    const totalW = W - wallPad*2;
+    const slotW = totalW / holes.length;
+    return holes.map((h, i) => ({
+      ...h,
+      i,
+      x0: wallPad + i*slotW,
+      x1: wallPad + (i+1)*slotW,
+      cx: wallPad + (i+0.5)*slotW,
+      y0: y-18,
+      y1: H,
+    }));
+  }
+  const holeRects = holesGeometry();
+
+  holesList.innerHTML = "";
+  holeRects.forEach(h => {
+    const el = document.createElement("div");
+    el.className = "hole-pill";
+    el.textContent = `穴${h.i+1}：${h.label}`;
+    holesList.appendChild(el);
+  });
+
+  // Pegs (pins)
+  const pegs = [];
+  const pegRows = 8;
+  const pegCols = 8;
+  const pegStartY = 92;
+  const pegGapX = (W - wallPad*2) / (pegCols-1);
+  const pegGapY = 44;
+  for (let r=0; r<pegRows; r++){
+    const offset = (r % 2) * (pegGapX/2);
+    for (let c=0; c<pegCols-1; c++){
+      const x = wallPad + offset + c*pegGapX;
+      const y = pegStartY + r*pegGapY;
+      if (x < wallPad+10 || x > W-wallPad-10) continue;
+      pegs.push({ x, y, r: 6.2 });
+    }
+  }
+
+  // Ball state
+  const balls = [];
+  let nextBallId = 1;
+
+  // Game state
+  let paused = false;
+  let dragging = false;
+  let dragPos = { x: launchAnchor.x, y: launchAnchor.y };
+  let currentBallId = 0;
+  let running = false; // active ball exists and not ended
+  let lastT = performance.now();
+  let raf = null;
+
+  function setStateText(t){ stateLabel.textContent = t; }
+  function setBallCount(n){ ballLabel.textContent = String(n); }
+  function setLastWinText(t){ lastWinEl.textContent = t; }
+
+  setStateText("待機中");
+  setBallCount(0);
+  setLastWinText("-");
+
+  function showOverlay(){ overlay.classList.remove("hidden"); }
+  function hideOverlay(){ overlay.classList.add("hidden"); }
+
+  function resetMiniUI(){
+    paused = false;
+    pauseBtn.textContent = "一時停止";
+    setStateText("待機中");
+    setBallCount(0);
+    currentBallId = 0;
+    running = false;
+    dragging = false;
+    dragPos = { x: launchAnchor.x, y: launchAnchor.y };
+    showOverlay();
+  }
+
+  function addBall(){
+    // costs 10 coins
+    if (!spend(10)){
+      setLastWinText("コイン不足（10必要）");
+      return;
+    }
+    // One active ball at a time (simple)
+    balls.length = 0;
+    const r = 9;
+    const b = {
+      id: nextBallId++,
+      x: launchAnchor.x,
+      y: launchAnchor.y,
+      vx: 0,
+      vy: 0,
+      r,
+      active: true,
+      launched: false
+    };
+    balls.push(b);
+    currentBallId = b.id;
+    running = true;
+    setBallCount(1);
+    setStateText("発射待ち（引いて離す）");
+    hideOverlay();
+    ensureLoop();
+  }
+
+  startMiniBtn.addEventListener("click", addBall);
+
+  pauseBtn.addEventListener("click", () => {
+    if (!running){
+      toast("ミニゲームは待機中です。");
+      return;
+    }
+    paused = !paused;
+    pauseBtn.textContent = paused ? "再開" : "一時停止";
+    setStateText(paused ? "一時停止中" : (dragging ? "発射待ち（引いて離す）" : "プレイ中"));
+  });
+
+  abortBtn.addEventListener("click", () => {
+    // Interrupt any time (no reward)
+    balls.length = 0;
+    if (raf) cancelAnimationFrame(raf);
+    raf = null;
+    setLastWinText("中断しました（獲得なし）");
+    resetMiniUI();
+  });
+
+  // ---------- input handling (pull & release) ----------
+  function pointerPos(ev){
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (ev.clientX - rect.left) * (canvas.width / rect.width),
+      y: (ev.clientY - rect.top) * (canvas.height / rect.height)
+    };
+  }
+
+  function hasBallWaiting(){
+    const b = balls[0];
+    return !!b && b.active && !b.launched;
+  }
+
+  function clampPull(p){
+    // Pull vector from anchor to p, clamp length.
+    const dx = p.x - launchAnchor.x;
+    const dy = p.y - launchAnchor.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const cl = Math.min(launchMaxPull, len);
+    return {
+      x: launchAnchor.x + dx/len*cl,
+      y: launchAnchor.y + dy/len*cl
+    };
+  }
+
+  function onDown(ev){
+    if (!running || paused) return;
+    if (!hasBallWaiting()) return;
+
+    const p = pointerPos(ev);
+    const b = balls[0];
+    // allow dragging near anchor/ball
+    const near = (Math.hypot(p.x - b.x, p.y - b.y) < 34) || (Math.hypot(p.x - launchAnchor.x, p.y - launchAnchor.y) < 40);
+    if (!near) return;
+
+    dragging = true;
+    dragPos = clampPull(p);
+    setStateText("発射待ち（引いて離す）");
+    canvas.setPointerCapture?.(ev.pointerId);
+  }
+
+  function onMove(ev){
+    if (!dragging) return;
+    const p = pointerPos(ev);
+    dragPos = clampPull(p);
+  }
+
+  function launch(){
+    const b = balls[0];
+    if (!b || !b.active || b.launched) return;
+
+    // velocity opposite to pull direction
+    const dx = launchAnchor.x - dragPos.x;
+    const dy = launchAnchor.y - dragPos.y;
+    const power = Math.hypot(dx, dy);
+    // calibrate to feel like pinball shooter
+    const k = 11.5;
+    b.vx = (dx / (power || 1)) * (power * k * 0.45);
+    b.vy = (dy / (power || 1)) * (power * k);
+    b.launched = true;
+    setStateText("プレイ中");
+  }
+
+  function onUp(ev){
+    if (!dragging) return;
+    dragging = false;
+    launch();
+  }
+
+  canvas.addEventListener("pointerdown", onDown);
+  canvas.addEventListener("pointermove", onMove);
+  canvas.addEventListener("pointerup", onUp);
+  canvas.addEventListener("pointercancel", () => { dragging = false; });
+
+  // ---------- physics ----------
+  function resolveCircleCollision(ball, peg){
+    const dx = ball.x - peg.x;
+    const dy = ball.y - peg.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const minDist = ball.r + peg.r;
+    if (dist >= minDist) return;
+
+    // push out
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const overlap = (minDist - dist);
+    ball.x += nx * overlap;
+    ball.y += ny * overlap;
+
+    // reflect velocity along normal
+    const vn = ball.vx*nx + ball.vy*ny;
+    if (vn < 0){
+      ball.vx -= (1 + RESTITUTION) * vn * nx;
+      ball.vy -= (1 + RESTITUTION) * vn * ny;
+      // small spin noise
+      ball.vx += (Math.random() - 0.5) * 12;
+    }
+  }
+
+  function resolveWalls(ball){
+    // left/right walls
+    const left = wallPad + ball.r;
+    const right = W - wallPad - ball.r;
+
+    if (ball.x < left){
+      ball.x = left;
+      ball.vx = Math.abs(ball.vx) * RESTITUTION;
+    } else if (ball.x > right){
+      ball.x = right;
+      ball.vx = -Math.abs(ball.vx) * RESTITUTION;
+    }
+
+    // top
+    const top = 34 + ball.r;
+    if (ball.y < top){
+      ball.y = top;
+      ball.vy = Math.abs(ball.vy) * RESTITUTION;
+    }
+  }
+
+  function checkHole(ball){
+    const yLine = H - 44;
+    if (ball.y < yLine) return null;
+
+    // if ball is within a hole region, it "falls in"
+    for (const h of holeRects){
+      if (ball.x >= h.x0 && ball.x < h.x1){
+        return h;
+      }
+    }
+    return null;
+  }
+
+  function endBall(hole){
+    // award coins
+    const win = 30 + (hole?.bonus ?? 0);
+    earn(win);
+    setLastWinText(`+${win}（30+${hole.bonus}）`);
+    balls.length = 0;
+    setBallCount(0);
+    running = false;
+    dragging = false;
+    setStateText("待機中");
+    showOverlay();
+  }
+
+  // ---------- render ----------
+  function drawGlowCircle(x, y, r, alpha=1){
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function draw(){
+    // background is CSS; here draw board details
+    ctx.clearRect(0,0,W,H);
+
+    // frame
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(wallPad-6, 26, W-(wallPad-6)*2, H-40, 22);
+    ctx.stroke();
+    ctx.restore();
+
+    // pegs
+    ctx.save();
+    ctx.fillStyle = "rgba(34,211,238,.55)";
+    for (const p of pegs){
+      drawGlowCircle(p.x, p.y, p.r, 0.9);
+    }
+    ctx.restore();
+
+    // holes
+    for (const h of holeRects){
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,.35)";
+      ctx.fillRect(h.x0, h.y0, h.x1-h.x0, h.y1-h.y0);
+
+      // label
+      ctx.fillStyle = "rgba(255,255,255,.85)";
+      ctx.font = "900 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Noto Sans JP";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(h.label, h.cx, H - 22);
+
+      // separators
+      ctx.strokeStyle = "rgba(255,255,255,.12)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(h.x0, h.y0);
+      ctx.lineTo(h.x0, H);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // launcher lane
+    ctx.save();
+    ctx.strokeStyle = "rgba(124,92,255,.35)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(W - wallPad - 32, H - 170);
+    ctx.lineTo(W - wallPad - 32, H - 44);
+    ctx.stroke();
+    ctx.restore();
+
+    // pull line
+    if (hasBallWaiting()){
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,.35)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(launchAnchor.x, launchAnchor.y);
+      ctx.lineTo(dragPos.x, dragPos.y);
+      ctx.stroke();
+      ctx.restore();
+
+      // anchor
+      ctx.save();
+      ctx.fillStyle = "rgba(255,255,255,.20)";
+      drawGlowCircle(launchAnchor.x, launchAnchor.y, 10, 1);
+      ctx.restore();
+    }
+
+    // ball
+    const b = balls[0];
+    if (b){
+      ctx.save();
+      // glow
+      ctx.fillStyle = "rgba(124,92,255,.35)";
+      drawGlowCircle(b.x, b.y, b.r+7, 0.6);
+      ctx.fillStyle = "rgba(255,255,255,.92)";
+      drawGlowCircle(b.x, b.y, b.r, 1);
+      ctx.restore();
+    }
+
+    // pause overlay
+    if (paused && running){
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,.55)";
+      ctx.fillRect(0,0,W,H);
+      ctx.fillStyle = "rgba(255,255,255,.9)";
+      ctx.font = "900 22px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Noto Sans JP";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("PAUSE", W/2, H/2);
+      ctx.restore();
+    }
+  }
+
+  // ---------- loop ----------
+  function ensureLoop(){
+    if (raf) return;
+    lastT = performance.now();
+    raf = requestAnimationFrame(loop);
+  }
+
+  function loop(t){
+    raf = requestAnimationFrame(loop);
+    const dt = Math.min(0.033, (t - lastT) / 1000);
+    lastT = t;
+
+    if (!paused && running){
+      const b = balls[0];
+      if (b){
+        if (!b.launched){
+          // stick to drag pos while waiting
+          b.x = dragPos.x;
+          b.y = dragPos.y;
+        } else {
+          // integrate
+          b.vy += GRAVITY * dt;
+          b.x += b.vx * dt;
+          b.y += b.vy * dt;
+
+          b.vx *= Math.pow(AIR_DAMP, dt*60);
+          b.vy *= Math.pow(AIR_DAMP, dt*60);
+
+          // collisions
+          resolveWalls(b);
+          for (const p of pegs) resolveCircleCollision(b, p);
+
+          // floor friction-ish (above holes line)
+          if (b.y > H - 60){
+            b.vx *= Math.pow(FRICTION, dt*60);
+          }
+
+          // hole
+          const hole = checkHole(b);
+          if (hole){
+            endBall(hole);
+          }
+        }
+      }
+    } else if (!running){
+      // stop loop if completely idle (but keep drawing once)
+      cancelAnimationFrame(raf);
+      raf = null;
+    }
+
+    draw();
+  }
+
+  // initial draw
+  draw();
+
+  // on resize: keep canvas internal size fixed, CSS scales it; no need.
+}
+const CoinArcadeView = ({ onBack }) => {
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    if (mountedRef.current) return;
+    mountedRef.current = true;
+    // Initialize after first paint so DOM nodes are present
+    requestAnimationFrame(() => {
+      try {
+        __initCoinArcade();
+      } catch (e) {
+        console.error("Coin Arcade init failed:", e);
+      }
+    });
+}, []);
+  return /* @__PURE__ */ jsxs("div", { id: "coinArcadeRoot", className: "w-full h-full flex flex-col bg-[#0b0b13] text-white", children: [
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between px-6 py-5 border-b border-white/10", children: [
+      /* @__PURE__ */ jsx("button", { className: "text-sm font-bold text-white/80", onClick: onBack, children: "\u623B\u308B" }),
+      /* @__PURE__ */ jsx("div", { className: "text-lg font-extrabold tracking-wide", children: "Coin Arcade" }),
+      /* @__PURE__ */ jsx("div", { className: "text-sm font-bold", children: /* @__PURE__ */ jsxs("span", { children: ["\u30B3\u30A4\u30F3: ", /* @__PURE__ */ jsx("span", { id: "coin" })] }) })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-auto p-6", children: [
+      /* @__PURE__ */ jsxs("div", { className: "bg-white/5 rounded-3xl p-6 mb-6", children: [
+        /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-white/80 mb-3", children: "\u30B9\u30ED\u30C3\u30C8 (100\u30B3\u30A4\u30F3 / \u5F53\u305F\u308A 500\u30B3\u30A4\u30F3)" }),
+        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-4", children: [
+          /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
+            /* @__PURE__ */ jsx("div", { id: "reel0", className: "w-16 h-16 rounded-2xl bg-black/30 flex items-center justify-center text-2xl font-extrabold" }),
+            /* @__PURE__ */ jsx("div", { id: "reel1", className: "w-16 h-16 rounded-2xl bg-black/30 flex items-center justify-center text-2xl font-extrabold" }),
+            /* @__PURE__ */ jsx("div", { id: "reel2", className: "w-16 h-16 rounded-2xl bg-black/30 flex items-center justify-center text-2xl font-extrabold" })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { className: "flex-1 flex flex-col gap-2", children: [
+            /* @__PURE__ */ jsxs("div", { className: "flex gap-3", children: [
+              /* @__PURE__ */ jsx("button", { id: "spinBtn", className: "px-4 py-3 rounded-2xl bg-green-500 text-white font-extrabold" , children: "\u56DE\u3059" }),
+              /* @__PURE__ */ jsx("button", { id: "slotAutoBtn", className: "px-4 py-3 rounded-2xl bg-white/10 text-white font-extrabold", children: "\u81EA\u52D5" }),
+              /* @__PURE__ */ jsx("button", { id: "resetBtn", className: "px-4 py-3 rounded-2xl bg-white/10 text-white font-extrabold", children: "\u30EA\u30BB\u30C3\u30C8" })
+            ] }),
+            /* @__PURE__ */ jsx("div", { id: "slotHint", className: "text-xs text-white/60" }),
+            /* @__PURE__ */ jsx("div", { id: "slotResult", className: "text-sm font-bold" })
+          ] })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "bg-white/5 rounded-3xl p-6", children: [
+        /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-white/80 mb-3", children: "\u30DF\u30CB\u30B2\u30FC\u30E0 (10\u30B3\u30A4\u30F3 / \u7403)" }),
+        /* @__PURE__ */ jsxs("div", { className: "flex flex-wrap gap-3 mb-4", children: [
+          /* @__PURE__ */ jsx("button", { id: "startMiniBtn", className: "px-4 py-3 rounded-2xl bg-blue-500 text-white font-extrabold", children: "\u958B\u59CB" }),
+          /* @__PURE__ */ jsx("button", { id: "pauseBtn", className: "px-4 py-3 rounded-2xl bg-white/10 text-white font-extrabold", children: "\u4E00\u6642\u505C\u6B62" }),
+          /* @__PURE__ */ jsx("button", { id: "abortBtn", className: "px-4 py-3 rounded-2xl bg-white/10 text-white font-extrabold", children: "\u4E2D\u65AD" })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between text-xs text-white/70 mb-3", children: [
+          /* @__PURE__ */ jsx("div", { id: "stateLabel" }),
+          /* @__PURE__ */ jsx("div", { children: /* @__PURE__ */ jsxs("span", { children: ["\u7403: ", /* @__PURE__ */ jsx("span", { id: "ballLabel" })] }) })
+        ] }),
+        /* @__PURE__ */ jsx("div", { className: "relative", children: /* @__PURE__ */ jsx("canvas", { id: "game", width: 380, height: 520, className: "w-full max-w-[420px] mx-auto rounded-3xl bg-black/30 block" }) }),
+        /* @__PURE__ */ jsx("div", { id: "overlay", className: "hidden" }),
+        /* @__PURE__ */ jsxs("div", { className: "mt-4 flex items-center justify-between", children: [
+          /* @__PURE__ */ jsx("div", { className: "text-xs text-white/70", children: /* @__PURE__ */ jsxs("span", { children: ["\u6700\u7D42\u7372\u5F97: ", /* @__PURE__ */ jsx("span", { id: "lastWin" })] }) }),
+          /* @__PURE__ */ jsx("div", { id: "holesList", className: "flex flex-wrap gap-2 justify-end" })
+        ] })
       ] })
     ] })
   ] });
 };
-const ChinchiroPanel = ({ user, profile, showNotification, onClose }) => {
-  const [tab, setTab] = useState("find"); // find | room
-  const [rooms, setRooms] = useState([]);
-  const [loadingRooms, setLoadingRooms] = useState(false);
-
-  const [bet, setBet] = useState(100);
-  const [roomId, setRoomId] = useState(null);
-  const [room, setRoom] = useState(null);
-
-  const [rolling, setRolling] = useState(false);
-
-  const FACE = ["", "⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
-
-  const sortDice = (arr) => [...arr].sort((a, b) => a - b);
-
-  const evalHand = (dice) => {
-    const d = sortDice(dice);
-    const [a, b, c] = d;
-
-    // ピンゾロ
-    if (a === 1 && b === 1 && c === 1) return { rank: 7, name: "ピンゾロ", value: 0 };
-
-    // 4-5-6
-    if (a === 4 && b === 5 && c === 6) return { rank: 6, name: "シゴロ", value: 0 };
-
-    // ゾロ目（1以外）
-    if (a === b && b === c) return { rank: 5, name: `${a}のゾロ目`, value: a };
-
-    // 1-2-3
-    if (a === 1 && b === 2 && c === 3) return { rank: 1, name: "ヒフミ", value: 0 };
-
-    // 目（2つ同じ）
-    if (a === b && b !== c) return { rank: 3, name: `${c}の目`, value: c };
-    if (a === c && a !== b) return { rank: 3, name: `${b}の目`, value: b };
-    if (b === c && a !== b) return { rank: 3, name: `${a}の目`, value: a };
-
-    // 役なし
-    return { rank: 2, name: "役なし", value: 0 };
-  };
-
-  const compareHands = (h1, h2) => {
-    if (h1.rank !== h2.rank) return h1.rank - h2.rank; // rank大が強い
-    return h1.value - h2.value;
-  };
-
-  // ルーム一覧（待機中）
-  useEffect(() => {
-    if (tab !== "find") return;
-    setLoadingRooms(true);
-    const qy = query(
-      collection(db, "artifacts", appId, "public", "data", "chinchiro_rooms"),
-      where("status", "==", "waiting"),
-      orderBy("createdAt", "desc"),
-      limit(20)
-    );
-    const unsub = onSnapshot(
-      qy,
-      (snap) => {
-        setRooms(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        setLoadingRooms(false);
-      },
-      (e) => {
-        console.error(e);
-        setLoadingRooms(false);
-      }
-    );
-    return () => unsub();
-  }, [tab]);
-
-  // ルーム購読
-  useEffect(() => {
-    if (!roomId) return;
-    const unsub = onSnapshot(
-      doc(db, "artifacts", appId, "public", "data", "chinchiro_rooms", roomId),
-      (d) => setRoom(d.exists() ? { id: d.id, ...d.data() } : null),
-      (e) => console.error(e)
-    );
-    return () => unsub();
-  }, [roomId]);
-
-  const canAfford = (amount) => (profile?.wallet || 0) >= amount;
-
-  const createRoom = async () => {
-    const b = Math.max(10, Math.floor(Number(bet) || 0));
-    if (!canAfford(b)) return showNotification("コインが足りません");
-    try {
-      const roomRef = doc(collection(db, "artifacts", appId, "public", "data", "chinchiro_rooms"));
-      await runTransaction(db, async (t) => {
-        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-        const uDoc = await t.get(userRef);
-        if (!uDoc.exists()) throw new Error("ユーザー情報が見つかりません");
-        const w = uDoc.data()?.wallet || 0;
-        if (w < b) throw new Error("コインが足りません");
-        t.update(userRef, { wallet: w - b, updatedAt: serverTimestamp() });
-        t.set(roomRef, {
-          status: "waiting",
-          bet: b,
-          hostId: user.uid,
-          hostRollsLeft: 3,
-          guestRollsLeft: 3,
-          hostDice: null,
-          guestDice: null,
-          hostHand: null,
-          guestHand: null,
-          winner: null,
-          createdAt: serverTimestamp()
-        });
-      });
-      setRoomId(roomRef.id);
-      setTab("room");
-      showNotification("ルームを作成しました（相手を待っています）");
-    } catch (e) {
-      console.error(e);
-      showNotification(e?.message || "作成に失敗しました");
-    }
-  };
-
-  const joinRoom = async (rid) => {
-    const r = rooms.find((x) => x.id === rid);
-    const b = r?.bet || 0;
-    if (!b) return;
-    if (!canAfford(b)) return showNotification("コインが足りません");
-    try {
-      await runTransaction(db, async (t) => {
-        const roomRef = doc(db, "artifacts", appId, "public", "data", "chinchiro_rooms", rid);
-        const rDoc = await t.get(roomRef);
-        if (!rDoc.exists()) throw new Error("ルームが見つかりません");
-        const data = rDoc.data();
-        if (data.status !== "waiting") throw new Error("参加できません（満員/開始済み）");
-        if (data.hostId === user.uid) throw new Error("自分のルームには参加できません");
-
-        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-        const uDoc = await t.get(userRef);
-        if (!uDoc.exists()) throw new Error("ユーザー情報が見つかりません");
-        const w = uDoc.data()?.wallet || 0;
-        if (w < b) throw new Error("コインが足りません");
-        t.update(userRef, { wallet: w - b, updatedAt: serverTimestamp() });
-
-        t.update(roomRef, {
-          status: "ready",
-          guestId: user.uid,
-          startedAt: serverTimestamp()
-        });
-      });
-
-      setRoomId(rid);
-      setTab("room");
-      showNotification("参加しました！ チンチロ開始！");
-    } catch (e) {
-      console.error(e);
-      showNotification(e?.message || "参加に失敗しました");
-    }
-  };
-
-  const leaveRoom = async () => {
-    if (!roomId || !room) return onClose();
-    try {
-      // 途中離脱は返金なし（簡易仕様）
-      await updateDoc(doc(db, "artifacts", appId, "public", "data", "chinchiro_rooms", roomId), {
-        status: "finished",
-        winner: room.hostId === user.uid ? (room.guestId || "guest") : (room.hostId || "host"),
-        finishedAt: serverTimestamp(),
-        note: "途中離脱"
-      });
-    } catch (e) {
-      console.error(e);
-    }
-    setRoomId(null);
-    setRoom(null);
-    setTab("find");
-    onClose();
-  };
-
-  const rollOnce = () => [1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)];
-
-  const doRoll = async () => {
-    if (!roomId || !room) return;
-    if (!(room.status === "ready" || room.status === "playing")) return;
-    if (rolling) return;
-
-    const isHost = room.hostId === user.uid;
-    const myDice = isHost ? room.hostDice : room.guestDice;
-    const myLeft = isHost ? room.hostRollsLeft : room.guestRollsLeft;
-
-    if (myDice) return showNotification("すでに確定しています");
-    if (myLeft <= 0) return showNotification("振れる回数がありません");
-
-    setRolling(true);
-    try {
-      await runTransaction(db, async (t) => {
-        const roomRef = doc(db, "artifacts", appId, "public", "data", "chinchiro_rooms", roomId);
-        const rDoc = await t.get(roomRef);
-        if (!rDoc.exists()) throw new Error("ルームが見つかりません");
-        const data = rDoc.data();
-        const hostId = data.hostId;
-        const guestId = data.guestId;
-
-        const isHostTx = hostId === user.uid;
-        const leftKey = isHostTx ? "hostRollsLeft" : "guestRollsLeft";
-        const diceKey = isHostTx ? "hostTempDice" : "guestTempDice";
-        const currentLeft = data[leftKey] ?? 3;
-        if (currentLeft <= 0) throw new Error("振れる回数がありません");
-
-        const dice = rollOnce();
-        t.update(roomRef, {
-          status: "playing",
-          [leftKey]: currentLeft - 1,
-          [diceKey]: dice,
-          updatedAt: serverTimestamp()
-        });
-      });
-    } catch (e) {
-      console.error(e);
-      showNotification(e?.message || "失敗しました");
-    } finally {
-      setRolling(false);
-    }
-  };
-
-  const confirmDice = async () => {
-    if (!roomId || !room) return;
-    const isHost = room.hostId === user.uid;
-    const temp = isHost ? room.hostTempDice : room.guestTempDice;
-    if (!temp) return showNotification("まず振ってください");
-    if (isHost ? room.hostDice : room.guestDice) return;
-
-    const hand = evalHand(temp);
-
-    try {
-      await runTransaction(db, async (t) => {
-        const roomRef = doc(db, "artifacts", appId, "public", "data", "chinchiro_rooms", roomId);
-        const rDoc = await t.get(roomRef);
-        if (!rDoc.exists()) throw new Error("ルームが見つかりません");
-        const data = rDoc.data();
-
-        const hostId = data.hostId;
-        const guestId = data.guestId;
-        const bet = data.bet || 0;
-
-        if (!guestId) throw new Error("相手がまだ参加していません");
-
-        const isHostTx = hostId === user.uid;
-        const diceKey = isHostTx ? "hostDice" : "guestDice";
-        const handKey = isHostTx ? "hostHand" : "guestHand";
-
-        t.update(roomRef, {
-          [diceKey]: temp,
-          [handKey]: hand,
-          status: "playing",
-          updatedAt: serverTimestamp()
-        });
-      });
-    } catch (e) {
-      console.error(e);
-      showNotification(e?.message || "確定に失敗しました");
-    }
-  };
-
-  // 両者確定したら勝敗決定＆精算
-  useEffect(() => {
-    if (!roomId || !room) return;
-    if (room.status === "finished") return;
-    if (!room.hostId || !room.guestId) return;
-    if (!room.hostDice || !room.guestDice) return;
-
-    const settle = async () => {
-      try {
-        await runTransaction(db, async (t) => {
-          const roomRef = doc(db, "artifacts", appId, "public", "data", "chinchiro_rooms", roomId);
-          const rDoc = await t.get(roomRef);
-          if (!rDoc.exists()) return;
-          const data = rDoc.data();
-          if (data.status === "finished") return;
-
-          const bet = data.bet || 0;
-          const hostHand = data.hostHand;
-          const guestHand = data.guestHand;
-          if (!hostHand || !guestHand) return;
-
-          const cmp = compareHands(hostHand, guestHand);
-          let winner = "draw";
-          if (cmp > 0) winner = data.hostId;
-          else if (cmp < 0) winner = data.guestId;
-
-          const hostRef = doc(db, "artifacts", appId, "public", "data", "users", data.hostId);
-          const guestRef = doc(db, "artifacts", appId, "public", "data", "users", data.guestId);
-
-          if (winner === "draw") {
-            // 返金（両者にベット分返す）
-            t.update(hostRef, { wallet: increment(bet) });
-            t.update(guestRef, { wallet: increment(bet) });
-          } else {
-            // 勝者が総取り（bet*2）
-            t.update(doc(db, "artifacts", appId, "public", "data", "users", winner), { wallet: increment(bet * 2) });
-          }
-
-          t.update(roomRef, {
-            status: "finished",
-            winner,
-            finishedAt: serverTimestamp()
-          });
-        });
-      } catch (e) {
-        console.error(e);
-      }
-    };
-
-    settle();
-  }, [roomId, room]);
-
-  if (!roomId) {
-    return (
-      <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center">
-        <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-4">
-          <div className="flex items-center justify-between">
-            <div className="text-lg font-extrabold">オンライン チンチロ</div>
-            <button onClick={onClose} className="font-bold text-slate-600">✕</button>
-          </div>
-
-          <div className="mt-3 rounded-2xl bg-slate-50 p-3">
-            <div className="text-xs text-slate-600 font-bold">ベット（参加時に支払い）</div>
-            <div className="mt-2 flex gap-2">
-              <input
-                value={bet}
-                onChange={(e) => setBet(e.target.value)}
-                className="flex-1 px-3 py-2 rounded-2xl border bg-white text-sm font-bold"
-                inputMode="numeric"
-              />
-              <button onClick={createRoom} className="px-4 py-2 rounded-2xl bg-green-600 text-white font-extrabold">
-                ルーム作成
-              </button>
-            </div>
-            <div className="mt-2 text-xs text-slate-500">残高: {profile?.wallet || 0} / 勝者は総取り（ベット×2）</div>
-          </div>
-
-          <div className="mt-4">
-            <div className="text-sm font-extrabold">参加できるルーム</div>
-            {loadingRooms ? <div className="text-slate-500 mt-2">読み込み中...</div> : null}
-            <div className="mt-2 space-y-2 max-h-[45vh] overflow-y-auto">
-              {rooms.length ? rooms.map((r) => (
-                <div key={r.id} className="p-3 rounded-2xl border bg-white flex items-center justify-between">
-                  <div>
-                    <div className="font-extrabold">ベット {r.bet} コイン</div>
-                    <div className="text-xs text-slate-500">作成者: {r.hostId?.slice(0, 6)}…</div>
-                  </div>
-                  <button onClick={() => joinRoom(r.id)} className="px-4 py-2 rounded-2xl bg-blue-600 text-white font-extrabold">
-                    参加
-                  </button>
-                </div>
-              )) : (
-                <div className="text-slate-500 mt-2">待機中のルームがありません</div>
-              )}
-            </div>
-          </div>
-
-          <div className="mt-4 text-xs text-slate-500">
-            役の強さ：ピンゾロ ＞ シゴロ(4-5-6) ＞ ゾロ目 ＞ 目(2つ同じ) ＞ 役なし ＞ ヒフミ(1-2-3)
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ルーム画面
-  const isHost = room?.hostId === user.uid;
-  const meDice = isHost ? room?.hostDice : room?.guestDice;
-  const meTemp = isHost ? room?.hostTempDice : room?.guestTempDice;
-  const meLeft = isHost ? room?.hostRollsLeft : room?.guestRollsLeft;
-
-  const otherDice = isHost ? room?.guestDice : room?.hostDice;
-  const otherHand = isHost ? room?.guestHand : room?.hostHand;
-
-  const myHand = isHost ? room?.hostHand : room?.guestHand;
-
-  const showDice = (d) => d ? d.map((x) => FACE[x]).join(" ") : "—";
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center">
-      <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-4">
-        <div className="flex items-center justify-between">
-          <div className="text-lg font-extrabold">チンチロ ルーム</div>
-          <button onClick={leaveRoom} className="font-bold text-slate-600">✕</button>
-        </div>
-
-        <div className="mt-2 text-xs text-slate-500">ルームID: {roomId} / ベット: {room?.bet || 0} / 状態: {room?.status}</div>
-
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <div className="p-3 rounded-2xl bg-slate-50">
-            <div className="text-xs font-bold text-slate-600">あなた</div>
-            <div className="mt-2 text-2xl font-extrabold">{showDice(meDice || meTemp)}</div>
-            <div className="mt-1 text-xs text-slate-500">{myHand ? myHand.name : "未確定"}</div>
-            <div className="mt-1 text-xs text-slate-500">残り {meLeft ?? 3} 回</div>
-          </div>
-          <div className="p-3 rounded-2xl bg-slate-50">
-            <div className="text-xs font-bold text-slate-600">相手</div>
-            <div className="mt-2 text-2xl font-extrabold">{showDice(otherDice)}</div>
-            <div className="mt-1 text-xs text-slate-500">{otherHand ? otherHand.name : "未確定"}</div>
-          </div>
-        </div>
-
-        {room?.status !== "finished" ? (
-          <div className="mt-4 space-y-2">
-            <button
-              onClick={doRoll}
-              disabled={rolling || !!meDice || (meLeft ?? 0) <= 0}
-              className={`w-full py-3 rounded-2xl font-extrabold ${(!meDice && (meLeft ?? 0) > 0) ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-500"}`}
-            >
-              サイコロを振る
-            </button>
-            <button
-              onClick={confirmDice}
-              disabled={!!meDice || !meTemp}
-              className={`w-full py-3 rounded-2xl font-extrabold ${(meTemp && !meDice) ? "bg-green-600 text-white" : "bg-slate-200 text-slate-500"}`}
-            >
-              この目で確定
-            </button>
-            <div className="text-xs text-slate-500 text-center">※ 確定すると変更できません。両者確定で自動精算。</div>
-          </div>
-        ) : (
-          <div className="mt-4 p-3 rounded-2xl bg-amber-50 border border-amber-100">
-            <div className="font-extrabold">
-              {room?.winner === "draw" ? "引き分け（ベット返金）" : (room?.winner === user.uid ? "あなたの勝ち！" : "あなたの負け…")}
-            </div>
-            <div className="text-xs text-slate-600 mt-1">
-              勝者は +{(room?.bet || 0) * 2} コイン（引き分けは双方+{room?.bet || 0}）
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const PachinkoView = ({ user, profile, onBack, showNotification }) => {
-  const [isSpinning, setIsSpinning] = useState(false);
-  const [lastResult, setLastResult] = useState(null);
-  const [chinchiroOpen, setChinchiroOpen] = useState(false);
-  const [reels, setReels] = useState(["🍒", "🔔", "7"]);
-  const [stopped, setStopped] = useState([true, true, true]); // 初期は止まっている扱い
-  const spinTimerRef = useRef(null);
-  const stoppedRef = useRef([true, true, true]);
-  const slotCooldownUntilRef = useRef(0);
-  const spinIdRef = useRef(null);
-  const finishingRef = useRef(false);
-
-  const COST = 100;
-  const WIN = 2000;
-  const SLOT_MIN_INTERVAL_MS = 1200; // 連打防止
-  const QUOTA_BACKOFF_MS = 30_000;
-
-  const SYMBOLS = useMemo(() => ["🍒", "🍋", "🔔", "💎", "BAR", "7"], []);
-
-  const randSymbol = useCallback(() => {
-    return SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
-  }, [SYMBOLS]);
-
-  const stopSpinAnimation = () => {
-    if (spinTimerRef.current) {
-      clearInterval(spinTimerRef.current);
-      spinTimerRef.current = null;
-    }
-  };
-
-  const startSpinAnimation = () => {
-    stopSpinAnimation();
-    spinTimerRef.current = setInterval(() => {
-      setReels((prev) => prev.map((v, i) => (stoppedRef.current[i] ? v : randSymbol())));
-    }, 90);
-  };
-
-  useEffect(() => {
-    return () => stopSpinAnimation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const canPlay = !isSpinning && (profile?.wallet || 0) >= COST;
-
-  const beginPlay = async () => {
-    const now = Date.now();
-    if (now < slotCooldownUntilRef.current) {
-      const sec = Math.ceil((slotCooldownUntilRef.current - now) / 1000);
-      return showNotification(`しばらく待ってから再試行してください（あと${sec}秒）`);
-    }
-    if ((profile?.wallet || 0) < COST) return showNotification("コイン残高が足りません（1回=100コイン）");
-    if (isSpinning) return;
-
-    slotCooldownUntilRef.current = now + SLOT_MIN_INTERVAL_MS;
-
-    // 先にコストを引く（途中で中断しても返金しない仕様）
-    try {
-      const spinId = now;
-      spinIdRef.current = spinId;
-      finishingRef.current = false;
-
-      await runTransaction(db, async (t) => {
-        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-        const uDoc = await t.get(userRef);
-        if (!uDoc.exists()) {
-          t.set(userRef, {
-            uid: user.uid,
-            displayName: user.displayName || "",
-            photoURL: user.photoURL || "",
-            wallet: 0,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }, { merge: true });
-        }
-        const current = (uDoc.exists() ? (uDoc.data().wallet || 0) : 0);
-        if (current < COST) throw new Error("残高不足");
-        const lastMs = uDoc.exists() ? (uDoc.data().slotLastPlayedMs || 0) : 0;
-        const nowMs = Date.now();
-        if (nowMs - lastMs < SLOT_MIN_INTERVAL_MS) throw new Error("操作が早すぎます");
-        t.update(userRef, { slotLastPlayedMs: nowMs });
-        t.update(userRef, { wallet: increment(-COST) });
-        t.update(userRef, {
-          slotPlays: increment(1),
-          slotSpinId: spinId,
-          slotSpinState: "spinning",
-          updatedAt: serverTimestamp()
-        });
-      });
-
-      // スタート
-      setIsSpinning(true);
-      setLastResult(null);
-      setStopped([false, false, false]);
-      stoppedRef.current = [false, false, false];
-      startSpinAnimation();
-      showNotification("スロット開始！順番にSTOPしてください");
-    } catch (e) {
-      console.error(e);
-      const msg = (e && typeof e === "object" && "message" in e) ? e.message : (typeof e === "string" ? e : String(e));
-      const lower = (msg || "").toLowerCase();
-      if (lower.includes("quota") || lower.includes("resource_exhausted") || lower.includes("resource-exhausted") || lower.includes("exceeded")) {
-        slotCooldownUntilRef.current = Date.now() + QUOTA_BACKOFF_MS;
-        showNotification("混雑しています。30秒ほど待ってからもう一度お試しください（Quota exceeded）");
-      } else {
-        showNotification(msg || "開始に失敗しました");
-      }
-    }
-  };
-
-  const finalize = async () => {
-    if (finishingRef.current) return;
-    finishingRef.current = true;
-
-    stopSpinAnimation();
-    setIsSpinning(false);
-
-    const a = reels[0];
-    const b = reels[1];
-    const c = reels[2];
-    const isWin = a === b && b === c;
-
-    try {
-      const spinId = spinIdRef.current;
-      await runTransaction(db, async (t) => {
-        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-        const uDoc = await t.get(userRef);
-        if (!uDoc.exists()) throw new Error("ユーザー情報が見つかりません");
-        const data = uDoc.data() || {};
-        // 二重支払い防止
-        if (data.slotSpinId !== spinId || data.slotSpinState !== "spinning") return;
-
-        if (isWin) {
-          t.update(userRef, { wallet: increment(WIN) });
-          t.update(userRef, { slotWins: increment(1) });
-        }
-
-        t.update(userRef, {
-          slotSpinId: null,
-          slotSpinState: "idle",
-          slotLastResult: { a, b, c, win: isWin, payout: isWin ? WIN : 0, at: Date.now() },
-          updatedAt: serverTimestamp()
-        });
-      });
-
-      const payout = isWin ? WIN : 0;
-      const delta = payout - COST;
-      setLastResult({ cost: COST, win: isWin, payout, delta, reels: [a, b, c] });
-      showNotification(isWin ? `当たり！ +${WIN}コイン` : "ハズレ…");
-    } catch (e) {
-      console.error(e);
-      showNotification((e && e.message) ? e.message : "結果確定に失敗しました");
-    }
-  };
-
-  const stopReel = (idx) => {
-    if (!isSpinning) return;
-    if (stoppedRef.current[idx]) return;
-
-    const next = [...stoppedRef.current];
-    next[idx] = true;
-    stoppedRef.current = next;
-    setStopped(next);
-
-    // 最後の停止で確定
-    if (next[0] && next[1] && next[2]) {
-      finalize();
-    }
-  };
-
-  return (
-    <div className="h-full flex flex-col">
-      <div className="px-4 pt-4 pb-3 flex items-center justify-between">
-        <button onClick={onBack} className="text-slate-600 font-bold">← 戻る</button>
-        <div className="text-xl font-extrabold">スロット</div>
-        <div className="text-slate-600 font-bold">残高: {profile?.wallet || 0}</div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-4 pb-24">
-        <div className="rounded-3xl bg-white border shadow-sm p-4">
-          <div className="text-sm text-slate-600 font-bold mb-2">1回 {COST} コイン / 当たり {WIN} コイン</div>
-
-          <div className="grid grid-cols-3 gap-3 items-center justify-center">
-            {reels.map((s, i) => (
-              <div key={i} className="rounded-2xl border bg-slate-50 h-24 flex items-center justify-center text-3xl font-extrabold">
-                {s}
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-4 grid grid-cols-3 gap-3">
-            {[0, 1, 2].map((i) => (
-              <button
-                key={i}
-                onClick={() => stopReel(i)}
-                disabled={!isSpinning || stopped[i]}
-                className={`py-2 rounded-2xl font-extrabold ${(!isSpinning || stopped[i]) ? "bg-slate-100 text-slate-400" : "bg-red-500 text-white active:scale-[0.99]"}`}
-              >
-                STOP
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-4 flex gap-2">
-            <button
-              onClick={beginPlay}
-              disabled={!canPlay}
-              className={`flex-1 py-3 rounded-2xl font-extrabold ${canPlay ? "bg-green-600 text-white" : "bg-slate-200 text-slate-500"}`}
-            >
-              SPIN
-            </button>
-            <button
-              onClick={() => {
-                // 中断（結果は確定しない＝コストは消費済み）
-                stopSpinAnimation();
-                setIsSpinning(false);
-                setStopped([true, true, true]);
-                stoppedRef.current = [true, true, true];
-                showNotification("中断しました");
-              }}
-              disabled={!isSpinning}
-              className={`px-4 py-3 rounded-2xl font-extrabold ${isSpinning ? "bg-slate-100 text-slate-700" : "bg-slate-50 text-slate-300"}`}
-            >
-              中断
-            </button>
-          </div>
-
-          <button
-            onClick={() => setChinchiroOpen(true)}
-            className="mt-3 w-full py-3 rounded-2xl font-extrabold bg-indigo-600 text-white"
-          >
-            オンライン チンチロ
-          </button>
-
-          {lastResult ? (
-            <div
-              className={`mt-4 p-3 rounded-2xl font-bold ${lastResult.win ? "bg-green-50 text-green-700" : "bg-slate-100 text-slate-700"}`}
-            >
-              {lastResult.message || (lastResult.win ? "当たり！+2000コイン" : "はずれ")}
-            </div>
-          ) : null}
-
-          {chinchiroOpen ? (
-            <ChinchiroPanel
-              user={user}
-              profile={profile}
-              showNotification={showNotification}
-              onClose={() => setChinchiroOpen(false)}
-            />
-};
-
+// ===================== /Coin Arcade =====================
 
 function App() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [view, setView] = useState("auth");
+  // If URL hash is "#coin-arcade", open Coin Arcade without changing existing UI by default.
+  useEffect(() => {
+    const applyHash = () => {
+      if (typeof window !== "undefined" && window.location && window.location.hash === "#coin-arcade") {
+        setView("coin-arcade");
+      }
+    };
+    applyHash();
+    window.addEventListener("hashchange", applyHash);
+    return () => window.removeEventListener("hashchange", applyHash);
+  }, []);
+
   const [activeChatId, setActiveChatId] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
   const [chats, setChats] = useState([]);
@@ -6804,8 +7555,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           name: profile?.name || user.displayName || "",
           joinedAt: serverTimestamp(),
           videoEnabled: !!isVideo,
-          screenSharing: false,
-          effect: activeEffect || "Normal"
+          screenSharing: false
         }, { merge: true });
       } catch (e) {
         console.warn("Failed to join group call presence (non-fatal):", e);
@@ -6835,8 +7585,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           callerId: user.uid,
           callType,
           sessionId,
-          timestamp: Date.now(),
-          effects: { [user.uid]: activeEffect || "Normal" }
+          timestamp: Date.now()
         }
       });
 
@@ -6882,8 +7631,7 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           callerId: user.uid,
           callType,
           sessionId,
-          timestamp: Date.now(),
-          effects: { [user.uid]: activeEffect || "Normal" }
+          timestamp: Date.now()
         }
       });
       setActiveCall({
@@ -6925,7 +7673,6 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
       const callData = activeCallChat?.callStatus || activeCall.callData || {};
       const nextCallData = {
         ...callData,
-        effects: { ...(callData?.effects || {}), [user.uid]: activeEffect || "Normal" },
         status: "accepted",
         callerId: callData.callerId,
         callType: callData.callType || (activeCall?.isVideo ? "video" : "audio"),
@@ -6962,33 +7709,6 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
     }
     return activeCall.phase || null;
   }, [activeCall, syncedCallData, user?.uid]);
-
-  // Sync video effect to the other side (so the effect is visible on both clients)
-  useEffect(() => {
-    if (!user?.uid) return;
-    if (!activeCall) return;
-    if (effectiveCallPhase !== "inCall") return;
-    const chatId = activeCall.chatId;
-    const sessionId = syncedCallData?.sessionId || activeCall?.callData?.sessionId || null;
-
-    const timer = setTimeout(async () => {
-      try {
-        if (activeCall.isGroupCall) {
-          if (!sessionId) return;
-          const pRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId, "group_calls", sessionId, "participants", user.uid);
-          await setDoc(pRef, { effect: activeEffect || "Normal", updatedAt: serverTimestamp() }, { merge: true });
-        } else {
-          const chatRef = doc(db, "artifacts", appId, "public", "data", "chats", chatId);
-          await updateDoc(chatRef, { [`callStatus.effects.${user.uid}`]: activeEffect || "Normal", "callStatus.updatedAt": Date.now() });
-        }
-      } catch (e) {
-        console.warn("Failed to sync effect (non-fatal):", e);
-      }
-    }, 250);
-
-    return () => clearTimeout(timer);
-  }, [activeEffect, activeCall?.chatId, activeCall?.isGroupCall, syncedCallData?.sessionId, effectiveCallPhase, user?.uid]);
-
   return /* @__PURE__ */ jsx("div", { className: "w-full h-[100dvh] bg-[#d7dbe1] flex justify-center overflow-hidden", children: /* @__PURE__ */ jsxs("div", { className: "w-[430px] max-w-full h-[100dvh] bg-[#f3f4f6] border-x border-gray-300 flex flex-col relative overflow-hidden", children: [
     notification && /* @__PURE__ */ jsx("div", { className: "fixed top-10 left-1/2 -translate-x-1/2 z-[300] bg-black/85 text-white px-6 py-2 rounded-full text-xs font-bold shadow-2xl animate-bounce", children: notification }),
     !user ? /* @__PURE__ */ jsx(AuthView, { onLogin: setUser, showNotification }) : /* @__PURE__ */ jsxs(Fragment, { children: [
@@ -7042,9 +7762,8 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
             ef.name
           ] }, ef.id))
         ] })
-      ] }) : /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden relative pb-24", children: [
+      ] }) : /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden relative", children: [
         view === "home" && /* @__PURE__ */ jsx(HomeView, { user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }),
-        view === "news" && /* @__PURE__ */ jsx(News, {}),
         view === "voom" && /* @__PURE__ */ jsx(VoomView, { user, allUsers, profile, posts, showNotification, db, appId, onLoadMore: loadMorePosts, hasMore: postsHasMore, loadingMore: postsLoadingMore }),
         view === "chatroom" && /* @__PURE__ */ jsx(ChatRoomView, { user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db, appId, mutedChats, toggleMuteChat, showNotification, addFriendById, startChatWithUser, startVideoCall }),
         view === "profile" && /* @__PURE__ */ jsx(ProfileEditView, { user, profile, setView, showNotification, copyToClipboard }),
@@ -7053,8 +7772,9 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
         view === "birthday-cards" && /* @__PURE__ */ jsx(BirthdayCardBox, { user, setView }),
         view === "sticker-create" && /* @__PURE__ */ jsx(StickerEditor, { user, profile, onClose: () => setView("sticker-store"), showNotification }),
         view === "sticker-store" && /* @__PURE__ */ jsx(StickerStoreView, { user, setView, showNotification, profile, allUsers }),
+        view === "coin-arcade" && /* @__PURE__ */ jsx(CoinArcadeView, { onBack: () => setView("home") }),
         view === "pachinko" && /* @__PURE__ */ jsx(PachinkoView, { user, profile, onBack: () => setView("home"), showNotification }),
-        view === "minigame" && /* @__PURE__ */ jsx(DiceMiniGameView, { user, invite: miniGameInvite, onBack: () => { setView("home"); setMiniGameInvite(null); setMiniGameInviteFrom(null); }, showNotification, profile })
+        view === "minigame" && /* @__PURE__ */ jsx(ShootingMiniGameView, { user, invite: miniGameInvite, onBack: () => { setView("home"); setMiniGameInvite(null); setMiniGameInviteFrom(null); }, showNotification })
       ] }),
       miniGameInvite && view !== "minigame" && /* @__PURE__ */ jsx(MiniGameInviteModal, {
         invite: miniGameInvite,
@@ -7090,14 +7810,10 @@ const leaveGroupCall = async (chatId, sessionId, { forceClear = false } = {}) =>
           /* @__PURE__ */ jsx("button", { className: "flex-1 py-4 bg-green-500 text-white rounded-2xl font-bold", onClick: () => addFriendById(searchQuery), children: "\u8FFD\u52A0" })
         ] })
       ] }) }),
-      user && !activeCall && ["home","news","voom","pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] h-20 bg-white border-t shadow-[0_-2px_10px_rgba(0,0,0,0.06)] flex items-center justify-around z-50 pt-2 rounded-t-[20px]", style: { paddingBottom: "calc(env(safe-area-inset-bottom) + 8px)" }, children: [
+      user && !activeCall && ["home", "voom", "pachinko"].includes(view) && /* @__PURE__ */ jsxs("div", { className: "h-20 bg-white border-t flex items-center justify-around z-50 pb-4 shrink-0", children: [
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "home" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("home"), children: [
           /* @__PURE__ */ jsx(Home, { className: "w-6 h-6" }),
           /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u30DB\u30FC\u30E0" })
-        ] }),
-        /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "news" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("news"), children: [
-          /* @__PURE__ */ jsx(FileText, { className: "w-6 h-6" }),
-          /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold", children: "\u30CB\u30E5\u30FC\u30B9" })
         ] }),
         /* @__PURE__ */ jsxs("div", { className: `flex flex-col items-center gap-1 cursor-pointer transition-all ${view === "voom" ? "text-green-500" : "text-gray-400"}`, onClick: () => setView("voom"), children: [
           /* @__PURE__ */ jsx(LayoutGrid, { className: "w-6 h-6" }),
