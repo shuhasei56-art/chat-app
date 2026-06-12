@@ -3876,6 +3876,7 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
 function LiveStreamModal({ open, onClose, user }) {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const modalRef = useRef(null);
 
   const localStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
@@ -3904,6 +3905,7 @@ function LiveStreamModal({ open, onClose, user }) {
   const [chatText, setChatText] = useState("");
   const [chatLog, setChatLog] = useState([]);
   const [flowComments, setFlowComments] = useState([]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const uid = user?.uid || auth.currentUser?.uid || null;
 
@@ -4377,6 +4379,28 @@ function LiveStreamModal({ open, onClose, user }) {
     }
   }, [roomId, pushChat]);
 
+  const toggleFullscreen = useCallback(async () => {
+    const next = !isFullscreen;
+    setIsFullscreen(next);
+    try {
+      if (next && modalRef.current?.requestFullscreen && !document.fullscreenElement) {
+        await modalRef.current.requestFullscreen();
+      } else if (!next && document.fullscreenElement && document.exitFullscreen) {
+        await document.exitFullscreen();
+      }
+    } catch (e) {
+      // ブラウザや環境によってFullscreen APIが使えない場合は、CSS全画面だけで表示します。
+    }
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    const onFs = () => {
+      if (!document.fullscreenElement) setIsFullscreen(false);
+    };
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+
   // Close behavior
   useEffect(() => {
     if (!open) return;
@@ -4395,7 +4419,7 @@ function LiveStreamModal({ open, onClose, user }) {
 
   if (!open) return null;
 
-  return /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4", children: /* @__PURE__ */ jsxs("div", { className: "w-full max-w-3xl bg-white rounded-3xl shadow-2xl overflow-hidden", children: [
+  return /* @__PURE__ */ jsx("div", { className: `fixed inset-0 z-50 bg-black/60 flex items-center justify-center ${isFullscreen ? "p-0" : "p-4"}`, children: /* @__PURE__ */ jsxs("div", { ref: modalRef, className: `${isFullscreen ? "w-screen h-screen max-w-none rounded-none flex flex-col" : "w-full max-w-3xl rounded-3xl"} bg-white shadow-2xl overflow-hidden`, children: [
     /* Header */
     /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between px-4 py-3 border-b", children: [
       /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
@@ -4405,18 +4429,21 @@ function LiveStreamModal({ open, onClose, user }) {
         status === "connecting" && /* @__PURE__ */ jsx("span", { className: "text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full", children: "接続準備中" }),
         status === "error" && /* @__PURE__ */ jsx("span", { className: "text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full", children: "エラー" })
       ] }),
-      /* @__PURE__ */ jsx("button", { onClick: async () => {
-        await fullCleanup();
-        onClose();
-      }, className: "p-2 rounded-xl hover:bg-gray-100", children: /* @__PURE__ */ jsx(X, { className: "w-5 h-5" }) })
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ jsx("button", { onClick: toggleFullscreen, className: "p-2 rounded-xl hover:bg-gray-100", title: isFullscreen ? "全画面を解除" : "全画面表示", "aria-label": isFullscreen ? "全画面を解除" : "全画面表示", children: /* @__PURE__ */ jsx(Maximize, { className: "w-5 h-5" }) }),
+        /* @__PURE__ */ jsx("button", { onClick: async () => {
+          await fullCleanup();
+          onClose();
+        }, className: "p-2 rounded-xl hover:bg-gray-100", children: /* @__PURE__ */ jsx(X, { className: "w-5 h-5" }) })
+      ] })
     ] }),
 
     /* Body */
-    /* @__PURE__ */ jsxs("div", { className: "p-4 grid grid-cols-1 md:grid-cols-2 gap-4", children: [
+    /* @__PURE__ */ jsxs("div", { className: `${isFullscreen ? "p-4 grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1 overflow-y-auto" : "p-4 grid grid-cols-1 md:grid-cols-2 gap-4"}`, children: [
       /* Left: video */
       /* @__PURE__ */ jsxs("div", { className: "space-y-3", children: [
         /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-gray-700", children: role === "host" ? "配信プレビュー（Host）" : "視聴（Viewer）" }),
-        /* @__PURE__ */ jsx("div", { className: "relative bg-black rounded-3xl overflow-hidden aspect-video", children: role === "host" ? /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover" }) : /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover" }) }),
+        /* @__PURE__ */ jsx("div", { className: `${isFullscreen ? "relative bg-black rounded-3xl overflow-hidden min-h-[45vh] lg:min-h-[60vh]" : "relative bg-black rounded-3xl overflow-hidden aspect-video"}`, children: role === "host" ? /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover" }) : /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover" }) }),
         /* Controls */
         /* @__PURE__ */ jsxs("div", { className: "flex flex-wrap gap-2", children: [
           /* @__PURE__ */ jsx("button", { onClick: toggleMic, className: `px-3 py-2 rounded-2xl font-bold flex items-center gap-2 ${micOn ? "bg-gray-100 hover:bg-gray-200" : "bg-red-100 hover:bg-red-200 text-red-700"}`, children: micOn ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(Mic, { className: "w-4 h-4" }), "MIC"] }) : /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(MicOff, { className: "w-4 h-4" }), "MIC"] }) }),
@@ -5111,7 +5138,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       setBuyStickerModalPackId(null);
     } }),
     aiEffectModalOpen && /* @__PURE__ */ jsx(AIEffectGenerator, { user, onClose: () => setAiEffectModalOpen(false), showNotification }),
-    liveModalOpen && /* @__PURE__ */ jsx(LiveStreamModal, { open: liveModalOpen, onClose: () => setLiveModalOpen(false) }),
+    liveModalOpen && /* @__PURE__ */ jsx(LiveStreamModal, { open: liveModalOpen, onClose: () => setLiveModalOpen(false), user }),
     !groupSettingsOpen && plusMenuOpen && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-16 left-4 right-4 bg-white rounded-3xl p-4 shadow-2xl grid grid-cols-4 gap-4 animate-in slide-in-from-bottom-4 z-20", children: [
       /* @__PURE__ */ jsxs("label", { className: "flex flex-col items-center gap-2 cursor-pointer", children: [
         /* @__PURE__ */ jsx("div", { className: "p-3 bg-green-50 rounded-2xl", children: /* @__PURE__ */ jsx(ImageIcon, { className: "w-6 h-6 text-green-500" }) }),
@@ -6047,7 +6074,7 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
             showNotification
           }
         ),
-        liveModalOpen && /* @__PURE__ */ jsx(LiveStreamModal, { open: liveModalOpen, onClose: () => setLiveModalOpen(false) })
+        liveModalOpen && /* @__PURE__ */ jsx(LiveStreamModal, { open: liveModalOpen, onClose: () => setLiveModalOpen(false), user })
       ]
     }
   );
