@@ -3860,6 +3860,737 @@ const StickerStoreView = ({ user, setView, showNotification, profile, allUsers }
     ] }) })
   ] });
 };
+
+/* =========================
+   LIVE配信（P2P WebRTC）追加
+   - サーバー不要の簡易シグナリング（オファー/アンサーのコピペ方式）
+   - 1対1のライブ配信/通話を想定（複数視聴や大規模配信にはSFU等が必要）
+   ========================= */
+/* =========================
+   LIVE配信（WebRTC + Firestore シグナリング / public data path 修正版）
+   - 1人(Host)が開催したルームに複数人(Viewer)が参加して視聴できる
+   - 構成：Hostが各Viewerと個別にP2P接続（メッシュ）
+     ※少人数向け。大量視聴はSFU(例: mediasoup/LiveKit)が必要
+   - 既存UI/機能には触れず、LIVEモーダルのみ拡張
+   ========================= */
+function LiveStreamModal({ open, onClose, user }) {
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const modalRef = useRef(null);
+
+  const localStreamRef = useRef(null);
+  const screenStreamRef = useRef(null);
+
+  // Host: viewerUid -> { pc, dc, unsubs: [...] }
+  const hostPeersRef = useRef(new Map());
+  const roomUnsubsRef = useRef([]);
+
+  // Viewer:
+  const viewerPcRef = useRef(null);
+  const viewerDcRef = useRef(null);
+  const viewerUnsubsRef = useRef([]);
+
+  const [role, setRole] = useState("host"); // host | viewer
+  const [status, setStatus] = useState("idle"); // idle | ready | connecting | connected | ended | error
+  const [error, setError] = useState(null);
+
+  const [roomId, setRoomId] = useState("");
+  const [joinRoomId, setJoinRoomId] = useState("");
+
+  const [micOn, setMicOn] = useState(true);
+  const [camOn, setCamOn] = useState(true);
+  const [paused, setPaused] = useState(false);
+  const [screenOn, setScreenOn] = useState(false);
+
+  const [chatText, setChatText] = useState("");
+  const [chatLog, setChatLog] = useState([]);
+  const [flowComments, setFlowComments] = useState([]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const uid = user?.uid || auth.currentUser?.uid || null;
+
+  const rtcConfig = useMemo(() => ({
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" }
+    ]
+  }), []);
+
+  const pushChat = useCallback((who, text) => {
+    const msg = { id: `${Date.now()}_${Math.random()}`, who, text, ts: Date.now() };
+    setChatLog((prev) => [...prev, msg]);
+    setFlowComments((prev) => [...prev, { ...msg, x: Math.random() * 60 + 10 }]);
+    // 自動で消す
+    setTimeout(() => {
+      setFlowComments((prev) => prev.filter((x) => x.id !== msg.id));
+    }, 8000);
+  }, []);
+
+  const attachLocalPreview = useCallback(() => {
+    if (localVideoRef.current && localStreamRef.current) {
+      localVideoRef.current.srcObject = localStreamRef.current;
+    }
+  }, []);
+
+  const attachRemote = useCallback((stream) => {
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = stream;
+    }
+  }, []);
+
+  const stopTracks = (stream) => {
+    try {
+      stream?.getTracks?.().forEach((t) => t.stop());
+    } catch (e) {
+    }
+  };
+
+  const cleanupHostPeers = useCallback(async () => {
+    for (const [viewerUid, peer] of hostPeersRef.current.entries()) {
+      try { peer.unsubs?.forEach((u) => u && u()); } catch (e) {}
+      try { peer.dc?.close?.(); } catch (e) {}
+      try { peer.pc?.close?.(); } catch (e) {}
+    }
+    hostPeersRef.current.clear();
+  }, []);
+
+  const cleanupViewer = useCallback(async () => {
+    try { viewerUnsubsRef.current.forEach((u) => u && u()); } catch (e) {}
+    viewerUnsubsRef.current = [];
+    try { viewerDcRef.current?.close?.(); } catch (e) {}
+    viewerDcRef.current = null;
+    try { viewerPcRef.current?.close?.(); } catch (e) {}
+    viewerPcRef.current = null;
+  }, []);
+
+  const cleanupRoomUnsubs = useCallback(() => {
+    try { roomUnsubsRef.current.forEach((u) => u && u()); } catch (e) {}
+    roomUnsubsRef.current = [];
+  }, []);
+
+  const fullCleanup = useCallback(async () => {
+    cleanupRoomUnsubs();
+    await cleanupHostPeers();
+    await cleanupViewer();
+    stopTracks(screenStreamRef.current);
+    screenStreamRef.current = null;
+    stopTracks(localStreamRef.current);
+    localStreamRef.current = null;
+    setScreenOn(false);
+    setStatus("ended");
+  }, [cleanupHostPeers, cleanupRoomUnsubs, cleanupViewer]);
+
+  const makeFallbackStream = useCallback(() => {
+    try {
+      if (typeof document !== "undefined" && document.createElement) {
+        const canvas = document.createElement("canvas");
+        canvas.width = 640;
+        canvas.height = 360;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.fillStyle = "#240000";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "bold 28px sans-serif";
+          ctx.fillText("LIVE", 28, 56);
+          ctx.font = "18px sans-serif";
+          ctx.fillText("カメラを使用できません", 28, 92);
+        }
+        if (canvas.captureStream) return canvas.captureStream(10);
+      }
+    } catch (e) {}
+    try { return new MediaStream(); } catch (e) { return null; }
+  }, []);
+
+  const ensureLocalStream = useCallback(async () => {
+    if (localStreamRef.current) return localStreamRef.current;
+    setError(null);
+
+    let s = null;
+    try {
+      if (!navigator?.mediaDevices?.getUserMedia) {
+        throw new Error("このブラウザではカメラ/マイクを取得できません。HTTPSで開いてください。");
+      }
+      s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    } catch (e1) {
+      try {
+        if (navigator?.mediaDevices?.getUserMedia) {
+          s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          setError("マイクなしで配信を開始しました。" + (e1?.message ? `（${e1.message}）` : ""));
+        }
+      } catch (e2) {
+        s = makeFallbackStream();
+        setError("カメラを取得できなかったため、仮の画面で配信を開始します。ブラウザのカメラ許可を確認してください。" + (e2?.message ? `（${e2.message}）` : ""));
+      }
+    }
+
+    if (!s) {
+      setError("配信用の映像を作成できませんでした。ブラウザを更新して再度お試しください。");
+      setStatus("error");
+      throw new Error("No local stream available");
+    }
+
+    localStreamRef.current = s;
+    try { s.getAudioTracks?.().forEach((t) => t.enabled = !!micOn); } catch (e) {}
+    try { s.getVideoTracks?.().forEach((t) => t.enabled = !!camOn && !paused); } catch (e) {}
+    attachLocalPreview();
+    return s;
+  }, [attachLocalPreview, makeFallbackStream, micOn, camOn, paused]);
+
+  // ---- Host: room create / manage
+  const createRoom = useCallback(async () => {
+    if (!uid) {
+      setError("ログイン状態が確認できません（uidがありません）");
+      setStatus("error");
+      return;
+    }
+    if (typeof RTCPeerConnection === "undefined") {
+      setError("このブラウザでは配信機能（WebRTC）が使えません。Chrome / Edge / Safari の最新版で開いてください。");
+      setStatus("error");
+      return;
+    }
+    setStatus("connecting");
+    await ensureLocalStream();
+
+    try {
+      // ルーム作成
+      const roomDocRef = doc(collection(db, "artifacts", appId, "public", "data", "liveRooms"));
+      const rid = roomDocRef.id;
+      setRoomId(rid);
+
+      await setDoc(roomDocRef, {
+        hostUid: uid,
+        createdAt: serverTimestamp(),
+        status: "open"
+      });
+
+      // Viewer一覧監視（参加したら個別に接続作成）
+      const viewersColRef = collection(db, "artifacts", appId, "public", "data", "liveRooms", rid, "viewers");
+      const unsubViewers = onSnapshot(viewersColRef, async (snap) => {
+        for (const ch of snap.docChanges()) {
+          if (ch.type === "added") {
+            const vUid = ch.doc.id;
+            if (vUid === uid) continue;
+            if (hostPeersRef.current.has(vUid)) continue;
+            try {
+              await hostConnectViewer({ rid, viewerUid: vUid });
+            } catch (e) {
+              setError("Viewer接続エラー: " + (e?.message || String(e)));
+              setStatus("error");
+            }
+          }
+          if (ch.type === "removed") {
+            const vUid = ch.doc.id;
+            const peer = hostPeersRef.current.get(vUid);
+            if (peer) {
+              try { peer.unsubs?.forEach((u) => u && u()); } catch (e) {}
+              try { peer.dc?.close?.(); } catch (e) {}
+              try { peer.pc?.close?.(); } catch (e) {}
+              hostPeersRef.current.delete(vUid);
+            }
+          }
+        }
+      }, (e) => {
+        setError("配信ルーム監視エラー: " + (e?.message || String(e)));
+        setStatus("error");
+      });
+
+      roomUnsubsRef.current.push(unsubViewers);
+      setStatus("connected");
+    } catch (e) {
+      setError(e?.message || String(e));
+      setStatus("error");
+    }
+  }, [db, ensureLocalStream, uid]);
+
+  const hostConnectViewer = useCallback(async ({ rid, viewerUid }) => {
+    const pc = new RTCPeerConnection(rtcConfig);
+    const peer = { pc, dc: null, unsubs: [] };
+    hostPeersRef.current.set(viewerUid, peer);
+
+    // local tracks
+    const s = localStreamRef.current;
+    if (s) {
+      s.getTracks().forEach((t) => pc.addTrack(t, s));
+    }
+
+    // DataChannel（チャット用）
+    const dc = pc.createDataChannel("chat");
+    peer.dc = dc;
+
+    dc.onopen = () => {
+      pushChat("system", `Viewer(${viewerUid.slice(0, 6)}) が接続しました`);
+    };
+    dc.onmessage = (ev) => {
+      const txt = String(ev.data || "");
+      pushChat(`viewer:${viewerUid.slice(0, 6)}`, txt);
+      // 受け取ったコメントは他Viewerにも中継（便利機能：全員に見える）
+      for (const [k, p] of hostPeersRef.current.entries()) {
+        if (k !== viewerUid && p?.dc?.readyState === "open") {
+          try { p.dc.send(txt); } catch (e) {}
+        }
+      }
+    };
+    dc.onclose = () => {
+      pushChat("system", `Viewer(${viewerUid.slice(0, 6)}) が切断しました`);
+    };
+
+    // Firestore signaling doc:
+    const connDocRef = doc(db, "artifacts", appId, "public", "data", "liveRooms", rid, "connections", viewerUid);
+    const hostCandCol = collection(db, "artifacts", appId, "public", "data", "liveRooms", rid, "connections", viewerUid, "hostCandidates");
+    const viewerCandCol = collection(db, "artifacts", appId, "public", "data", "liveRooms", rid, "connections", viewerUid, "viewerCandidates");
+
+    // ICE candidates (host -> hostCandidates)
+    pc.onicecandidate = async (event) => {
+      if (event.candidate) {
+        try {
+          await addDoc(hostCandCol, event.candidate.toJSON());
+        } catch (e) {
+        }
+      }
+    };
+
+    // Offer
+    const offer = await pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true });
+    await pc.setLocalDescription(offer);
+    await setDoc(connDocRef, {
+      createdAt: serverTimestamp(),
+      viewerUid,
+      offer: {
+        type: offer.type,
+        sdp: offer.sdp
+      }
+    }, { merge: true });
+
+    // Watch for answer
+    const unsubAnswer = onSnapshot(connDocRef, async (snap) => {
+      const data = snap.data();
+      if (!data) return;
+      if (data.answer && !pc.currentRemoteDescription) {
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        } catch (e) {
+        }
+      }
+    }, (e) => {
+      setError("アンサー監視エラー: " + (e?.message || String(e)));
+    });
+    peer.unsubs.push(unsubAnswer);
+
+    // Watch viewer ICE candidates
+    const unsubViewerCands = onSnapshot(viewerCandCol, (snap) => {
+      snap.docChanges().forEach(async (ch) => {
+        if (ch.type === "added") {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(ch.doc.data()));
+          } catch (e) {
+          }
+        }
+      });
+    }, (e) => {
+      setError("Viewer ICE監視エラー: " + (e?.message || String(e)));
+    });
+    peer.unsubs.push(unsubViewerCands);
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "failed" || pc.connectionState === "disconnected" || pc.connectionState === "closed") {
+        // cleanup peer
+        const p = hostPeersRef.current.get(viewerUid);
+        if (p) {
+          try { p.unsubs?.forEach((u) => u && u()); } catch (e) {}
+          try { p.dc?.close?.(); } catch (e) {}
+          try { p.pc?.close?.(); } catch (e) {}
+          hostPeersRef.current.delete(viewerUid);
+        }
+      }
+    };
+  }, [db, pushChat, rtcConfig]);
+
+  // ---- Viewer: join room
+  const joinRoom = useCallback(async () => {
+    if (!uid) {
+      setError("ログイン状態が確認できません（uidがありません）");
+      setStatus("error");
+      return;
+    }
+    const rid = (joinRoomId || "").trim();
+    if (!rid) {
+      setError("ルームIDを入力してください");
+      setStatus("error");
+      return;
+    }
+    if (typeof RTCPeerConnection === "undefined") {
+      setError("このブラウザでは視聴機能（WebRTC）が使えません。Chrome / Edge / Safari の最新版で開いてください。");
+      setStatus("error");
+      return;
+    }
+    setStatus("connecting");
+    setError(null);
+
+    try {
+      const roomDocRef = doc(db, "artifacts", appId, "public", "data", "liveRooms", rid);
+      const roomSnap = await getDoc(roomDocRef);
+      if (!roomSnap.exists()) {
+        setError("ルームが見つかりません");
+        setStatus("error");
+        return;
+      }
+
+      // Viewer登録
+      await setDoc(doc(db, "artifacts", appId, "public", "data", "liveRooms", rid, "viewers", uid), {
+        joinedAt: serverTimestamp()
+      }, { merge: true });
+
+      // Connection doc path (viewer uid)
+      const connDocRef = doc(db, "artifacts", appId, "public", "data", "liveRooms", rid, "connections", uid);
+      const hostCandCol = collection(db, "artifacts", appId, "public", "data", "liveRooms", rid, "connections", uid, "hostCandidates");
+      const viewerCandCol = collection(db, "artifacts", appId, "public", "data", "liveRooms", rid, "connections", uid, "viewerCandidates");
+
+      // Create PC
+      const pc = new RTCPeerConnection(rtcConfig);
+      viewerPcRef.current = pc;
+
+      const remoteStream = typeof MediaStream !== "undefined" ? new MediaStream() : null;
+      if (remoteStream) attachRemote(remoteStream);
+
+      pc.ontrack = (event) => {
+        if (!remoteStream) return;
+        event.streams[0]?.getTracks?.().forEach((t) => {
+          try { remoteStream.addTrack(t); } catch (e) {}
+        });
+      };
+
+      pc.ondatachannel = (event) => {
+        viewerDcRef.current = event.channel;
+        event.channel.onmessage = (ev) => {
+          pushChat("host", String(ev.data || ""));
+        };
+      };
+
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          try {
+            await addDoc(viewerCandCol, event.candidate.toJSON());
+          } catch (e) {
+          }
+        }
+      };
+
+      // Listen offer -> answer
+      const unsubConn = onSnapshot(connDocRef, async (snap) => {
+        const data = snap.data();
+        if (!data) return;
+        if (data.offer && !pc.currentRemoteDescription) {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await setDoc(connDocRef, {
+              answer: { type: answer.type, sdp: answer.sdp }
+            }, { merge: true });
+          } catch (e) {
+          }
+        }
+      }, (e) => {
+        setError("接続情報の取得エラー: " + (e?.message || String(e)));
+        setStatus("error");
+      });
+      viewerUnsubsRef.current.push(unsubConn);
+
+      // Listen host ICE
+      const unsubHostCands = onSnapshot(hostCandCol, (snap) => {
+        snap.docChanges().forEach(async (ch) => {
+          if (ch.type === "added") {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(ch.doc.data()));
+            } catch (e) {
+            }
+          }
+        });
+      }, (e) => {
+        setError("Host ICE取得エラー: " + (e?.message || String(e)));
+        setStatus("error");
+      });
+      viewerUnsubsRef.current.push(unsubHostCands);
+
+      setRoomId(rid);
+      setStatus("connected");
+    } catch (e) {
+      setError(e?.message || String(e));
+      setStatus("error");
+    }
+  }, [attachRemote, db, joinRoomId, pushChat, rtcConfig, uid]);
+
+  // ---- Controls
+  const toggleMic = useCallback(() => {
+    setMicOn((v) => {
+      const nv = !v;
+      try {
+        localStreamRef.current?.getAudioTracks?.().forEach((t) => t.enabled = nv);
+      } catch (e) {}
+      return nv;
+    });
+  }, []);
+
+  const toggleCam = useCallback(() => {
+    setCamOn((v) => {
+      const nv = !v;
+      try {
+        localStreamRef.current?.getVideoTracks?.().forEach((t) => t.enabled = nv && !paused);
+      } catch (e) {}
+      return nv;
+    });
+  }, [paused]);
+
+  const togglePause = useCallback(() => {
+    setPaused((v) => {
+      const nv = !v;
+      try {
+        localStreamRef.current?.getVideoTracks?.().forEach((t) => t.enabled = camOn && !nv);
+      } catch (e) {}
+      return nv;
+    });
+  }, [camOn]);
+
+  const toggleScreen = useCallback(async () => {
+    // Host only
+    if (role !== "host") return;
+    if (!screenOn) {
+      try {
+        if (!navigator?.mediaDevices?.getDisplayMedia) throw new Error("このブラウザでは画面共有が使えません。");
+        const ss = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+        screenStreamRef.current = ss;
+        setScreenOn(true);
+
+        // replace video track for all host peers
+        const screenTrack = ss.getVideoTracks()[0];
+        const oldTrack = localStreamRef.current?.getVideoTracks?.()[0] || null;
+
+        for (const [, peer] of hostPeersRef.current.entries()) {
+          try {
+            const sender = peer.pc.getSenders().find((s) => s.track && s.track.kind === "video");
+            if (sender) await sender.replaceTrack(screenTrack);
+          } catch (e) {}
+        }
+
+        // local preview also switches to screen to avoid confusion
+        if (localVideoRef.current) {
+          const previewStream = new MediaStream();
+          previewStream.addTrack(screenTrack);
+          const audioTrack = localStreamRef.current?.getAudioTracks?.()[0];
+          if (audioTrack) previewStream.addTrack(audioTrack);
+          localVideoRef.current.srcObject = previewStream;
+        }
+
+        screenTrack.onended = async () => {
+          // back to camera
+          try { stopTracks(screenStreamRef.current); } catch (e) {}
+          screenStreamRef.current = null;
+          setScreenOn(false);
+          attachLocalPreview();
+          if (oldTrack) {
+            for (const [, peer] of hostPeersRef.current.entries()) {
+              try {
+                const sender = peer.pc.getSenders().find((s) => s.track && s.track.kind === "video");
+                if (sender) await sender.replaceTrack(oldTrack);
+              } catch (e) {}
+            }
+          }
+        };
+      } catch (e) {
+        setError(e?.message || String(e));
+      }
+    } else {
+      // stop screen share
+      try { stopTracks(screenStreamRef.current); } catch (e) {}
+      screenStreamRef.current = null;
+      setScreenOn(false);
+      attachLocalPreview();
+
+      // replace back to camera track
+      const camTrack = localStreamRef.current?.getVideoTracks?.()[0] || null;
+      if (camTrack) {
+        for (const [, peer] of hostPeersRef.current.entries()) {
+          try {
+            const sender = peer.pc.getSenders().find((s) => s.track && s.track.kind === "video");
+            if (sender) await sender.replaceTrack(camTrack);
+          } catch (e) {}
+        }
+      }
+    }
+  }, [attachLocalPreview, role, screenOn]);
+
+  const sendChat = useCallback(() => {
+    const txt = (chatText || "").trim();
+    if (!txt) return;
+    setChatText("");
+
+    if (role === "host") {
+      pushChat("me", txt);
+      for (const [, peer] of hostPeersRef.current.entries()) {
+        if (peer?.dc?.readyState === "open") {
+          try { peer.dc.send(txt); } catch (e) {}
+        }
+      }
+    } else {
+      pushChat("me", txt);
+      if (viewerDcRef.current?.readyState === "open") {
+        try { viewerDcRef.current.send(txt); } catch (e) {}
+      }
+    }
+  }, [chatText, pushChat, role]);
+
+  const copyRoomId = useCallback(async () => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(roomId);
+        pushChat("system", "ルームIDをコピーしました");
+      } else {
+        pushChat("system", "ルームIDを選択してコピーしてください");
+      }
+    } catch (e) {
+      pushChat("system", "ルームIDを選択してコピーしてください");
+    }
+  }, [roomId, pushChat]);
+
+  const toggleFullscreen = useCallback(async () => {
+    const next = !isFullscreen;
+    setIsFullscreen(next);
+    try {
+      if (next && modalRef.current?.requestFullscreen && !document.fullscreenElement) {
+        await modalRef.current.requestFullscreen();
+      } else if (!next && document.fullscreenElement && document.exitFullscreen) {
+        await document.exitFullscreen();
+      }
+    } catch (e) {
+      // ブラウザや環境によってFullscreen APIが使えない場合は、CSS全画面だけで表示します。
+    }
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    const onFs = () => {
+      if (!document.fullscreenElement) setIsFullscreen(false);
+    };
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+
+  // Close behavior
+  useEffect(() => {
+    if (!open) return;
+    setStatus("idle");
+    setError(null);
+    setChatLog([]);
+    setFlowComments([]);
+    setRoomId("");
+    setJoinRoomId("");
+    setRole("host");
+    return () => {
+      fullCleanup();
+      cleanupRoomUnsubs();
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  return /* @__PURE__ */ jsx("div", { className: `fixed inset-0 z-50 bg-black/60 flex items-center justify-center ${isFullscreen ? "p-0" : "p-4"}`, children: /* @__PURE__ */ jsxs("div", { ref: modalRef, className: `${isFullscreen ? "w-screen h-screen max-w-none rounded-none flex flex-col" : "w-full max-w-3xl rounded-3xl"} bg-white shadow-2xl overflow-hidden relative`, children: [
+    /* Header */
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between px-4 py-3 border-b", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ jsx(Video, { className: "w-5 h-5 text-red-500" }),
+        /* @__PURE__ */ jsx("div", { className: "font-bold", children: "LIVE配信" }),
+        status === "connected" && /* @__PURE__ */ jsx("span", { className: "text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full", children: "接続中" }),
+        status === "connecting" && /* @__PURE__ */ jsx("span", { className: "text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full", children: "接続準備中" }),
+        status === "error" && /* @__PURE__ */ jsx("span", { className: "text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full", children: "エラー" })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ jsx("button", { onClick: toggleFullscreen, className: "p-2 rounded-xl hover:bg-gray-100", title: isFullscreen ? "全画面を解除" : "全画面表示", "aria-label": isFullscreen ? "全画面を解除" : "全画面表示", children: /* @__PURE__ */ jsx(Maximize, { className: "w-5 h-5" }) }),
+        /* @__PURE__ */ jsx("button", { onClick: async () => {
+          await fullCleanup();
+          onClose();
+        }, className: "p-2 rounded-xl hover:bg-gray-100", children: /* @__PURE__ */ jsx(X, { className: "w-5 h-5" }) })
+      ] })
+    ] }),
+
+    /* Body */
+    /* @__PURE__ */ jsxs("div", { className: `${isFullscreen ? "p-4 pr-48 sm:pr-60 grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1 overflow-y-auto" : "p-4 grid grid-cols-1 md:grid-cols-2 gap-4"}`, children: [
+      /* Left: video */
+      /* @__PURE__ */ jsxs("div", { className: "space-y-3", children: [
+        /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-gray-700", children: role === "host" ? "配信プレビュー（Host）" : "視聴（Viewer）" }),
+        /* @__PURE__ */ jsx("div", { className: `${isFullscreen ? "relative bg-black rounded-3xl overflow-hidden min-h-[45vh] lg:min-h-[60vh]" : "relative bg-black rounded-3xl overflow-hidden aspect-video"}`, children: role === "host" ? /* @__PURE__ */ jsx("video", { ref: localVideoRef, autoPlay: true, playsInline: true, muted: true, className: "w-full h-full object-cover" }) : /* @__PURE__ */ jsx("video", { ref: remoteVideoRef, autoPlay: true, playsInline: true, className: "w-full h-full object-cover" }) }),
+        /* Controls */
+        /* @__PURE__ */ jsxs("div", { className: "flex flex-wrap gap-2", children: [
+          /* @__PURE__ */ jsx("button", { onClick: toggleMic, className: `px-3 py-2 rounded-2xl font-bold flex items-center gap-2 ${micOn ? "bg-gray-100 hover:bg-gray-200" : "bg-red-100 hover:bg-red-200 text-red-700"}`, children: micOn ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(Mic, { className: "w-4 h-4" }), "MIC"] }) : /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(MicOff, { className: "w-4 h-4" }), "MIC"] }) }),
+          /* @__PURE__ */ jsx("button", { onClick: toggleCam, className: `px-3 py-2 rounded-2xl font-bold flex items-center gap-2 ${camOn ? "bg-gray-100 hover:bg-gray-200" : "bg-red-100 hover:bg-red-200 text-red-700"}`, children: camOn ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(CameraIcon, { className: "w-4 h-4" }), "CAM"] }) : /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(VideoOff, { className: "w-4 h-4" }), "CAM"] }) }),
+          role === "host" && /* @__PURE__ */ jsx("button", { onClick: togglePause, className: `px-3 py-2 rounded-2xl font-bold flex items-center gap-2 ${paused ? "bg-yellow-100 hover:bg-yellow-200 text-yellow-800" : "bg-gray-100 hover:bg-gray-200"}`, children: paused ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(StopCircle, { className: "w-4 h-4" }), "一時停止"] }) : /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(Play, { className: "w-4 h-4" }), "一時停止"] }) }),
+          role === "host" && /* @__PURE__ */ jsx("button", { onClick: toggleScreen, className: `px-3 py-2 rounded-2xl font-bold flex items-center gap-2 ${screenOn ? "bg-blue-100 hover:bg-blue-200 text-blue-800" : "bg-gray-100 hover:bg-gray-200"}`, children: screenOn ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(ScreenShareOff, { className: "w-4 h-4" }), "共有"] }) : /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(ScreenShare, { className: "w-4 h-4" }), "共有"] }) })
+        ] })
+      ] }),
+
+      /* Right: room + chat */
+      /* @__PURE__ */ jsxs("div", { className: "space-y-3", children: [
+        /* Role switch */
+        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+          /* @__PURE__ */ jsx("button", { onClick: () => setRole("host"), className: `flex-1 py-2 rounded-2xl font-bold ${role === "host" ? "bg-black text-white" : "bg-gray-100 hover:bg-gray-200"}`, children: "Host（開催）" }),
+          /* @__PURE__ */ jsx("button", { onClick: () => setRole("viewer"), className: `flex-1 py-2 rounded-2xl font-bold ${role === "viewer" ? "bg-black text-white" : "bg-gray-100 hover:bg-gray-200"}`, children: "Viewer（視聴）" })
+        ] }),
+
+        role === "host" ? /* Host panel */ /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-3xl p-3 space-y-2", children: [
+          /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-gray-700", children: "ルーム作成（複数視聴OK）" }),
+          /* @__PURE__ */ jsx("button", { onClick: createRoom, className: "w-full py-3 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-bold", children: roomId ? "配信中（再作成しない）" : "配信を開始（ルーム作成）" }),
+          roomId && /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsx("div", { className: "flex-1 bg-white rounded-2xl px-3 py-2 text-sm font-mono select-all", children: roomId }),
+            /* @__PURE__ */ jsx("button", { onClick: copyRoomId, className: "p-2 rounded-2xl bg-white hover:bg-gray-100", children: /* @__PURE__ */ jsx(Copy, { className: "w-4 h-4" }) })
+          ] }),
+          /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500", children: "ViewerはこのルームIDを入力して参加できます。少人数向け（Hostが各Viewerへ個別送信）" }),
+          error && /* @__PURE__ */ jsxs("div", { className: "text-sm text-red-600 flex items-center gap-2", children: [/* @__PURE__ */ jsx(AlertCircle, { className: "w-4 h-4" }), error] })
+        ] }) : /* Viewer panel */ /* @__PURE__ */ jsxs("div", { className: "bg-gray-50 rounded-3xl p-3 space-y-2", children: [
+          /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-gray-700", children: "ルーム参加" }),
+          /* @__PURE__ */ jsx("input", { value: joinRoomId, onChange: (e) => setJoinRoomId(e.target.value), placeholder: "ルームIDを入力", className: "w-full px-3 py-3 rounded-2xl border bg-white outline-none" }),
+          /* @__PURE__ */ jsx("button", { onClick: joinRoom, className: "w-full py-3 rounded-2xl bg-black hover:bg-gray-900 text-white font-bold", children: "参加して視聴する" }),
+          error && /* @__PURE__ */ jsxs("div", { className: "text-sm text-red-600 flex items-center gap-2", children: [/* @__PURE__ */ jsx(AlertCircle, { className: "w-4 h-4" }), error] })
+        ] }),
+
+        /* Chat */
+        /* @__PURE__ */ jsxs("div", { className: "bg-white rounded-3xl border p-3 space-y-2", children: [
+          /* @__PURE__ */ jsx("div", { className: "text-sm font-bold text-gray-700", children: "コメントチャット" }),
+          /* @__PURE__ */ jsx("div", { className: "h-40 overflow-auto bg-gray-50 rounded-2xl p-2 space-y-1", children: chatLog.map((m) => /* @__PURE__ */ jsxs("div", { className: "text-sm", children: [
+            /* @__PURE__ */ jsx("span", { className: "font-bold text-gray-700", children: m.who }),
+            /* @__PURE__ */ jsx("span", { className: "text-gray-500", children: " : " }),
+            /* @__PURE__ */ jsx("span", { className: "text-gray-800", children: m.text })
+          ] }, m.id)) }),
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsx("input", { value: chatText, onChange: (e) => setChatText(e.target.value), onKeyDown: (e) => {
+              if (e.key === "Enter") sendChat();
+            }, placeholder: "コメント…", className: "flex-1 px-3 py-2 rounded-2xl border bg-white outline-none" }),
+            /* @__PURE__ */ jsx("button", { onClick: sendChat, className: "px-4 py-2 rounded-2xl bg-blue-500 hover:bg-blue-600 text-white font-bold flex items-center gap-2", children: /* @__PURE__ */ jsx(Send, { className: "w-4 h-4" }) })
+          ] })
+        ] })
+      ] })
+    ] }),
+
+    /* Fullscreen side comment panel */
+    isFullscreen && /* @__PURE__ */ jsxs("div", { className: "absolute right-2 top-16 bottom-20 z-[70] w-44 sm:w-56 pointer-events-auto rounded-3xl bg-white/88 backdrop-blur-md border border-white/70 shadow-2xl overflow-hidden flex flex-col", children: [
+      /* @__PURE__ */ jsxs("div", { className: "px-3 py-2 bg-black/75 text-white flex items-center justify-between shrink-0", children: [
+        /* @__PURE__ */ jsx("span", { className: "text-xs font-black", children: "コメント" }),
+        /* @__PURE__ */ jsx("span", { className: "text-[10px] font-bold text-white/70", children: `${chatLog.length}` })
+      ] }),
+      /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-y-auto p-2 space-y-1", children: chatLog.slice(-12).map((m) => /* @__PURE__ */ jsxs("div", { className: "rounded-2xl bg-white/90 px-2 py-1 shadow-sm border border-gray-100", children: [
+        /* @__PURE__ */ jsx("div", { className: "text-[10px] font-black text-gray-500 truncate", children: m.who }),
+        /* @__PURE__ */ jsx("div", { className: "text-xs font-bold text-gray-900 break-words leading-snug", children: m.text })
+      ] }, m.id)) }),
+      /* @__PURE__ */ jsxs("div", { className: "p-2 border-t bg-white/95 flex items-center gap-1 shrink-0", children: [
+        /* @__PURE__ */ jsx("input", { value: chatText, onChange: (e) => setChatText(e.target.value), onKeyDown: (e) => {
+          if (e.key === "Enter") sendChat();
+        }, placeholder: "コメント", className: "min-w-0 flex-1 px-2 py-2 rounded-2xl bg-gray-100 outline-none text-xs font-bold" }),
+        /* @__PURE__ */ jsx("button", { onClick: sendChat, className: "w-8 h-8 rounded-full bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center shrink-0", title: "送信", "aria-label": "送信", children: /* @__PURE__ */ jsx(Send, { className: "w-4 h-4" }) })
+      ] })
+    ] }),
+
+    /* Flow comments overlay (visual helper) */
+    flowComments.length > 0 && /* @__PURE__ */ jsx("div", { className: "pointer-events-none fixed inset-0 z-[60]", children: flowComments.map((m, i) => /* @__PURE__ */ jsx("div", { className: "absolute left-0 right-0", style: { top: `${20 + (i % 10) * 6}%` }, children: /* @__PURE__ */ jsx("div", { className: "inline-block px-3 py-2 bg-black/70 text-white rounded-full whitespace-nowrap opacity-90", style: { marginLeft: `${m.x}%` }, children: m.text }) }, m.id)) })
+  ] }) });
+}
 const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveChatId, setView, db: db2, appId: appId2, mutedChats, toggleMuteChat, showNotification, addFriendById, startChatWithUser, startVideoCall }) => {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
@@ -3896,6 +4627,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
   const [coinModalTarget, setCoinModalTarget] = useState(null);
   const [aiEffectModalOpen, setAiEffectModalOpen] = useState(false);
   const [headerAvatarError, setHeaderAvatarError] = useState(false);
+  const [liveModalOpen, setLiveModalOpen] = useState(false); // 配信ボタンで開くLIVEモーダル
   const chatData = chats.find((c) => c.id === activeChatId);
   const contactCandidates = useMemo(() => {
     const hiddenSet = new Set(profile?.hiddenFriends || []);
@@ -4305,8 +5037,12 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
         !isGroup && partnerData && isTodayBirthday(partnerData.birthday) && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 text-xs", children: "\u{1F382}" })
       ] }),
       !isGroup ? /* @__PURE__ */ jsx("div", { className: "font-bold text-[12px] flex-1 truncate text-gray-900 leading-none", children: title }) : /* @__PURE__ */ jsx("div", { className: "flex-1" }),
-      /* @__PURE__ */ jsxs("div", { className: "flex gap-2 mr-1 items-center", children: [
-        /* @__PURE__ */ jsxs("div", { className: "relative", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex gap-2 mr-1 items-center flex-nowrap shrink-0 overflow-x-auto", children: [
+        /* @__PURE__ */ jsx("button", { onClick: () => setLiveModalOpen(true), className: "hover:bg-red-50 p-1 rounded-full transition-colors text-red-500 relative shrink-0 flex items-center justify-center", title: "配信", "aria-label": "配信", children: /* @__PURE__ */ jsxs("span", { className: "relative flex items-center justify-center", children: [
+          /* @__PURE__ */ jsx(Video, { className: "w-5 h-5 text-red-500" }),
+          /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse" })
+        ] }) }),
+        /* @__PURE__ */ jsxs("div", { className: "relative shrink-0", children: [
           /* @__PURE__ */ jsx("button", { onClick: () => setBackgroundMenuOpen(!backgroundMenuOpen), className: "hover:bg-gray-200 p-1 rounded-full transition-colors", title: "\u80CC\u666F\u3092\u5909\u66F4", children: /* @__PURE__ */ jsx(Palette, { className: "w-5 h-5 text-gray-500" }) }),
           backgroundMenuOpen && /* @__PURE__ */ jsxs("div", { className: "absolute top-full right-0 mt-2 bg-white rounded-xl shadow-xl border overflow-hidden w-40 z-20", children: [
             /* @__PURE__ */ jsxs("label", { className: "flex items-center gap-2 px-4 py-3 hover:bg-gray-50 cursor-pointer text-sm font-bold text-gray-700", children: [
@@ -4498,6 +5234,7 @@ const ChatRoomView = ({ user, profile, allUsers, chats, activeChatId, setActiveC
       setBuyStickerModalPackId(null);
     } }),
     aiEffectModalOpen && /* @__PURE__ */ jsx(AIEffectGenerator, { user, onClose: () => setAiEffectModalOpen(false), showNotification }),
+    liveModalOpen && /* @__PURE__ */ jsx(LiveStreamModal, { open: liveModalOpen, onClose: () => setLiveModalOpen(false), user }),
     !groupSettingsOpen && plusMenuOpen && /* @__PURE__ */ jsxs("div", { className: "absolute bottom-16 left-4 right-4 bg-white rounded-3xl p-4 shadow-2xl grid grid-cols-4 gap-4 animate-in slide-in-from-bottom-4 z-20", children: [
       /* @__PURE__ */ jsxs("label", { className: "flex flex-col items-center gap-2 cursor-pointer", children: [
         /* @__PURE__ */ jsx("div", { className: "p-3 bg-green-50 rounded-2xl", children: /* @__PURE__ */ jsx(ImageIcon, { className: "w-6 h-6 text-green-500" }) }),
@@ -5068,6 +5805,7 @@ const AvatarWithFallback = ({ src, name, className, fallbackClassName }) => {
   return /* @__PURE__ */ jsx("img", { src, className, loading: "lazy", onError: () => setHasError(true), alt: name || "avatar" });
 };
 const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, setSearchModalOpen, startChatWithUser, showNotification }) => {
+  const [liveModalOpen, setLiveModalOpen] = useState(false);
   const [tab, setTab] = useState("chats");
   const [selectedFriend, setSelectedFriend] = useState(null);
   const [coinModalTarget, setCoinModalTarget] = useState(null);
@@ -5216,12 +5954,13 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
       children: [
         /* @__PURE__ */ jsxs("div", { className: "p-4 border-b flex justify-between items-center bg-white shrink-0", children: [
           /* @__PURE__ */ jsx("h1", { className: "text-xl font-bold", children: "\u30DB\u30FC\u30E0" }),
-          /* @__PURE__ */ jsxs("div", { className: "flex gap-4 items-center", children: [
+          /* @__PURE__ */ jsxs("div", { className: "flex gap-4 items-center flex-nowrap shrink-0", children: [
             /* @__PURE__ */ jsx(Store, { className: "w-6 h-6 cursor-pointer text-orange-500", onClick: () => setView("sticker-store") }),
             /* @__PURE__ */ jsx(Gift, { className: "w-6 h-6 cursor-pointer text-pink-500", onClick: () => setView("birthday-cards") }),
             /* @__PURE__ */ jsx(Users, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("group-create") }),
             /* @__PURE__ */ jsx(Search, { className: "w-6 h-6 cursor-pointer", onClick: () => setSearchModalOpen(true) }),
             /* @__PURE__ */ jsx(UserPlus, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("qr") }),
+            /* @__PURE__ */ jsx("button", { onClick: () => setLiveModalOpen(true), className: "w-6 h-6 cursor-pointer text-red-500 hover:text-red-600 relative flex items-center justify-center bg-transparent border-0 p-0", title: "配信", "aria-label": "配信", children: /* @__PURE__ */ jsxs("span", { className: "relative flex items-center justify-center", children: [/* @__PURE__ */ jsx(Video, { className: "w-6 h-6" }), /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse" })] }) }),
             /* @__PURE__ */ jsx(Settings, { className: "w-6 h-6 cursor-pointer", onClick: () => setView("profile") })
           ] })
         ] }),
@@ -5430,7 +6169,8 @@ const HomeView = ({ user, profile, allUsers, chats, setView, setActiveChatId, se
             targetName: coinModalTarget.name,
             showNotification
           }
-        )
+        ),
+        liveModalOpen && /* @__PURE__ */ jsx(LiveStreamModal, { open: liveModalOpen, onClose: () => setLiveModalOpen(false), user })
       ]
     }
   );
@@ -5738,15 +6478,74 @@ const ShootingMiniGameView = ({ user, invite, onBack, showNotification }) => {
 };
 
 const PachinkoView = ({ user, profile, onBack, showNotification }) => {
+  const [mode, setMode] = useState("pachinko");
   const [bet, setBet] = useState("10");
   const [isSpinning, setIsSpinning] = useState(false);
   const [lastResult, setLastResult] = useState(null);
+  const [highLowCard, setHighLowCard] = useState(null);
+  const [blackjack, setBlackjack] = useState({ phase: "idle", player: [], dealer: [], bet: 0, message: "ベットして開始してください" });
+  const [chinchiroDice, setChinchiroDice] = useState([1, 1, 1]);
+
+  const cardSuits = ["♠", "♥", "♦", "♣"];
+  const cardRanks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+  const drawCard = () => {
+    const rankIndex = Math.floor(Math.random() * cardRanks.length);
+    return { suit: cardSuits[Math.floor(Math.random() * cardSuits.length)], rank: cardRanks[rankIndex], value: Math.min(rankIndex + 1, 10) };
+  };
+  const cardText = (c) => c ? `${c.suit}${c.rank}` : "？";
+  const cardColor = (c) => c && (c.suit === "♥" || c.suit === "♦") ? "text-red-500" : "text-gray-900";
+  const bjTotal = (cards) => {
+    let total = 0;
+    let aces = 0;
+    cards.forEach((c) => {
+      if (c.rank === "A") {
+        aces += 1;
+        total += 11;
+      } else {
+        total += c.value;
+      }
+    });
+    while (total > 21 && aces > 0) {
+      total -= 10;
+      aces -= 1;
+    }
+    return total;
+  };
+  const parseBet = () => {
+    const b = parseInt(bet, 10);
+    if (!Number.isFinite(b) || b <= 0) {
+      showNotification("ベットは正の整数にしてください");
+      return null;
+    }
+    if ((profile?.wallet || 0) < b) {
+      showNotification("コイン残高が足りません");
+      return null;
+    }
+    return b;
+  };
+  const updateWallet = async (delta, gameName, extra = {}) => {
+    await runTransaction(db, async (t) => {
+      const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
+      const uDoc = await t.get(userRef);
+      if (!uDoc.exists()) throw new Error("ユーザーが見つかりません");
+      const current = uDoc.data().wallet || 0;
+      if (current + delta < 0) throw new Error("残高不足");
+      t.update(userRef, { wallet: increment(delta) });
+      const histRef = doc(collection(db, "artifacts", appId, "public", "data", "pachinko_history"));
+      t.set(histRef, { uid: user.uid, gameName, delta, bet: extra.bet || 0, payout: extra.payout || 0, result: extra.result || "", detail: extra, createdAt: serverTimestamp() });
+    });
+  };
+  const settleInstantGame = async (gameName, b, mult, resultText, extra = {}) => {
+    const payout = Math.floor(b * mult);
+    const delta = payout - b;
+    await updateWallet(delta, gameName, { bet: b, mult, payout, result: resultText, ...extra });
+    setLastResult({ gameName, bet: b, mult, payout, delta, resultText, ...extra });
+    showNotification(delta > 0 ? `${resultText} +${delta}コイン` : delta === 0 ? `${resultText} ±0` : `${resultText} ${delta}コイン`);
+  };
 
   const playOnce = async () => {
-    const b = parseInt(bet, 10);
-    if (!Number.isFinite(b) || b <= 0) return showNotification("ベットは正の整数にしてください");
-    if ((profile?.wallet || 0) < b) return showNotification("コイン残高が足りません");
-    if (isSpinning) return;
+    const b = parseBet();
+    if (!b || isSpinning) return;
     setIsSpinning(true);
     try {
       const r = Math.random();
@@ -5756,66 +6555,229 @@ const PachinkoView = ({ user, profile, onBack, showNotification }) => {
       else if (r < 0.93) mult = 2;
       else if (r < 0.985) mult = 5;
       else mult = 10;
-      const payout = Math.floor(b * mult);
-      const delta = payout - b;
-      await runTransaction(db, async (t) => {
-        const userRef = doc(db, "artifacts", appId, "public", "data", "users", user.uid);
-        const uDoc = await t.get(userRef);
-        if (!uDoc.exists()) throw new Error("ユーザーが見つかりません");
-        const current = uDoc.data().wallet || 0;
-        if (current < b) throw new Error("残高不足");
-        t.update(userRef, { wallet: increment(delta) });
-        const histRef = doc(collection(db, "artifacts", appId, "public", "data", "pachinko_history"));
-        t.set(histRef, { uid: user.uid, bet: b, mult, payout, delta, createdAt: serverTimestamp() });
-      });
-      setLastResult({ bet: b, mult, payout, delta });
-      showNotification(mult === 0 ? "ハズレ…" : `当たり！ x${mult}（+${delta}）`);
+      await settleInstantGame("pachinko", b, mult, mult === 0 ? "ハズレ" : `当たり x${mult}`);
     } catch (e) {
       console.error(e);
-      showNotification(typeof e === "string" ? e : "プレイに失敗しました");
+      showNotification(e?.message || "プレイに失敗しました");
     } finally {
       setTimeout(() => setIsSpinning(false), 650);
     }
   };
 
-  return /* @__PURE__ */ jsxs("div", { className: "w-full h-full flex flex-col", children: [
+  const startHighLow = () => {
+    setHighLowCard(drawCard());
+    setLastResult({ gameName: "highlow", resultText: "親カードを出しました。HIGHかLOWを選んでください。" });
+  };
+  const playHighLow = async (choice) => {
+    const b = parseBet();
+    if (!b || isSpinning) return;
+    const base = highLowCard || drawCard();
+    const next = drawCard();
+    setIsSpinning(true);
+    try {
+      const baseNum = cardRanks.indexOf(base.rank);
+      const nextNum = cardRanks.indexOf(next.rank);
+      const win = choice === "high" ? nextNum > baseNum : nextNum < baseNum;
+      const draw = nextNum === baseNum;
+      const mult = draw ? 1 : win ? 2 : 0;
+      await settleInstantGame("highlow", b, mult, draw ? `ドロー ${cardText(base)} → ${cardText(next)}` : win ? `勝ち ${cardText(base)} → ${cardText(next)}` : `負け ${cardText(base)} → ${cardText(next)}`, { base: cardText(base), next: cardText(next), choice });
+      setHighLowCard(next);
+    } catch (e) {
+      console.error(e);
+      showNotification(e?.message || "ハイ＆ローに失敗しました");
+    } finally {
+      setTimeout(() => setIsSpinning(false), 450);
+    }
+  };
+
+  const startBlackjack = async () => {
+    const b = parseBet();
+    if (!b || isSpinning) return;
+    setIsSpinning(true);
+    try {
+      await updateWallet(-b, "blackjack_start", { bet: b, payout: 0, result: "start" });
+      const player = [drawCard(), drawCard()];
+      const dealer = [drawCard(), drawCard()];
+      const total = bjTotal(player);
+      const phase = total === 21 ? "stand" : "playing";
+      setBlackjack({ phase, player, dealer, bet: b, message: total === 21 ? "ブラックジャック！スタンドで精算してください" : "ヒットかスタンドを選んでください" });
+      setLastResult({ gameName: "blackjack", resultText: `ブラックジャック開始（-${b}）`, bet: b, delta: -b });
+    } catch (e) {
+      console.error(e);
+      showNotification(e?.message || "ブラックジャックを開始できませんでした");
+    } finally {
+      setTimeout(() => setIsSpinning(false), 350);
+    }
+  };
+  const hitBlackjack = () => {
+    if (blackjack.phase !== "playing") return;
+    const player = [...blackjack.player, drawCard()];
+    const total = bjTotal(player);
+    setBlackjack({ ...blackjack, player, phase: total > 21 ? "bust" : "playing", message: total > 21 ? "バーストしました。精算してください" : "もう1枚引くか、スタンドしてください" });
+  };
+  const settleBlackjack = async () => {
+    if (!["playing", "stand", "bust"].includes(blackjack.phase) || !blackjack.bet) return;
+    setIsSpinning(true);
+    try {
+      let dealer = [...blackjack.dealer];
+      let playerTotal = bjTotal(blackjack.player);
+      while (blackjack.phase !== "bust" && bjTotal(dealer) < 17) dealer.push(drawCard());
+      const dealerTotal = bjTotal(dealer);
+      let payout = 0;
+      let resultText = "負け";
+      if (playerTotal > 21) {
+        payout = 0;
+        resultText = "バースト負け";
+      } else if (dealerTotal > 21 || playerTotal > dealerTotal) {
+        payout = playerTotal === 21 && blackjack.player.length === 2 ? Math.floor(blackjack.bet * 2.5) : blackjack.bet * 2;
+        resultText = "勝ち";
+      } else if (playerTotal === dealerTotal) {
+        payout = blackjack.bet;
+        resultText = "プッシュ";
+      }
+      await updateWallet(payout, "blackjack_settle", { bet: blackjack.bet, payout, result: resultText, playerTotal, dealerTotal });
+      setBlackjack({ phase: "done", player: blackjack.player, dealer, bet: 0, message: `${resultText} / あなた ${playerTotal} vs 親 ${dealerTotal} / 払い出し ${payout}` });
+      setLastResult({ gameName: "blackjack", bet: blackjack.bet, payout, delta: payout - blackjack.bet, resultText, playerTotal, dealerTotal });
+      showNotification(`${resultText} / 払い出し ${payout}`);
+    } catch (e) {
+      console.error(e);
+      showNotification(e?.message || "ブラックジャック精算に失敗しました");
+    } finally {
+      setTimeout(() => setIsSpinning(false), 450);
+    }
+  };
+
+  const playChinchiro = async () => {
+    const b = parseBet();
+    if (!b || isSpinning) return;
+    setIsSpinning(true);
+    try {
+      const dice = [1, 2, 3].map(() => 1 + Math.floor(Math.random() * 6));
+      setChinchiroDice(dice);
+      const sorted = [...dice].sort((a, b2) => a - b2);
+      let mult = 0;
+      let resultText = "目なし";
+      if (sorted[0] === sorted[1] && sorted[1] === sorted[2]) {
+        mult = sorted[0] === 1 ? 5 : 3;
+        resultText = sorted[0] === 1 ? "ピンゾロ" : `${sorted[0]}ゾロ`;
+      } else if (sorted.join("") === "456") {
+        mult = 2;
+        resultText = "シゴロ";
+      } else if (sorted.join("") === "123") {
+        mult = 0;
+        resultText = "ヒフミ";
+      } else if (sorted[0] === sorted[1] || sorted[1] === sorted[2] || sorted[0] === sorted[2]) {
+        const counts = {};
+        dice.forEach((d) => counts[d] = (counts[d] || 0) + 1);
+        const eye = Number(Object.keys(counts).find((k) => counts[k] === 1));
+        mult = eye >= 4 ? 2 : 1;
+        resultText = `${eye}の目`;
+      }
+      await settleInstantGame("chinchiro", b, mult, resultText, { dice: dice.join("-") });
+    } catch (e) {
+      console.error(e);
+      showNotification(e?.message || "チンチロに失敗しました");
+    } finally {
+      setTimeout(() => setIsSpinning(false), 500);
+    }
+  };
+
+  const ModeButton = ({ id, label }) => /* @__PURE__ */ jsx("button", { onClick: () => setMode(id), className: `px-4 py-3 rounded-2xl text-sm font-black transition-all ${mode === id ? "bg-yellow-500 text-white shadow-lg shadow-yellow-200" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`, children: label });
+  const CardChip = ({ card, hidden = false }) => /* @__PURE__ */ jsx("div", { className: `min-w-12 h-16 rounded-2xl border shadow-sm flex items-center justify-center text-lg font-black bg-white ${hidden ? "text-gray-300 bg-gray-900" : cardColor(card)}`, children: hidden ? "?" : cardText(card) });
+  const ResultBox = () => lastResult && /* @__PURE__ */ jsxs("div", { className: "mt-4 bg-gray-50 border rounded-2xl p-4", children: [
+    /* @__PURE__ */ jsx("div", { className: "text-xs font-bold text-gray-500", children: "結果" }),
+    /* @__PURE__ */ jsx("div", { className: "mt-1 text-sm font-black text-gray-900 break-words", children: lastResult.resultText || "結果なし" }),
+    lastResult.bet !== void 0 && /* @__PURE__ */ jsxs("div", { className: "mt-1 text-xs font-bold text-gray-500", children: [
+      "ベット ",
+      lastResult.bet || 0,
+      " / 払い出し ",
+      lastResult.payout || 0,
+      " / ",
+      (lastResult.delta || 0) >= 0 ? "+" : "",
+      lastResult.delta || 0
+    ] })
+  ] });
+
+  return /* @__PURE__ */ jsxs("div", { className: "w-full h-full flex flex-col bg-gray-50", children: [
     /* @__PURE__ */ jsxs("div", { className: "p-4 bg-white border-b flex items-center gap-3", children: [
       /* @__PURE__ */ jsx("button", { onClick: onBack, className: "p-2 rounded-full hover:bg-gray-100", children: /* @__PURE__ */ jsx(ChevronLeft, { className: "w-6 h-6" }) }),
-      /* @__PURE__ */ jsx("div", { className: "font-black text-lg", children: "オンラインパチンコ（コイン）" }),
+      /* @__PURE__ */ jsxs("div", { children: [
+        /* @__PURE__ */ jsx("div", { className: "font-black text-lg", children: "コインゲーム広場" }),
+        /* @__PURE__ */ jsx("div", { className: "text-[10px] font-bold text-gray-400", children: "ゲーム内コイン専用 / 実際のお金は使いません" })
+      ] }),
       /* @__PURE__ */ jsx("div", { className: "ml-auto flex items-center gap-2 bg-yellow-50 border border-yellow-100 px-3 py-1.5 rounded-full", children: /* @__PURE__ */ jsxs(Fragment, { children: [
         /* @__PURE__ */ jsx(Coins, { className: "w-4 h-4 text-yellow-600" }),
         /* @__PURE__ */ jsx("span", { className: "text-xs font-black text-yellow-700", children: (profile?.wallet || 0).toLocaleString() })
       ] }) })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto p-6", children: [
-      /* @__PURE__ */ jsx("div", { className: "bg-white rounded-3xl p-6 shadow border", children: /* @__PURE__ */ jsxs(Fragment, { children: [
-        /* @__PURE__ */ jsx("div", { className: "font-black text-base mb-2", children: "ベットして回す" }),
-        /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500 font-bold mb-4", children: "※ これは遊び用（仮想コイン）です。現金や換金はありません。" }),
-        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3 mb-4", children: [
-          /* @__PURE__ */ jsx("input", { type: "number", min: 1, step: 1, value: bet, onChange: (e) => setBet(e.target.value), className: "flex-1 bg-gray-50 border rounded-2xl p-4 font-black text-center outline-none focus:ring-2 focus:ring-yellow-400", placeholder: "10" }),
-          /* @__PURE__ */ jsx("button", { onClick: playOnce, disabled: isSpinning, className: "px-5 py-4 rounded-2xl font-black text-white bg-yellow-500 hover:bg-yellow-600 shadow-lg shadow-yellow-200 disabled:bg-gray-300 flex items-center gap-2", children: isSpinning ? /* @__PURE__ */ jsx(Loader2, { className: "w-5 h-5 animate-spin" }) : /* @__PURE__ */ jsxs(Fragment, { children: [
+    /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-y-auto p-4 sm:p-6", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex gap-2 overflow-x-auto pb-2 mb-4 scrollbar-hide", children: [
+        /* @__PURE__ */ jsx(ModeButton, { id: "pachinko", label: "パチンコ" }),
+        /* @__PURE__ */ jsx(ModeButton, { id: "cards", label: "トランプ賭けゲーム" }),
+        /* @__PURE__ */ jsx(ModeButton, { id: "chinchiro", label: "チンチロ" })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "bg-white rounded-3xl p-5 sm:p-6 shadow border", children: [
+        /* @__PURE__ */ jsxs("div", { className: "flex flex-col sm:flex-row sm:items-end gap-3 mb-5", children: [
+          /* @__PURE__ */ jsxs("label", { className: "flex-1", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-xs font-black text-gray-500 mb-2", children: "ベット額" }),
+            /* @__PURE__ */ jsx("input", { value: bet, onChange: (e) => setBet(e.target.value), inputMode: "numeric", className: "w-full bg-gray-50 border rounded-2xl px-4 py-3 font-black outline-none focus:ring-2 focus:ring-yellow-200", placeholder: "10" })
+          ] }),
+          /* @__PURE__ */ jsx("div", { className: "text-xs font-bold text-gray-400", children: "勝敗に応じてウォレットが自動更新されます" })
+        ] }),
+        mode === "pachinko" && /* @__PURE__ */ jsxs("div", { className: "space-y-4", children: [
+          /* @__PURE__ */ jsx("div", { className: "rounded-[32px] bg-gradient-to-b from-yellow-50 to-orange-50 border p-6 text-center", children: /* @__PURE__ */ jsxs("div", { children: [
+            /* @__PURE__ */ jsx("div", { className: `mx-auto w-32 h-32 rounded-full border-8 border-yellow-200 bg-white shadow-inner flex items-center justify-center text-5xl ${isSpinning ? "animate-spin" : ""}`, children: "🟡" }),
+            /* @__PURE__ */ jsx("div", { className: "mt-4 text-sm font-black text-gray-700", children: "倍率: ハズレ / x1 / x2 / x5 / x10" })
+          ] }) }),
+          /* @__PURE__ */ jsx("button", { disabled: isSpinning, onClick: playOnce, className: "w-full py-4 rounded-2xl font-black text-white bg-yellow-500 hover:bg-yellow-600 shadow-lg shadow-yellow-200 disabled:bg-gray-300 flex items-center justify-center gap-2", children: isSpinning ? /* @__PURE__ */ jsx(Loader2, { className: "w-5 h-5 animate-spin" }) : /* @__PURE__ */ jsxs(Fragment, { children: [
             /* @__PURE__ */ jsx(Disc, { className: "w-5 h-5" }),
             "回す"
           ] }) })
         ] }),
-        lastResult && /* @__PURE__ */ jsxs("div", { className: "mt-2 bg-gray-50 border rounded-2xl p-4", children: [
-          /* @__PURE__ */ jsx("div", { className: "text-xs font-bold text-gray-500", children: "結果" }),
-          /* @__PURE__ */ jsxs("div", { className: "mt-1 text-sm font-black text-gray-900", children: [
-            "ベット ",
-            lastResult.bet,
-            " / 倍率 x",
-            lastResult.mult,
-            " / 払い出し ",
-            lastResult.payout,
-            " / ",
-            lastResult.delta >= 0 ? "+" : "",
-            lastResult.delta
+        mode === "cards" && /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-1 lg:grid-cols-2 gap-4", children: [
+          /* @__PURE__ */ jsxs("div", { className: "rounded-[28px] border bg-green-50 p-5", children: [
+            /* @__PURE__ */ jsx("div", { className: "font-black text-green-900 text-lg mb-1", children: "ハイ＆ロー" }),
+            /* @__PURE__ */ jsx("div", { className: "text-xs font-bold text-green-800/70 mb-4", children: "次のカードが大きいか小さいかを予想。ドローは返金。" }),
+            /* @__PURE__ */ jsx("div", { className: "flex justify-center mb-4", children: /* @__PURE__ */ jsx(CardChip, { card: highLowCard }) }),
+            /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-3 gap-2", children: [
+              /* @__PURE__ */ jsx("button", { onClick: startHighLow, className: "py-3 rounded-2xl bg-white border font-black text-gray-700", children: "親カード" }),
+              /* @__PURE__ */ jsx("button", { disabled: isSpinning, onClick: () => playHighLow("low"), className: "py-3 rounded-2xl bg-blue-500 text-white font-black disabled:bg-gray-300", children: "LOW" }),
+              /* @__PURE__ */ jsx("button", { disabled: isSpinning, onClick: () => playHighLow("high"), className: "py-3 rounded-2xl bg-red-500 text-white font-black disabled:bg-gray-300", children: "HIGH" })
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { className: "rounded-[28px] border bg-slate-50 p-5", children: [
+            /* @__PURE__ */ jsx("div", { className: "font-black text-slate-900 text-lg mb-1", children: "ブラックジャック" }),
+            /* @__PURE__ */ jsx("div", { className: "text-xs font-bold text-slate-500 mb-4", children: "21に近づける定番カードゲーム。開始時にベット分を預け、精算時に払い出し。" }),
+            /* @__PURE__ */ jsxs("div", { className: "mb-3", children: [
+              /* @__PURE__ */ jsx("div", { className: "text-xs font-black text-gray-500 mb-1", children: `親 ${blackjack.phase === "playing" ? "?" : bjTotal(blackjack.dealer) || 0}` }),
+              /* @__PURE__ */ jsx("div", { className: "flex gap-2 flex-wrap", children: blackjack.dealer.length ? blackjack.dealer.map((c, i) => /* @__PURE__ */ jsx(CardChip, { card: c, hidden: blackjack.phase === "playing" && i === 1 }, `${c.suit}${c.rank}${i}`)) : /* @__PURE__ */ jsx(CardChip, { card: null }) })
+            ] }),
+            /* @__PURE__ */ jsxs("div", { className: "mb-4", children: [
+              /* @__PURE__ */ jsx("div", { className: "text-xs font-black text-gray-500 mb-1", children: `あなた ${bjTotal(blackjack.player) || 0}` }),
+              /* @__PURE__ */ jsx("div", { className: "flex gap-2 flex-wrap", children: blackjack.player.length ? blackjack.player.map((c, i) => /* @__PURE__ */ jsx(CardChip, { card: c }, `${c.suit}${c.rank}${i}`)) : /* @__PURE__ */ jsx(CardChip, { card: null }) })
+            ] }),
+            /* @__PURE__ */ jsx("div", { className: "text-xs font-bold text-gray-600 bg-white rounded-2xl border p-3 mb-3", children: blackjack.message }),
+            /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-3 gap-2", children: [
+              /* @__PURE__ */ jsx("button", { disabled: isSpinning, onClick: startBlackjack, className: "py-3 rounded-2xl bg-gray-900 text-white font-black disabled:bg-gray-300", children: "開始" }),
+              /* @__PURE__ */ jsx("button", { disabled: blackjack.phase !== "playing", onClick: hitBlackjack, className: "py-3 rounded-2xl bg-blue-500 text-white font-black disabled:bg-gray-300", children: "ヒット" }),
+              /* @__PURE__ */ jsx("button", { disabled: !["playing", "stand", "bust"].includes(blackjack.phase), onClick: settleBlackjack, className: "py-3 rounded-2xl bg-yellow-500 text-white font-black disabled:bg-gray-300", children: "精算" })
+            ] })
           ] })
-        ] })
-      ] }) })
+        ] }),
+        mode === "chinchiro" && /* @__PURE__ */ jsxs("div", { className: "space-y-4", children: [
+          /* @__PURE__ */ jsxs("div", { className: "rounded-[32px] bg-gradient-to-b from-purple-50 to-indigo-50 border p-6 text-center", children: [
+            /* @__PURE__ */ jsx("div", { className: "text-lg font-black text-purple-900 mb-2", children: "チンチロ" }),
+            /* @__PURE__ */ jsx("div", { className: "text-xs font-bold text-purple-700/70 mb-4", children: "ピンゾロx5 / ゾロ目x3 / シゴロx2 / 目ありx1〜x2 / ヒフミ・目なしは負け" }),
+            /* @__PURE__ */ jsx("div", { className: "flex justify-center gap-3", children: chinchiroDice.map((d, i) => /* @__PURE__ */ jsx("div", { className: `w-16 h-16 rounded-2xl bg-white shadow border flex items-center justify-center text-3xl font-black ${isSpinning ? "animate-bounce" : ""}`, children: d }, i)) })
+          ] }),
+          /* @__PURE__ */ jsx("button", { disabled: isSpinning, onClick: playChinchiro, className: "w-full py-4 rounded-2xl font-black text-white bg-purple-500 hover:bg-purple-600 shadow-lg shadow-purple-200 disabled:bg-gray-300", children: isSpinning ? "判定中..." : "サイコロを振る" })
+        ] }),
+        /* @__PURE__ */ jsx(ResultBox, {})
+      ] })
     ] })
   ] });
 };
+
 // ===================== /MiniGame + Pachinko =====================
 // ===================== Coin Arcade (from app.js) =====================
 function __initCoinArcade() {
